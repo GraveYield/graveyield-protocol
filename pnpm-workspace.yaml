@@ -1,0 +1,4 @@
+packages:
+  - sdk
+  - indexer
+  # `tests/` is added once it has its own package.json (anchor + ts-mocha harness).

@@ -1,0 +1,33 @@
+{
+  "name": "graveyield-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Settlement layer for economic finality on-chain. GraveYield Protocol monorepo.",
+  "homepage": "https://***REMOVED***",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/graveyieldprotocol/protocol.git"
+  },
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "anchor:build": "anchor build",
+    "anchor:test": "anchor test",
+    "check:toolchain": "bash ./scripts/check-toolchain.sh",
+    "fmt:rust": "cargo fmt --all",
+    "fmt:rust:check": "cargo fmt --all -- --check",
+    "lint:rust": "cargo clippy --all-targets -- -D warnings"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  }
+}

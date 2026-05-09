@@ -1,0 +1,56 @@
+# Anchor / Solana
+target/
+.anchor/
+test-ledger/
+**/*.so
+**/*.so.dbg
+
+# Rust
+**/target/
+**/Cargo.lock.bak
+
+# Node / pnpm
+node_modules/
+**/node_modules/
+.pnpm-store/
+dist/
+build/
+**/dist/
+**/build/
+.tsbuildinfo
+**/*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Keys — never commit any keypair
+**/*.json.bak
+keys/
+*-keypair.json
+id*.json
+deployer*.json
+upgrade-authority*.json
+
+# IDE / editor
+.idea/
+.vscode/
+!.vscode/settings.json.example
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+
+# Coverage
+coverage/
+*.lcov
+
+# Misc
+.cache/
+tmp/

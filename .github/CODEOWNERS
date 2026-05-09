@@ -1,0 +1,27 @@
+# GraveYield Protocol code ownership.
+# Every PR that touches a path below auto-requests review from the listed owners.
+
+# Default owner: protocol founder.
+*                                    @graveyieldprotocol
+
+# Anchor programs.
+/programs/grave-scanner/             @graveyieldprotocol
+/programs/grave-vault/               @graveyieldprotocol
+
+# SDK and indexer.
+/sdk/                                @graveyieldprotocol
+/indexer/                            @graveyieldprotocol
+
+# Adapters (future).
+/adapters/                           @graveyieldprotocol
+
+# Canonical specs — terminology and Charter invariants.
+/docs/                               @graveyieldprotocol
+/docs/architecture/charter-invariants.md @graveyieldprotocol
+/CONTRIBUTING.md                     @graveyieldprotocol
+/SECURITY.md                         @graveyieldprotocol
+/LICENSE                             @graveyieldprotocol
+
+# CI / tooling.
+/.github/                            @graveyieldprotocol
+/scripts/                            @graveyieldprotocol

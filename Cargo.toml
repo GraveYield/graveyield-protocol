@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "programs/grave-scanner",
+    "programs/grave-vault",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["GraveYield Protocol contributors"]
+repository = "https://github.com/graveyieldprotocol/protocol"
+homepage = "https://***REMOVED***"
+readme = "README.md"
+
+[workspace.dependencies]
+anchor-lang = "0.31.1"
+anchor-spl = "0.31.1"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+debug = false
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

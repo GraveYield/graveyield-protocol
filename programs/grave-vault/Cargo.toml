@@ -1,0 +1,31 @@
+[package]
+name = "grave-vault"
+description = "GraveVault: settlement program. Executes salvages, distributes proceeds 40/40/20, and serves claims."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "grave_vault"
+
+[features]
+default = []
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+idl-build = [
+    "anchor-lang/idl-build",
+    "anchor-spl/idl-build",
+    "grave-scanner/idl-build",
+]
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl  = { workspace = true }
+grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
