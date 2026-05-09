@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase 2 of evaluate_pool. Re-verifies all six criteria after the multi-epoch
-// confirmation gap and issues an `EligibilityCert` (TTL = 1 hour). GraveVault
-// consumes the cert to authorise `salvage_pool`.
+// Phase 2 of evaluate_pool. Re-verifies all six criteria after the
+// multi-epoch confirmation gap and issues an `EligibilityCert` (TTL = 1
+// hour). GraveVault consumes the cert to authorise `salvage_pool`.
+//
+// Phase 2 also enforces that the bitmap matches the originating
+// EligibilityAnchor — a Phase 1 pass cannot be downgraded silently.
 
 use anchor_lang::prelude::*;
 
+use crate::adapters::{self, PoolData};
 use crate::constants::{
-    ELIGIBILITY_ANCHOR_SEED, ELIGIBILITY_CERT_SEED, ELIGIBILITY_CERT_TTL_SECONDS,
-    MIN_EPOCH_CONFIRMATION,
+    ELIGIBILITY_ANCHOR_SEED, ELIGIBILITY_CERT_SEED, ELIGIBILITY_CERT_TTL_SECONDS, LAUNCH_PRICE_SEED,
 };
+use crate::criteria::{self, CriteriaInputs, CriteriaThresholds, Phase};
 use crate::errors::GraveScannerError;
-use crate::state::{EligibilityAnchor, EligibilityCert, ProtocolConfig};
+use crate::state::{EligibilityAnchor, EligibilityCert, LaunchPrice, ProtocolConfig};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct EvaluatePoolPhase2Params {
     pub amm_program_id: Pubkey,
     pub pool_address: Pubkey,
+    /// Last on-chain swap timestamp; see Phase 1 docs for the
+    /// PRE-MAINNET-TODO(ORACLE) note on cryptographic verification.
+    pub last_swap_unix_ts: i64,
 }
 
 #[derive(Accounts)]
@@ -48,7 +55,18 @@ pub struct EvaluatePoolPhase2<'info> {
     )]
     pub eligibility_cert: Account<'info, EligibilityCert>,
 
-    /// CHECK: AMM-specific introspection (re-verification of all six criteria).
+    #[account(
+        seeds = [
+            LAUNCH_PRICE_SEED,
+            params.amm_program_id.as_ref(),
+            params.pool_address.as_ref(),
+        ],
+        bump = launch_price.bump,
+    )]
+    pub launch_price: Account<'info, LaunchPrice>,
+
+    /// CHECK: AMM-specific introspection (re-verification of all six
+    /// criteria) is dispatched through the `adapters` module.
     pub pool: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -57,10 +75,10 @@ pub struct EvaluatePoolPhase2<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<EvaluatePoolPhase2>,
-    params: EvaluatePoolPhase2Params,
-) -> Result<()> {
+pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Params) -> Result<()> {
+    let cfg = &ctx.accounts.protocol_config;
+    require!(!cfg.paused, GraveScannerError::ProtocolPaused);
+
     let clock = Clock::get().map_err(|_| GraveScannerError::InvalidClock)?;
     let anchor_account = &ctx.accounts.eligibility_anchor;
 
@@ -69,22 +87,38 @@ pub fn handler(
         GraveScannerError::AnchorInvalidated
     );
 
+    let pool_data: PoolData =
+        adapters::extract_pool_data(&ctx.accounts.pool.to_account_info(), &params.pool_address)?;
+
+    let lp_locked_amount =
+        adapters::locker::locked_lp_amount(&pool_data.base_mint, ctx.remaining_accounts)?;
+
+    let inputs = CriteriaInputs {
+        last_swap_unix_ts: params.last_swap_unix_ts,
+        current_unix_ts: clock.unix_timestamp,
+        launch_price_q64x64: ctx.accounts.launch_price.launch_price_q64x64,
+        current_price_q64x64: pool_data.current_price_q64x64()?,
+        current_tvl_lamports: pool_data.quote_reserve,
+        lp_supply: pool_data.lp_supply,
+        lp_locked_amount,
+        current_epoch: clock.epoch,
+        anchor_first_eligible_epoch: Some(anchor_account.first_eligible_epoch),
+    };
+    let thresholds = CriteriaThresholds {
+        inactivity_seconds: cfg.inactivity_seconds,
+        price_collapse_bps: cfg.price_collapse_bps,
+        min_tvl_lamports: cfg.min_tvl_lamports,
+        lp_burn_dust_threshold: cfg.lp_burn_dust_threshold,
+    };
+    let bitmap = criteria::evaluate(&inputs, &thresholds, Phase::Two)?;
+
+    // Phase 2 must reproduce the same bitmap that Phase 1 produced. A
+    // mismatch signals that the criteria semantics drifted between phases
+    // (parameter change, adapter upgrade, etc.) — refuse to certify.
     require!(
-        clock
-            .epoch
-            .saturating_sub(anchor_account.first_eligible_epoch)
-            >= MIN_EPOCH_CONFIRMATION,
-        GraveScannerError::EpochConfirmationPending
+        bitmap == anchor_account.criteria_bitmap,
+        GraveScannerError::CriteriaBitmapMismatch
     );
-
-    require_keys_eq!(
-        ctx.accounts.pool.key(),
-        params.pool_address,
-        GraveScannerError::UnsupportedAmm
-    );
-
-    // TODO(GraveScanner): re-verify all six criteria against current pool state.
-    // Stub returns success for scaffolding only.
 
     let cert = &mut ctx.accounts.eligibility_cert;
     cert.amm_program_id = params.amm_program_id;
@@ -97,6 +131,7 @@ pub fn handler(
         .unix_timestamp
         .checked_add(ELIGIBILITY_CERT_TTL_SECONDS)
         .ok_or(GraveScannerError::MathOverflow)?;
+    cert.criteria_bitmap = bitmap;
     cert.bump = ctx.bumps.eligibility_cert;
     cert._reserved = [0u8; 64];
 
@@ -107,6 +142,7 @@ pub fn handler(
         anchor_epoch: cert.anchor_epoch,
         cert_epoch: cert.cert_epoch,
         expires_at: cert.expires_at,
+        criteria_bitmap: bitmap,
     });
 
     Ok(())
@@ -120,4 +156,5 @@ pub struct EligibilityCertIssued {
     pub anchor_epoch: u64,
     pub cert_epoch: u64,
     pub expires_at: i64,
+    pub criteria_bitmap: u8,
 }

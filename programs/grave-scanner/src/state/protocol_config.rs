@@ -28,6 +28,16 @@ pub struct ProtocolConfig {
     /// Staleness window for uncertified `EligibilityAnchor` PDAs (v4.0.1).
     pub anchor_staleness_seconds: u64,
 
+    /// LP-supply dust threshold for Criterion 4 ("LP not burned"). Pools
+    /// with `lp_supply <= lp_burn_dust_threshold` are treated as burned.
+    pub lp_burn_dust_threshold: u64,
+
+    /// Emergency pause flag. When `true`, `evaluate_pool_*` reverts with
+    /// `ProtocolPaused`. Has no effect on rent reclaim (`sweep_stale_anchor`)
+    /// or governance instructions. Per spec: GraveVault's
+    /// `claim_lp_proceeds` remains live independently of this flag.
+    pub paused: bool,
+
     /// Bump for ['protocol_config'] PDA.
     pub bump: u8,
 

@@ -13,6 +13,7 @@ pub struct InitializeParams {
     pub price_collapse_bps: u16,
     pub min_tvl_lamports: u64,
     pub anchor_staleness_seconds: u64,
+    pub lp_burn_dust_threshold: u64,
 }
 
 #[derive(Accounts)]
@@ -59,7 +60,13 @@ pub fn handler(ctx: Context<Initialize>, params: InitializeParams) -> Result<()>
     } else {
         params.anchor_staleness_seconds
     };
+    cfg.lp_burn_dust_threshold = if params.lp_burn_dust_threshold == 0 {
+        DEFAULT_LP_BURN_DUST_THRESHOLD
+    } else {
+        params.lp_burn_dust_threshold
+    };
 
+    cfg.paused = false;
     cfg.bump = ctx.bumps.protocol_config;
     cfg._reserved = [0u8; 64];
 

@@ -37,8 +37,10 @@ pub struct RecordLaunchPrice<'info> {
 }
 
 pub fn handler(ctx: Context<RecordLaunchPrice>, params: RecordLaunchPriceParams) -> Result<()> {
-    // TODO(GraveScanner): verify launch_price_q64x64 against on-chain pool
-    // reserves rather than trusting the caller. Phase-1 stub for scaffolding.
+    // PRE-MAINNET-TODO(ORACLE): cross-check launch_price_q64x64 against
+    // on-chain pool reserves at the supplied first_swap_slot rather than
+    // trusting the caller | reverts: PoolDataParseError on mismatch |
+    // verify: against AMM transaction history at the recorded slot.
     let clock = Clock::get()?;
     let lp = &mut ctx.accounts.launch_price;
 

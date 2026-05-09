@@ -31,6 +31,11 @@ pub struct EligibilityCert {
     /// Unix timestamp at which this cert expires (issued_at + 3600).
     pub expires_at: i64,
 
+    /// Bitmap of the six derelict-pool criteria validated at Phase 2.
+    /// MUST equal `crate::criteria::ALL_CRITERIA_MASK` (0x3F) and MUST
+    /// match the originating EligibilityAnchor's bitmap.
+    pub criteria_bitmap: u8,
+
     /// Bump for [b"eligibility_cert", amm_program_id, pool_address].
     pub bump: u8,
 
