@@ -23,6 +23,20 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
+// Anchor 0.31.1's `#[program]` macro expansion calls the deprecated
+// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
+// 2.x). Until Anchor's upstream fix lands, we silence the lint at crate level
+// so `cargo clippy -D warnings` stays green. The deprecation does not affect
+// runtime behaviour — `realloc` is still available, just discouraged.
+#![allow(deprecated)]
+// Anchor 0.31.x's `#[program]` macro and Solana's
+// `solana_program_entrypoint::custom_panic_default!` macro emit
+// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
+// `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
+// trip the `unexpected_cfgs` lint because the consuming crate did not declare
+// them. We silence at crate level until the upstream macros emit
+// `check-cfg` directives themselves.
+#![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
 
@@ -65,10 +79,7 @@ pub mod grave_vault {
     /// Permissionless. Executes a salvage: pre-flight, LP snapshot, CPI to AMM
     /// remove_liquidity, CPI to Jupiter v6 swap, 40/40/20 distribution, and
     /// emits a `SalvageCompleted` event with a SalvageReceipt PDA.
-    pub fn salvage_pool(
-        ctx: Context<SalvagePool>,
-        params: SalvagePoolParams,
-    ) -> Result<()> {
+    pub fn salvage_pool(ctx: Context<SalvagePool>, params: SalvagePoolParams) -> Result<()> {
         instructions::salvage_pool::handler(ctx, params)
     }
 

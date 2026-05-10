@@ -17,7 +17,10 @@ concurrency:
 env:
   SOLANA_VERSION: 2.0.21
   ANCHOR_VERSION: 0.31.1
-  RUST_TOOLCHAIN: 1.79.0
+  # Host toolchain. Must match rust-toolchain.toml — the modern SPL crate
+  # ecosystem (digest 0.11 / block-buffer 0.12) requires edition2024 = 1.85+.
+  # The on-chain BPF build still uses Solana platform-tools' embedded Rust.
+  RUST_TOOLCHAIN: 1.85.0
   NODE_VERSION: 20
   PNPM_VERSION: 9
 

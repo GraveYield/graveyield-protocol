@@ -24,6 +24,10 @@ idl-build = [
     "anchor-spl/idl-build",
     "grave-scanner/idl-build",
 ]
+# Anchor 0.31.x's `#[program]` macro emits `#[cfg(feature = "anchor-debug")]`
+# tags. Declaring the feature here silences the unexpected_cfgs lint on
+# Rust 1.80+. The feature is a no-op flag the macro author uses internally.
+anchor-debug = []
 
 [dependencies]
 anchor-lang = { workspace = true }
