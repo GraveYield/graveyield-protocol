@@ -3,10 +3,10 @@
 // GraveScanner constants — locked thresholds and PDA seeds.
 // Do not change without updating docs/architecture/eligibility-anchors.md.
 
-// =====================================================================
+// =================================================================
 // Eligibility thresholds (Charter-locked at launch, governance-tunable
 // within ranges enforced by `update_protocol_config`).
-// =====================================================================
+// =================================================================
 
 /// Minimum trading inactivity to consider a pool derelict (Criterion 1).
 /// 90 days, expressed in seconds.
@@ -38,12 +38,33 @@ pub const DEFAULT_LP_BURN_DUST_THRESHOLD: u64 = 1_000;
 /// `sweep_stale_anchor` to reclaim rent.
 pub const DEFAULT_ANCHOR_STALENESS_SECONDS: u64 = 14 * 24 * 60 * 60;
 
-/// EligibilityCert TTL — 1 hour, expressed in seconds.
-pub const ELIGIBILITY_CERT_TTL_SECONDS: i64 = 60 * 60;
+/// Default `EligibilityCert` TTL — 1 hour, expressed in seconds. Governance
+/// can lower or raise this via `update_protocol_config` but never below
+/// `MIN_CERT_TTL_SECONDS`.
+///
+/// Used as the default value when `initialize` is called with
+/// `cert_ttl_seconds = 0`. Live values live in `ProtocolConfig.cert_ttl_seconds`
+/// (see `state/protocol_config.rs`).
+pub const DEFAULT_CERT_TTL_SECONDS: i64 = 60 * 60;
 
-// =====================================================================
+/// Hardcoded floor on `cert_ttl_seconds`. Governance cannot configure a
+/// cert TTL shorter than this, even by accident — `update_protocol_config`
+/// rejects any value below this with `CertTtlBelowMinimum`.
+///
+/// Rationale: a cert TTL below 10 minutes makes the certify-and-salvage
+/// bundle helper brittle against ordinary mempool latency. Raising this
+/// floor requires a program upgrade, not a config update.
+pub const MIN_CERT_TTL_SECONDS: i64 = 600;
+
+/// `EligibilityCert` TTL constant retained for backwards-compatible imports
+/// (e.g., older test fixtures). Prefer `ProtocolConfig.cert_ttl_seconds`
+/// at runtime; this alias mirrors `DEFAULT_CERT_TTL_SECONDS`.
+#[deprecated(note = "Use ProtocolConfig.cert_ttl_seconds at runtime, or DEFAULT_CERT_TTL_SECONDS for defaults.")]
+pub const ELIGIBILITY_CERT_TTL_SECONDS: i64 = DEFAULT_CERT_TTL_SECONDS;
+
+// =================================================================
 // PDA seeds.
-// =====================================================================
+// =================================================================
 
 pub const PROTOCOL_CONFIG_SEED: &[u8] = b"protocol_config";
 pub const ELIGIBILITY_ANCHOR_SEED: &[u8] = b"eligibility_anchor";

@@ -5,6 +5,7 @@
 
 use anchor_lang::prelude::*;
 
+use crate::constants::MIN_CERT_TTL_SECONDS;
 use crate::errors::GraveScannerError;
 use crate::state::ProtocolConfig;
 
@@ -14,6 +15,9 @@ pub struct UpdateProtocolConfigParams {
     pub price_collapse_bps: Option<u16>,
     pub min_tvl_lamports: Option<u64>,
     pub anchor_staleness_seconds: Option<u64>,
+    /// EligibilityCert TTL in seconds. Floor: `MIN_CERT_TTL_SECONDS` (600).
+    /// Any value below the floor reverts with `CertTtlBelowMinimum`.
+    pub cert_ttl_seconds: Option<i64>,
 }
 
 #[derive(Accounts)]
@@ -47,6 +51,15 @@ pub fn handler(
     }
     if let Some(v) = params.anchor_staleness_seconds {
         cfg.anchor_staleness_seconds = v;
+    }
+    if let Some(v) = params.cert_ttl_seconds {
+        // Hardcoded floor: governance cannot push cert_ttl below 600s.
+        // Raising the floor requires a program upgrade.
+        require!(
+            v >= MIN_CERT_TTL_SECONDS,
+            GraveScannerError::CertTtlBelowMinimum
+        );
+        cfg.cert_ttl_seconds = v;
     }
 
     Ok(())

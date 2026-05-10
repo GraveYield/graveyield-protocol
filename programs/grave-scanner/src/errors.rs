@@ -5,7 +5,7 @@
 //
 // Anchor's `#[error_code]` macro adds a default offset of 6000 to each
 // variant's Rust discriminant. To produce the canonical spec codes
-// 6000..=6018, the discriminants below are 0..=18 (with the 12..=14 gap
+// 6000..=6019, the discriminants below are 0..=19 (with the 12..=14 gap
 // preserved for future v4.x additions).
 //
 // Do not renumber existing variants. New variants append at the next
@@ -90,4 +90,10 @@ pub enum GraveScannerError {
     /// staleness window elapsed.
     #[msg("AnchorNotStale: staleness window has not yet elapsed.")]
     AnchorNotStale = 18,
+
+    /// On-chain code 6019. `update_protocol_config` rejected a
+    /// `cert_ttl_seconds` value below the hardcoded `MIN_CERT_TTL_SECONDS`
+    /// floor (600s = 10 min). Raising the floor requires a program upgrade.
+    #[msg("CertTtlBelowMinimum: cert_ttl_seconds below MIN_CERT_TTL_SECONDS floor.")]
+    CertTtlBelowMinimum = 19,
 }

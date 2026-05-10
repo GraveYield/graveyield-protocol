@@ -30,6 +30,15 @@ idl-build = [
 anchor-debug = []
 
 [dependencies]
-anchor-lang = { workspace = true }
+# `init-if-needed` is required for the lp_holder_pool_vault SystemAccount
+# in `salvage_pool` — first salvage of a pool creates the system-owned
+# 0-data PDA; subsequent salvages of the same pool are gated upstream by
+# the `pool_registry` init constraint, so init_if_needed only matters on
+# the first call. The Anchor footgun (init_if_needed silently accepting
+# an unexpected pre-existing account with mismatched layout) does not
+# apply here because SystemAccount<'info> + space=0 + system-owner is a
+# total enumeration — any pre-existing account that doesn't match those
+# bounds fails the type check.
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
 grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
