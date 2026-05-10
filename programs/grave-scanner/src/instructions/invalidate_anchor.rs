@@ -44,10 +44,7 @@ pub struct InvalidateAnchor<'info> {
     pub authority: Signer<'info>,
 }
 
-pub fn handler(
-    ctx: Context<InvalidateAnchor>,
-    _params: InvalidateAnchorParams,
-) -> Result<()> {
+pub fn handler(ctx: Context<InvalidateAnchor>, _params: InvalidateAnchorParams) -> Result<()> {
     let anchor_account = &mut ctx.accounts.eligibility_anchor;
     anchor_account.invalidated = true;
 

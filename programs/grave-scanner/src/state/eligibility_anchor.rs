@@ -28,6 +28,11 @@ pub struct EligibilityAnchor {
     /// True if multisig invalidated this anchor before certification.
     pub invalidated: bool,
 
+    /// Bitmap of the six derelict-pool criteria that passed at Phase 1.
+    /// All six pass = `0x3F`. Phase 2 must reproduce the same bitmap before
+    /// promoting to an EligibilityCert.
+    pub criteria_bitmap: u8,
+
     /// Bump for [b"eligibility_anchor", amm_program_id, pool_address].
     pub bump: u8,
 

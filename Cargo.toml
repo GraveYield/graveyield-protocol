@@ -8,6 +8,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# MSRV pin: matches rust-toolchain.toml and Solana 2.0.x BPF compilation.
+# Cargo 1.84+ uses this for MSRV-aware dependency resolution; on Cargo 1.79
+# this is informational and the lockfile drives compatibility.
+rust-version = "1.79"
 license = "Apache-2.0"
 authors = ["GraveYield Protocol contributors"]
 repository = "https://github.com/graveyieldprotocol/protocol"

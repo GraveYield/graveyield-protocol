@@ -3,8 +3,6 @@
 // GraveScanner constants — locked thresholds and PDA seeds.
 // Do not change without updating docs/architecture/eligibility-anchors.md.
 
-use anchor_lang::prelude::*;
-
 // =====================================================================
 // Eligibility thresholds (Charter-locked at launch, governance-tunable
 // within ranges enforced by `update_protocol_config`).
@@ -25,6 +23,15 @@ pub const DEFAULT_MIN_TVL_LAMPORTS: u64 = 500_000_000;
 /// Minimum consecutive Solana epoch confirmation between Phase 1 anchor and
 /// Phase 2 cert (Criterion 6). ~4-6 days at standard epoch length.
 pub const MIN_EPOCH_CONFIRMATION: u64 = 2;
+
+/// Default LP-supply dust threshold for Criterion 4 ("LP not burned").
+/// Pools whose outstanding LP supply is `<=` this value are considered
+/// fully burned. 1_000 raw LP tokens is a safe floor pre-mainnet — the
+/// real production value should be set per-AMM after analysing
+/// incinerator-balance distributions.
+///
+/// PRE-MAINNET-TODO(KEYS): replace flat threshold with percent-of-original-supply or incinerator-balance check | reverts: PoolNotEligible | verify: against historical pool burn distributions
+pub const DEFAULT_LP_BURN_DUST_THRESHOLD: u64 = 1_000;
 
 /// Default staleness window for uncertified `EligibilityAnchor` PDAs.
 /// 14 days in seconds. After this window any account can call
