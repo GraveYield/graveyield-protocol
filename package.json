@@ -29,5 +29,16 @@
   "devDependencies": {
     "@types/node": "^20.19.40",
     "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/node": "^20.19.40",
+      "@types/bn.js": "^5.1.5"
+    },
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@types/node": "^20.19.40"
+      }
+    }
   }
 }

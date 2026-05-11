@@ -77,7 +77,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+      # NOTE: `cache: pnpm` was removed. setup-node hashes `**/pnpm-lock.yaml`
+      # to compute the cache key, and no lockfile is committed yet (scaffold
+      # gap). Re-add once a `pnpm-lock.yaml` lands at the repo root.
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -r typecheck
 
