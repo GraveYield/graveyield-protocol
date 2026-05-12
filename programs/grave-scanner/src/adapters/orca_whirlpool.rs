@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Orca Whirlpool pool adapter.
+// Orca Whirlpool pool adapter — stub.
 //
 // Mainnet program ID: whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc
 //
-// Whirlpool accounts hold sqrt_price_x64 and tick state; reserves
-// are computed from token-vault accounts owned by the whirlpool. The
-// `Whirlpool::reward_last_updated_timestamp` and explicit on-chain
-// counters can serve as an upper bound on the last-swap timestamp.
+// Whirlpool is also concentrated-liquidity; reserves require token-vault
+// aggregation rather than a single base/quote read.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
@@ -18,9 +16,12 @@ use crate::errors::GraveScannerError;
 /// Mainnet Orca Whirlpool program ID.
 pub const PROGRAM_ID: Pubkey = pubkey!("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 
-/// Parse an Orca Whirlpool account into `PoolData`.
+/// Parse an Orca Whirlpool pool account into `PoolData`.
 ///
 /// PRE-MAINNET-TODO(CPI): Orca Whirlpool layout parsing + token-vault reserve aggregation | reverts: AmmAdapterUnimplemented | verify: against Whirlpool SDK and mainnet pool fixtures
-pub fn parse(_pool_account_info: &AccountInfo) -> Result<PoolData> {
+pub fn parse<'info>(
+    _pool_account_info: &AccountInfo<'info>,
+    _remaining_accounts: &[AccountInfo<'info>],
+) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }

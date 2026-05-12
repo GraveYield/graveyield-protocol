@@ -5,11 +5,16 @@
 // `criteria` evaluator. New AMM support is added by implementing a new
 // adapter module here.
 //
-// All adapter parse functions in this milestone are honest stubs that
-// revert with a named error code (`AmmAdapterUnimplemented` for AMMs,
-// `LockerAdapterUnimplemented` for lockers). The architectural surface
-// is exercised by virtue of compilation; runtime behavior is supplied
-// by follow-up PRs that implement the actual byte-layout parsing.
+// Convention since m4 (Raydium V4 layout adapter): each adapter takes
+// both the pool account AND the `remaining_accounts` slice. Reserves and
+// LP supply for the pool live on separate SPL token accounts (the pool's
+// coin_vault, pc_vault, lp_mint) — these MUST be included in
+// `remaining_accounts` by the caller. Adapters look them up by Pubkey.
+// Adapters whose layout parsing isn't yet implemented continue to revert
+// `AmmAdapterUnimplemented`.
+//
+// Locker adapter (`locker.rs`) follows the same `remaining_accounts`
+// convention for UNCX / PinkSale / Team Finance locker container accounts.
 //
 // Auditor's one-liner: `grep -rn "PRE-MAINNET-TODO" programs/`.
 
@@ -33,6 +38,11 @@ pub mod raydium_v4;
 #[derive(Clone, Copy, Debug)]
 pub struct PoolData {
     /// Unix timestamp of the last on-chain swap. Used for Criterion 1.
+    /// AMM-specific: Raydium V4 does not store a last-swap timestamp on
+    /// the pool account; in that case the adapter returns 0 and the
+    /// handler reads `last_swap_unix_ts` from instruction params instead
+    /// (gated by the ORACLE-002 PRE-MAINNET-TODO until indexer-signed
+    /// attestation lands).
     pub last_swap_unix_ts: i64,
     /// Base-side reserves (the memecoin / measured token).
     pub base_reserve: u64,
@@ -44,6 +54,8 @@ pub struct PoolData {
     pub base_mint: Pubkey,
     /// Mint of the quote token.
     pub quote_mint: Pubkey,
+    /// LP mint — needed for the Criterion 5 locker check.
+    pub lp_mint: Pubkey,
 }
 
 impl PoolData {
@@ -61,6 +73,24 @@ impl PoolData {
 }
 
 // =====================================================================
+// Account-lookup helper for adapter parsers.
+// =====================================================================
+
+/// Find an `AccountInfo` in `accounts` whose key matches `key`.
+///
+/// Adapters call this to resolve the pool's vault and lp_mint accounts
+/// from the instruction's `remaining_accounts` slice.
+pub fn find_account_by_key<'a, 'info>(
+    accounts: &'a [AccountInfo<'info>],
+    key: &Pubkey,
+) -> Result<&'a AccountInfo<'info>> {
+    accounts
+        .iter()
+        .find(|info| info.key == key)
+        .ok_or_else(|| GraveScannerError::PoolDataParseError.into())
+}
+
+// =====================================================================
 // Top-level dispatch by AMM program ID.
 // =====================================================================
 
@@ -70,9 +100,13 @@ impl PoolData {
 /// IDs declared in each adapter module. Mismatches return
 /// `UnsupportedAmm`; supported AMMs whose parser is not yet implemented
 /// return `AmmAdapterUnimplemented`.
-pub fn extract_pool_data(
-    pool_account_info: &AccountInfo,
+///
+/// `remaining_accounts` is the full instruction `remaining_accounts`
+/// slice. Adapters look up the pool's vault and lp_mint accounts here.
+pub fn extract_pool_data<'info>(
+    pool_account_info: &AccountInfo<'info>,
     expected_pool_address: &Pubkey,
+    remaining_accounts: &[AccountInfo<'info>],
 ) -> Result<PoolData> {
     require_keys_eq!(
         *pool_account_info.key,
@@ -82,15 +116,15 @@ pub fn extract_pool_data(
 
     let owner = pool_account_info.owner;
     if owner == &raydium_v4::PROGRAM_ID {
-        raydium_v4::parse(pool_account_info)
+        raydium_v4::parse(pool_account_info, remaining_accounts)
     } else if owner == &raydium_clmm::PROGRAM_ID {
-        raydium_clmm::parse(pool_account_info)
+        raydium_clmm::parse(pool_account_info, remaining_accounts)
     } else if owner == &orca_whirlpool::PROGRAM_ID {
-        orca_whirlpool::parse(pool_account_info)
+        orca_whirlpool::parse(pool_account_info, remaining_accounts)
     } else if owner == &pumpswap::PROGRAM_ID {
-        pumpswap::parse(pool_account_info)
+        pumpswap::parse(pool_account_info, remaining_accounts)
     } else if owner == &meteora::PROGRAM_ID {
-        meteora::parse(pool_account_info)
+        meteora::parse(pool_account_info, remaining_accounts)
     } else {
         err!(GraveScannerError::UnsupportedAmm)
     }

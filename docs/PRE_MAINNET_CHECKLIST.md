@@ -47,13 +47,12 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | ID | File | Status | Description |
 | --- | --- | --- | --- |
 | ORACLE-001 | `programs/grave-scanner/src/instructions/record_launch_price.rs` | 🟧 | Cross-check `launch_price_q64x64` against on-chain pool reserves at the supplied `first_swap_slot` rather than trusting the caller. Reverts with `PoolDataParseError` on mismatch. Verify against AMM transaction history at the recorded slot. |
-| ORACLE-002 | `programs/grave-scanner/src/instructions/evaluate_pool_phase1.rs` (also Phase 2) | 🟥 | Cryptographic proof of last-swap timestamp. Currently passed as a parameter and trusted; production handler must verify via adapter-provided last-swap proof or signed indexer attestation. |
+| ORACLE-002 | `programs/grave-scanner/src/instructions/evaluate_pool_phase1.rs` (also Phase 2) | 🟥 | Cryptographic proof of last-swap timestamp. Currently passed as a parameter and trusted; production handler must verify via adapter-provided last-swap proof or signed indexer attestation. Raydium V4 adapter (m4) returns `0` as a sentinel since AmmInfo doesn't carry a last-swap timestamp — handler still reads the param until this row retires. |
 
 ### CPI
 
 | ID | File | Status | Description |
 | --- | --- | --- | --- |
-| CPI-001 | `programs/grave-scanner/src/adapters/raydium_v4.rs` | 🟥 | Raydium V4 pool layout parsing. Reverts with `AmmAdapterUnimplemented`. Verify against mainnet pool fixtures (e.g. `9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2` SOL/USDC) and Raydium SDK source-of-truth field offsets. |
 | CPI-002 | `programs/grave-scanner/src/adapters/raydium_clmm.rs` | 🟧 | Raydium CLMM pool layout parsing + tick-range reserve calculation. v1.1 milestone. |
 | CPI-003 | `programs/grave-scanner/src/adapters/orca_whirlpool.rs` | 🟧 | Orca Whirlpool layout + token-vault reserve aggregation. |
 | CPI-004 | `programs/grave-scanner/src/adapters/pumpswap.rs` | 🟧 | PumpSwap pool layout parsing. |
@@ -72,11 +71,21 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 1. Implement the change. Replace the `PRE-MAINNET-TODO(...)` marker with
    either a `// TODO(post-launch): ...` if there is residual cleanup, or
    delete it entirely if the resolution is complete.
-2. Move the row in this file under a `## Retired` section with a SHA
+2. Move the row in this file under the `## Retired` section with a SHA
    reference to the implementing PR.
 3. CI's pre-mainnet-todo audit (added in a follow-up PR) cross-checks
    that every grep'd marker has a matching live row in this file and
    vice versa.
+
+## Retired
+
+Rows retired by shipped implementations. Each entry references the
+implementing PR; the merge SHA is filled in by a tiny follow-up commit
+after the PR lands so the row can be tagged to its exact post-merge SHA.
+
+| ID | File | Retired by | Merge SHA |
+| --- | --- | --- | --- |
+| CPI-001 | `programs/grave-scanner/src/adapters/raydium_v4.rs` | PR #13 (m4: Raydium V4 layout adapter) | `<filled by post-merge fix-up commit>` |
 
 ## Audit handoff
 

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// PumpSwap (pump.fun's bonding-curve graduated AMM) pool adapter.
+// PumpSwap (pump.fun graduated AMM) pool adapter — stub.
 //
 // Mainnet program ID: PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGhXkP
 //
-// PumpSwap is the post-graduation AMM for pump.fun tokens that
-// reach the bonding-curve cap. Pre-graduation pools live in the
-// pump.fun program itself and are out of scope for derelict-pool
-// salvage (graduations are gated by liquidity thresholds GraveYield
-// would never trigger on).
+// PumpSwap pools share a similar two-vault shape with Raydium V4, but
+// the AMM account layout differs in field offsets and the vault types.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
@@ -22,6 +19,9 @@ pub const PROGRAM_ID: Pubkey = pubkey!("PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGh
 /// Parse a PumpSwap pool account into `PoolData`.
 ///
 /// PRE-MAINNET-TODO(CPI): PumpSwap pool layout parsing | reverts: AmmAdapterUnimplemented | verify: against PumpSwap SDK and mainnet pool fixtures
-pub fn parse(_pool_account_info: &AccountInfo) -> Result<PoolData> {
+pub fn parse<'info>(
+    _pool_account_info: &AccountInfo<'info>,
+    _remaining_accounts: &[AccountInfo<'info>],
+) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }
