@@ -13,6 +13,15 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "typescript"]
+    # Pin Node typings to the major matching engines.node (20 LTS).
+    # Bumping @types/node above the engines major causes typecheck to fail
+    # against APIs that don't exist on the runtime. When the engines major is
+    # raised, update this allow-list at the same time.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/bn.js"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
