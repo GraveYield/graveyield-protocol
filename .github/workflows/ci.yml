@@ -71,7 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
+      # Pinned to v6.0.6 (2026-05-08) — v6.0.7 (2026-05-11) and v6.0.8
+      # (2026-05-12) regress at install time, failing the action in ~7s
+      # before pnpm even runs. Revisit once upstream confirms a fix.
+      - uses: pnpm/action-setup@v6.0.6
         with:
           version: ${{ env.PNPM_VERSION }}
       - uses: actions/setup-node@v6
