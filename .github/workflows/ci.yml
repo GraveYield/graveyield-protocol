@@ -71,18 +71,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # Pinned to v6.0.6 (2026-05-08) — v6.0.7 (2026-05-11) and v6.0.8
-      # (2026-05-12) regress at install time, failing the action in ~7s
-      # before pnpm even runs. Revisit once upstream confirms a fix.
-      - uses: pnpm/action-setup@v6.0.6
-        with:
-          version: ${{ env.PNPM_VERSION }}
+      # pnpm/action-setup@v6 requires Node.js to already be installed
+      # (upstream removed the bundled Node in v6). setup-node MUST come
+      # first. The previous floating-tag failure at install time was this
+      # ordering, not a regression in v6.0.7/v6.0.8.
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # NOTE: `cache: pnpm` was removed. setup-node hashes `**/pnpm-lock.yaml`
-      # to compute the cache key, and no lockfile is committed yet (scaffold
-      # gap). Re-add once a `pnpm-lock.yaml` lands at the repo root.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      # NOTE: `cache: pnpm` was removed from setup-node. setup-node hashes
+      # `**/pnpm-lock.yaml` to compute the cache key, and no lockfile is
+      # committed yet (scaffold gap). Re-add once a `pnpm-lock.yaml` lands
+      # at the repo root.
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -r typecheck
 
