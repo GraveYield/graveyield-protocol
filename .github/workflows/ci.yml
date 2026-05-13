@@ -61,8 +61,14 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # cargo-binstall fetches a prebuilt anchor-cli binary in ~10s instead
+      # of compiling from source (~5-7 min, which has been intermittently
+      # cancelled on ubuntu-latest runners during the dependency-fetch
+      # phase). Drops total anchor-build job time from ~10 min to ~2 min.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
       - name: Install Anchor CLI
-        run: cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+        run: cargo binstall --no-confirm --version ${ANCHOR_VERSION} anchor-cli
       - name: Anchor build
         run: anchor build
 
