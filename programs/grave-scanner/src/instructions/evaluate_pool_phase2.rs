@@ -76,7 +76,10 @@ pub struct EvaluatePoolPhase2<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Params) -> Result<()> {
+pub fn handler<'info>(
+    ctx: Context<'_, '_, 'info, 'info, EvaluatePoolPhase2<'info>>,
+    params: EvaluatePoolPhase2Params,
+) -> Result<()> {
     let cfg = &ctx.accounts.protocol_config;
     require!(!cfg.paused, GraveScannerError::ProtocolPaused);
 

@@ -65,7 +65,7 @@ mod offsets {
 /// is rejected with `PoolDataParseError`.
 pub fn parse<'info>(
     pool_account_info: &AccountInfo<'info>,
-    remaining_accounts: &[AccountInfo<'info>],
+    remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<PoolData> {
     let (coin_vault, pc_vault, coin_vault_mint, pc_vault_mint, lp_mint) = {
         let data = pool_account_info
@@ -91,12 +91,12 @@ pub fn parse<'info>(
     // `Account::<T>::try_from` validates account ownership against the SPL
     // Token Program ID. A non-token account passed in remaining_accounts is
     // rejected here regardless of its data layout.
-    let coin_account: Account<TokenAccount> = Account::try_from(coin_vault_info)
-        .map_err(|_| GraveScannerError::PoolDataParseError)?;
-    let pc_account: Account<TokenAccount> = Account::try_from(pc_vault_info)
-        .map_err(|_| GraveScannerError::PoolDataParseError)?;
-    let lp_mint_account: Account<Mint> = Account::try_from(lp_mint_info)
-        .map_err(|_| GraveScannerError::PoolDataParseError)?;
+    let coin_account: Account<TokenAccount> =
+        Account::try_from(coin_vault_info).map_err(|_| GraveScannerError::PoolDataParseError)?;
+    let pc_account: Account<TokenAccount> =
+        Account::try_from(pc_vault_info).map_err(|_| GraveScannerError::PoolDataParseError)?;
+    let lp_mint_account: Account<Mint> =
+        Account::try_from(lp_mint_info).map_err(|_| GraveScannerError::PoolDataParseError)?;
 
     require_keys_eq!(
         coin_account.mint,

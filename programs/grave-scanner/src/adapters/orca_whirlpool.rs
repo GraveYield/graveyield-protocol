@@ -21,7 +21,7 @@ pub const PROGRAM_ID: Pubkey = pubkey!("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uct
 /// PRE-MAINNET-TODO(CPI): Orca Whirlpool layout parsing + token-vault reserve aggregation | reverts: AmmAdapterUnimplemented | verify: against Whirlpool SDK and mainnet pool fixtures
 pub fn parse<'info>(
     _pool_account_info: &AccountInfo<'info>,
-    _remaining_accounts: &[AccountInfo<'info>],
+    _remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }

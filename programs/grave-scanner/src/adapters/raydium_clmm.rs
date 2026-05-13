@@ -22,7 +22,7 @@ pub const PROGRAM_ID: Pubkey = pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKg
 /// PRE-MAINNET-TODO(CPI): Raydium CLMM pool layout parsing + tick-range reserve calculation | reverts: AmmAdapterUnimplemented | verify: against mainnet pool fixtures and Raydium CLMM SDK
 pub fn parse<'info>(
     _pool_account_info: &AccountInfo<'info>,
-    _remaining_accounts: &[AccountInfo<'info>],
+    _remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }

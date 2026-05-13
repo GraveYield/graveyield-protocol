@@ -80,10 +80,10 @@ impl PoolData {
 ///
 /// Adapters call this to resolve the pool's vault and lp_mint accounts
 /// from the instruction's `remaining_accounts` slice.
-pub fn find_account_by_key<'a, 'info>(
-    accounts: &'a [AccountInfo<'info>],
+pub fn find_account_by_key<'info>(
+    accounts: &'info [AccountInfo<'info>],
     key: &Pubkey,
-) -> Result<&'a AccountInfo<'info>> {
+) -> Result<&'info AccountInfo<'info>> {
     accounts
         .iter()
         .find(|info| info.key == key)
@@ -106,7 +106,7 @@ pub fn find_account_by_key<'a, 'info>(
 pub fn extract_pool_data<'info>(
     pool_account_info: &AccountInfo<'info>,
     expected_pool_address: &Pubkey,
-    remaining_accounts: &[AccountInfo<'info>],
+    remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<PoolData> {
     require_keys_eq!(
         *pool_account_info.key,

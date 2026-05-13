@@ -23,7 +23,7 @@ pub const PROGRAM_ID: Pubkey = pubkey!("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaP
 /// PRE-MAINNET-TODO(CPI): Meteora DLMM/Dynamic AMM pool layout parsing | reverts: AmmAdapterUnimplemented | verify: against Meteora SDK
 pub fn parse<'info>(
     _pool_account_info: &AccountInfo<'info>,
-    _remaining_accounts: &[AccountInfo<'info>],
+    _remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }
