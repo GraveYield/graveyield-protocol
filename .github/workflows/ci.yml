@@ -69,8 +69,23 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
       - name: Install Anchor CLI
         run: cargo binstall --no-confirm --version ${ANCHOR_VERSION} anchor-cli
+      # Capture anchor build's full output to a file and upload it as a
+      # workflow artifact when the job fails — needed because the actual
+      # error message is otherwise only visible via the GitHub Actions
+      # web UI logs page (the Composio integration this repo uses for
+      # programmatic CI inspection does not expose log download).
       - name: Anchor build
-        run: anchor build
+        run: |
+          set -o pipefail
+          anchor build 2>&1 | tee /tmp/anchor-build.log
+      - name: Upload anchor build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: anchor-build-log
+          path: /tmp/anchor-build.log
+          if-no-files-found: warn
+          retention-days: 7
 
   ts-typecheck:
     name: pnpm typecheck
