@@ -15,7 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOLANA_VERSION: 2.0.21
+  # Solana 2.2.18 ships platform-tools v1.50 (cargo 1.85). Earlier 2.x
+  # versions (e.g. 2.0.21, 2.1.x) ship cargo 1.75/1.79, which cannot
+  # parse the `edition2024` manifests pulled in transitively by
+  # anchor-lang 0.31.1's solana-program 2.3.0 dep chain. The on-chain
+  # ABI is unchanged; only the BPF compile toolchain advances.
+  SOLANA_VERSION: 2.2.18
   ANCHOR_VERSION: 0.31.1
   # Host toolchain. Must match rust-toolchain.toml — the modern SPL crate
   # ecosystem (digest 0.11 / block-buffer 0.12) requires edition2024 = 1.85+.
@@ -61,8 +66,14 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # cargo-binstall fetches a prebuilt anchor-cli binary in ~10s instead
+      # of compiling from source (~5-7 min, which has been intermittently
+      # cancelled on ubuntu-latest runners during the dependency-fetch
+      # phase). Drops total anchor-build job time from ~10 min to ~2 min.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
       - name: Install Anchor CLI
-        run: cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+        run: cargo binstall --no-confirm --version ${ANCHOR_VERSION} anchor-cli
       - name: Anchor build
         run: anchor build
 
@@ -71,15 +82,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.PNPM_VERSION }}
+      # pnpm/action-setup@v6 requires Node.js to already be installed
+      # (upstream removed the bundled Node in v6). setup-node MUST come
+      # first. The previous floating-tag failure at install time was this
+      # ordering, not a regression in v6.0.7/v6.0.8.
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # NOTE: `cache: pnpm` was removed. setup-node hashes `**/pnpm-lock.yaml`
-      # to compute the cache key, and no lockfile is committed yet (scaffold
-      # gap). Re-add once a `pnpm-lock.yaml` lands at the repo root.
+      # pnpm/action-setup@v6 auto-detects pnpm version from the
+      # `packageManager` field in package.json (pnpm@9.12.0). No explicit
+      # `version:` input — that field is what we want to be the single
+      # source of truth for the pnpm pin anyway.
+      - uses: pnpm/action-setup@v6
+      # NOTE: `cache: pnpm` was removed from setup-node. setup-node hashes
+      # `**/pnpm-lock.yaml` to compute the cache key, and no lockfile is
+      # committed yet (scaffold gap). Re-add once a `pnpm-lock.yaml` lands
+      # at the repo root.
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -r typecheck
 

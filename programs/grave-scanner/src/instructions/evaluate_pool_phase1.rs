@@ -59,7 +59,8 @@ pub struct EvaluatePoolPhase1<'info> {
 
     /// CHECK: AMM-specific account introspection happens via the
     /// `adapters` module. The account is validated against
-    /// `params.pool_address` and dispatched by `pool.owner`.
+    /// `params.pool_address` and dispatched by `pool.owner`. Vault and
+    /// lp_mint accounts are passed via `remaining_accounts`.
     pub pool: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -74,19 +75,23 @@ pub fn handler(ctx: Context<EvaluatePoolPhase1>, params: EvaluatePoolPhase1Param
 
     let clock = Clock::get().map_err(|_| GraveScannerError::InvalidClock)?;
 
-    // Extract AMM-side pool snapshot. Honest-stub adapter pattern: this
-    // call reverts with `AmmAdapterUnimplemented` until per-AMM layout
+    // Extract AMM-side pool snapshot. Per the m4 convention, the adapter
+    // reads reserves/lp_supply from the pool's vault and lp_mint accounts
+    // passed via `remaining_accounts`. Raydium V4 is wired; the other
+    // adapters revert `AmmAdapterUnimplemented` until their layout
     // parsers land.
-    let pool_data: PoolData =
-        adapters::extract_pool_data(&ctx.accounts.pool.to_account_info(), &params.pool_address)?;
+    let pool_data: PoolData = adapters::extract_pool_data(
+        &ctx.accounts.pool.to_account_info(),
+        &params.pool_address,
+        ctx.remaining_accounts,
+    )?;
 
     // Locker introspection. Honest-stub adapter pattern: reverts with
     // `LockerAdapterUnimplemented` until UNCX/PinkSale/TeamFinance
-    // adapters land.
-    let lp_locked_amount = adapters::locker::locked_lp_amount(
-        &pool_data.base_mint, // The LP mint will live in PoolData once adapters land; using base_mint as placeholder to keep the surface compiled.
-        ctx.remaining_accounts,
-    )?;
+    // adapters land. Receives the true LP mint (post-m4) so the locker
+    // check is semantically correct once implemented.
+    let lp_locked_amount =
+        adapters::locker::locked_lp_amount(&pool_data.lp_mint, ctx.remaining_accounts)?;
 
     let inputs = CriteriaInputs {
         last_swap_unix_ts: params.last_swap_unix_ts,

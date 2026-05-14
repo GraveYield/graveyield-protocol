@@ -61,10 +61,7 @@ pub struct ClaimLpProceeds<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<ClaimLpProceeds>,
-    params: ClaimLpProceedsParams,
-) -> Result<()> {
+pub fn handler(ctx: Context<ClaimLpProceeds>, params: ClaimLpProceedsParams) -> Result<()> {
     let registry = &mut ctx.accounts.pool_registry;
 
     // TODO(GraveVault m6): verify Merkle proof of (lp_holder, lp_balance) against
@@ -84,7 +81,9 @@ pub fn handler(
         .ok_or(GraveVaultError::MathOverflow)?
         .checked_div(registry.lp_total_supply_at_snapshot as u128)
         .ok_or(GraveVaultError::MathOverflow)?;
-    let amount_u64: u64 = amount.try_into().map_err(|_| GraveVaultError::MathOverflow)?;
+    let amount_u64: u64 = amount
+        .try_into()
+        .map_err(|_| GraveVaultError::MathOverflow)?;
 
     let new_claimed = registry
         .lp_holder_pool_claimed_lamports

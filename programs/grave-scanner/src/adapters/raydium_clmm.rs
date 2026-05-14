@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Raydium CLMM (concentrated liquidity) pool adapter.
+// Raydium CLMM (Concentrated Liquidity Market Maker) pool adapter — stub.
 //
 // Mainnet program ID: CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
 //
-// CLMM pool state lives in `PoolState` accounts; reserves are
-// derived from the active tick range and not directly stored as
-// "amounts" the way V4 does. Salvage of CLMM positions is a v1.1
-// roadmap item — V4 covers the bulk of derelict pools.
+// Concentrated liquidity introduces tick-range reserve calculation; this
+// adapter must aggregate across active tick ranges rather than reading a
+// single vault pair. v1.1 milestone.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
@@ -21,6 +20,9 @@ pub const PROGRAM_ID: Pubkey = pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKg
 /// Parse a Raydium CLMM pool account into `PoolData`.
 ///
 /// PRE-MAINNET-TODO(CPI): Raydium CLMM pool layout parsing + tick-range reserve calculation | reverts: AmmAdapterUnimplemented | verify: against mainnet pool fixtures and Raydium CLMM SDK
-pub fn parse(_pool_account_info: &AccountInfo) -> Result<PoolData> {
+pub fn parse(
+    _pool_account_info: &AccountInfo,
+    _remaining_accounts: &[AccountInfo],
+) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }

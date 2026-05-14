@@ -66,7 +66,8 @@ pub struct EvaluatePoolPhase2<'info> {
     pub launch_price: Account<'info, LaunchPrice>,
 
     /// CHECK: AMM-specific introspection (re-verification of all six
-    /// criteria) is dispatched through the `adapters` module.
+    /// criteria) is dispatched through the `adapters` module. Vault and
+    /// lp_mint accounts are passed via `remaining_accounts`.
     pub pool: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -87,11 +88,14 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
         GraveScannerError::AnchorInvalidated
     );
 
-    let pool_data: PoolData =
-        adapters::extract_pool_data(&ctx.accounts.pool.to_account_info(), &params.pool_address)?;
+    let pool_data: PoolData = adapters::extract_pool_data(
+        &ctx.accounts.pool.to_account_info(),
+        &params.pool_address,
+        ctx.remaining_accounts,
+    )?;
 
     let lp_locked_amount =
-        adapters::locker::locked_lp_amount(&pool_data.base_mint, ctx.remaining_accounts)?;
+        adapters::locker::locked_lp_amount(&pool_data.lp_mint, ctx.remaining_accounts)?;
 
     let inputs = CriteriaInputs {
         last_swap_unix_ts: params.last_swap_unix_ts,
