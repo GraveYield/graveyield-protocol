@@ -8,7 +8,6 @@
 // the AMM account layout differs in field offsets and the vault types.
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::pubkey;
 
 use super::PoolData;
 use crate::errors::GraveScannerError;

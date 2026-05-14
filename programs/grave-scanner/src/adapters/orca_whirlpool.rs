@@ -8,7 +8,6 @@
 // aggregation rather than a single base/quote read.
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::pubkey;
 
 use super::PoolData;
 use crate::errors::GraveScannerError;

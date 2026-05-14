@@ -8,7 +8,6 @@
 // docs/PRE_MAINNET_CHECKLIST.md tracks the confirmation step.
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::pubkey;
 
 use super::PoolData;
 use crate::errors::GraveScannerError;
