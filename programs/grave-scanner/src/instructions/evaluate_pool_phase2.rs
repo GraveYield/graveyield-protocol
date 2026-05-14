@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Phase 2 of evaluate_pool. Re-verifies all six criteria after the
-// multi-epoch confirmation gap and issues an `EligibilityCert` (TTL = 1
-// hour). GraveVault consumes the cert to authorise `salvage_pool`.
+// multi-epoch confirmation gap and issues an `EligibilityCert` (TTL =
+// `ProtocolConfig.cert_ttl_seconds`, governance-configurable, default 1h,
+// floored at MIN_CERT_TTL_SECONDS=600s). GraveVault consumes the cert to
+// authorise `salvage_pool`.
 //
 // Phase 2 also enforces that the bitmap matches the originating
 // EligibilityAnchor — a Phase 1 pass cannot be downgraded silently.
@@ -10,9 +12,7 @@
 use anchor_lang::prelude::*;
 
 use crate::adapters::{self, PoolData};
-use crate::constants::{
-    ELIGIBILITY_ANCHOR_SEED, ELIGIBILITY_CERT_SEED, ELIGIBILITY_CERT_TTL_SECONDS, LAUNCH_PRICE_SEED,
-};
+use crate::constants::{ELIGIBILITY_ANCHOR_SEED, ELIGIBILITY_CERT_SEED, LAUNCH_PRICE_SEED};
 use crate::criteria::{self, CriteriaInputs, CriteriaThresholds, Phase};
 use crate::errors::GraveScannerError;
 use crate::state::{EligibilityAnchor, EligibilityCert, LaunchPrice, ProtocolConfig};
@@ -131,9 +131,12 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
     cert.anchor_epoch = anchor_account.first_eligible_epoch;
     cert.cert_epoch = clock.epoch;
     cert.issued_at = clock.unix_timestamp;
+    // TTL is governance-configurable per ProtocolConfig (with a hardcoded
+    // floor enforced in `update_protocol_config`). Reading here keeps cert
+    // freshness in lockstep with the live config.
     cert.expires_at = clock
         .unix_timestamp
-        .checked_add(ELIGIBILITY_CERT_TTL_SECONDS)
+        .checked_add(cfg.cert_ttl_seconds)
         .ok_or(GraveScannerError::MathOverflow)?;
     cert.criteria_bitmap = bitmap;
     cert.bump = ctx.bumps.eligibility_cert;

@@ -46,14 +46,14 @@ pub struct ClaimLpProceeds<'info> {
     )]
     pub claim_record: Account<'info, ClaimRecord>,
 
-    /// CHECK: same `lp_holder_pool_vault` written to by salvage_pool.
+    /// Same `lp_holder_pool_vault` written to by salvage_pool.
     /// Charter-invariant: only `claim_lp_proceeds` may debit this account.
     #[account(
         mut,
         seeds = [LP_HOLDER_POOL_SEED, params.pool_address.as_ref()],
         bump,
     )]
-    pub lp_holder_pool_vault: UncheckedAccount<'info>,
+    pub lp_holder_pool_vault: SystemAccount<'info>,
 
     #[account(mut)]
     pub lp_holder: Signer<'info>,

@@ -3,6 +3,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::*;
+use crate::errors::GraveScannerError;
 use crate::state::ProtocolConfig;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -14,6 +15,10 @@ pub struct InitializeParams {
     pub min_tvl_lamports: u64,
     pub anchor_staleness_seconds: u64,
     pub lp_burn_dust_threshold: u64,
+    /// EligibilityCert TTL in seconds. 0 = default to `DEFAULT_CERT_TTL_SECONDS`
+    /// (3600). Values below `MIN_CERT_TTL_SECONDS` (600) are rejected with
+    /// `CertTtlBelowMinimum`.
+    pub cert_ttl_seconds: i64,
 }
 
 #[derive(Accounts)]
@@ -65,6 +70,17 @@ pub fn handler(ctx: Context<Initialize>, params: InitializeParams) -> Result<()>
     } else {
         params.lp_burn_dust_threshold
     };
+
+    let cert_ttl = if params.cert_ttl_seconds == 0 {
+        DEFAULT_CERT_TTL_SECONDS
+    } else {
+        params.cert_ttl_seconds
+    };
+    require!(
+        cert_ttl >= MIN_CERT_TTL_SECONDS,
+        GraveScannerError::CertTtlBelowMinimum
+    );
+    cfg.cert_ttl_seconds = cert_ttl;
 
     cfg.paused = false;
     cfg.bump = ctx.bumps.protocol_config;

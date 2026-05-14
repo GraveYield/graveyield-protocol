@@ -32,6 +32,14 @@ pub struct ProtocolConfig {
     /// with `lp_supply <= lp_burn_dust_threshold` are treated as burned.
     pub lp_burn_dust_threshold: u64,
 
+    /// `EligibilityCert` TTL in seconds. Governance-configurable via
+    /// `update_protocol_config`, but bounded below by
+    /// `MIN_CERT_TTL_SECONDS` (600s) — `update_protocol_config` rejects
+    /// any value below the floor with `CertTtlBelowMinimum`.
+    ///
+    /// Read by `evaluate_pool_phase_2` when stamping `cert.expires_at`.
+    pub cert_ttl_seconds: i64,
+
     /// Emergency pause flag. When `true`, `evaluate_pool_*` reverts with
     /// `ProtocolPaused`. Has no effect on rent reclaim (`sweep_stale_anchor`)
     /// or governance instructions. Per spec: GraveVault's
