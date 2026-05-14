@@ -73,24 +73,6 @@ impl PoolData {
 }
 
 // =====================================================================
-// Account-lookup helper for adapter parsers.
-// =====================================================================
-
-/// Find an `AccountInfo` in `accounts` whose key matches `key`.
-///
-/// Adapters call this to resolve the pool's vault and lp_mint accounts
-/// from the instruction's `remaining_accounts` slice.
-pub fn find_account_by_key<'info>(
-    accounts: &'info [AccountInfo<'info>],
-    key: &Pubkey,
-) -> Result<&'info AccountInfo<'info>> {
-    accounts
-        .iter()
-        .find(|info| info.key == key)
-        .ok_or_else(|| GraveScannerError::PoolDataParseError.into())
-}
-
-// =====================================================================
 // Top-level dispatch by AMM program ID.
 // =====================================================================
 
@@ -102,11 +84,14 @@ pub fn find_account_by_key<'info>(
 /// return `AmmAdapterUnimplemented`.
 ///
 /// `remaining_accounts` is the full instruction `remaining_accounts`
-/// slice. Adapters look up the pool's vault and lp_mint accounts here.
-pub fn extract_pool_data<'info>(
-    pool_account_info: &AccountInfo<'info>,
+/// slice. Adapters look up the pool's vault and lp_mint accounts here
+/// (via inline iteration — no helper function carries a reference
+/// across a call boundary, so no `'info` lifetime parameter is required
+/// on this dispatch or its callers).
+pub fn extract_pool_data(
+    pool_account_info: &AccountInfo,
     expected_pool_address: &Pubkey,
-    remaining_accounts: &'info [AccountInfo<'info>],
+    remaining_accounts: &[AccountInfo],
 ) -> Result<PoolData> {
     require_keys_eq!(
         *pool_account_info.key,

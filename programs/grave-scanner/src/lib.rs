@@ -65,8 +65,8 @@ pub mod grave_scanner {
 
     /// Phase 1 — evaluate all six derelict criteria and write an
     /// `EligibilityAnchor` PDA. Sets `first_eligible_epoch = current_epoch`.
-    pub fn evaluate_pool_phase_1<'info>(
-        ctx: Context<'_, '_, 'info, 'info, EvaluatePoolPhase1<'info>>,
+    pub fn evaluate_pool_phase_1(
+        ctx: Context<EvaluatePoolPhase1>,
         params: EvaluatePoolPhase1Params,
     ) -> Result<()> {
         instructions::evaluate_pool_phase1::handler(ctx, params)
@@ -76,8 +76,8 @@ pub mod grave_scanner {
     /// gap (≥2 consecutive Solana epochs, ~4-6 days). On success, writes an
     /// `EligibilityCert` PDA with TTL = 1h. GraveVault consumes the cert to
     /// authorise `salvage_pool`.
-    pub fn evaluate_pool_phase_2<'info>(
-        ctx: Context<'_, '_, 'info, 'info, EvaluatePoolPhase2<'info>>,
+    pub fn evaluate_pool_phase_2(
+        ctx: Context<EvaluatePoolPhase2>,
         params: EvaluatePoolPhase2Params,
     ) -> Result<()> {
         instructions::evaluate_pool_phase2::handler(ctx, params)

@@ -28,7 +28,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::pubkey;
 
-use super::{find_account_by_key, PoolData};
+use super::PoolData;
 use crate::errors::GraveScannerError;
 
 /// Mainnet Raydium V4 program ID.
@@ -85,13 +85,15 @@ mod offsets {
 ///   3. The actual `mint` field inside each vault SPL Token Account MUST
 ///      equal the AmmInfo's claimed `coin_vault_mint` / `pc_vault_mint`.
 ///
-/// Note: this adapter intentionally avoids `anchor_spl::token::{Mint,
-/// TokenAccount}` deserialization. Manual byte parsing keeps the adapter
-/// dependency-light and sidesteps an Anchor 0.31.1 BPF-compile issue with
-/// `Account::<T>::try_from` inside generic-lifetime instruction handlers.
-pub fn parse<'info>(
-    pool_account_info: &AccountInfo<'info>,
-    remaining_accounts: &'info [AccountInfo<'info>],
+/// Note: this adapter avoids `anchor_spl::token::{Mint, TokenAccount}`
+/// deserialization AND the `find_account_by_key` helper. Everything is
+/// inlined inside this function so no cross-function lifetime constraint
+/// requires explicit `'info` threading on the calling handler — the
+/// `#[program]` macro under Anchor 0.31.1 rejects generic-lifetime
+/// instruction handlers at BPF compile time.
+pub fn parse(
+    pool_account_info: &AccountInfo,
+    remaining_accounts: &[AccountInfo],
 ) -> Result<PoolData> {
     let (coin_vault, pc_vault, coin_vault_mint, pc_vault_mint, lp_mint) = {
         let data = pool_account_info
@@ -110,13 +112,19 @@ pub fn parse<'info>(
         )
     };
 
-    let coin_vault_info = find_account_by_key(remaining_accounts, &coin_vault)?;
-    let pc_vault_info = find_account_by_key(remaining_accounts, &pc_vault)?;
-    let lp_mint_info = find_account_by_key(remaining_accounts, &lp_mint)?;
+    // Inline account lookup — no helper function = no return-by-reference
+    // = no lifetime parameter to thread through the call stack.
+    let find = |key: &Pubkey| -> Result<&AccountInfo<'_>> {
+        remaining_accounts
+            .iter()
+            .find(|i| i.key == key)
+            .ok_or_else(|| GraveScannerError::PoolDataParseError.into())
+    };
+    let coin_vault_info = find(&coin_vault)?;
+    let pc_vault_info = find(&pc_vault)?;
+    let lp_mint_info = find(&lp_mint)?;
 
-    // Explicit owner-validation: each remaining-account passed must be an
-    // SPL Token Program account. Rejects forged accounts whose byte layout
-    // happens to match SPL but whose owning program is something else.
+    // Explicit owner-validation.
     require_keys_eq!(
         *coin_vault_info.owner,
         SPL_TOKEN_PROGRAM_ID,
@@ -133,9 +141,44 @@ pub fn parse<'info>(
         GraveScannerError::PoolDataParseError
     );
 
-    let (coin_actual_mint, coin_amount) = read_token_account(coin_vault_info)?;
-    let (pc_actual_mint, pc_amount) = read_token_account(pc_vault_info)?;
-    let lp_supply = read_mint_supply(lp_mint_info)?;
+    // Inline SPL account-data reads — each borrow is scoped to its block,
+    // never crosses a function boundary.
+    let (coin_actual_mint, coin_amount) = {
+        let data = coin_vault_info
+            .try_borrow_data()
+            .map_err(|_| GraveScannerError::PoolDataParseError)?;
+        require!(
+            data.len() >= TOKEN_ACCOUNT_SIZE,
+            GraveScannerError::PoolDataParseError
+        );
+        (
+            read_pubkey(&data, offsets::TOKEN_ACCOUNT_MINT)?,
+            read_u64_le(&data, offsets::TOKEN_ACCOUNT_AMOUNT)?,
+        )
+    };
+    let (pc_actual_mint, pc_amount) = {
+        let data = pc_vault_info
+            .try_borrow_data()
+            .map_err(|_| GraveScannerError::PoolDataParseError)?;
+        require!(
+            data.len() >= TOKEN_ACCOUNT_SIZE,
+            GraveScannerError::PoolDataParseError
+        );
+        (
+            read_pubkey(&data, offsets::TOKEN_ACCOUNT_MINT)?,
+            read_u64_le(&data, offsets::TOKEN_ACCOUNT_AMOUNT)?,
+        )
+    };
+    let lp_supply = {
+        let data = lp_mint_info
+            .try_borrow_data()
+            .map_err(|_| GraveScannerError::PoolDataParseError)?;
+        require!(
+            data.len() >= MINT_ACCOUNT_SIZE,
+            GraveScannerError::PoolDataParseError
+        );
+        read_u64_le(&data, offsets::MINT_SUPPLY)?
+    };
 
     require_keys_eq!(
         coin_actual_mint,
@@ -157,32 +200,6 @@ pub fn parse<'info>(
         quote_mint: pc_vault_mint,
         lp_mint,
     })
-}
-
-/// Read mint + amount from an SPL Token Account at canonical offsets.
-fn read_token_account(info: &AccountInfo) -> Result<(Pubkey, u64)> {
-    let data = info
-        .try_borrow_data()
-        .map_err(|_| GraveScannerError::PoolDataParseError)?;
-    require!(
-        data.len() >= TOKEN_ACCOUNT_SIZE,
-        GraveScannerError::PoolDataParseError
-    );
-    let mint = read_pubkey(&data, offsets::TOKEN_ACCOUNT_MINT)?;
-    let amount = read_u64_le(&data, offsets::TOKEN_ACCOUNT_AMOUNT)?;
-    Ok((mint, amount))
-}
-
-/// Read supply from an SPL Mint account at the canonical offset.
-fn read_mint_supply(info: &AccountInfo) -> Result<u64> {
-    let data = info
-        .try_borrow_data()
-        .map_err(|_| GraveScannerError::PoolDataParseError)?;
-    require!(
-        data.len() >= MINT_ACCOUNT_SIZE,
-        GraveScannerError::PoolDataParseError
-    );
-    read_u64_le(&data, offsets::MINT_SUPPLY)
 }
 
 fn read_pubkey(data: &[u8], offset: usize) -> Result<Pubkey> {

@@ -19,9 +19,9 @@ pub const PROGRAM_ID: Pubkey = pubkey!("PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGh
 /// Parse a PumpSwap pool account into `PoolData`.
 ///
 /// PRE-MAINNET-TODO(CPI): PumpSwap pool layout parsing | reverts: AmmAdapterUnimplemented | verify: against PumpSwap SDK and mainnet pool fixtures
-pub fn parse<'info>(
-    _pool_account_info: &AccountInfo<'info>,
-    _remaining_accounts: &'info [AccountInfo<'info>],
+pub fn parse(
+    _pool_account_info: &AccountInfo,
+    _remaining_accounts: &[AccountInfo],
 ) -> Result<PoolData> {
     err!(GraveScannerError::AmmAdapterUnimplemented)
 }
