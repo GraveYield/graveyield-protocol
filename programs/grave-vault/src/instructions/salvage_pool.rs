@@ -13,14 +13,27 @@
 // 7. Distribute proceeds 40 / 40 / 20 to lp_holder_pool_vault, salvor, treasury.
 // 8. Issue SalvageReceipt and emit SalvageCompleted / PoolSalvaged events.
 //
-// This scaffold defines the account context, parameters, and event shape. The
-// CPI bodies are TODO — they are tracked as the m1-m8 build sequence.
+// This handler currently lands m3 (pre-flight + PoolRegistry init + cert
+// freshness gates). The CPI bodies for steps 5–7 are tracked as m4–m7 in
+// the canonical 10-step build sequence and are honest-stubbed today —
+// distribution math fields are zeroed at the SalvageReceipt level.
 
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{self, CreateAccount};
 
 use crate::constants::*;
 use crate::errors::GraveVaultError;
 use crate::state::{PoolRegistry, ProtocolConfig, SalvageReceipt};
+
+use grave_scanner::state::EligibilityCert;
+
+/// Bitmap mask for "all six derelict-pool criteria pass" on an EligibilityCert.
+///
+/// Must match `grave_scanner::criteria::ALL_CRITERIA_MASK`. Hardcoded here
+/// rather than imported so a misnamed re-export on the Scanner side fails
+/// at compile time rather than silently. Updating this constant requires
+/// updating the Scanner-side mask in lock-step (see Combined Tech Doc §3.5).
+pub const ALL_CRITERIA_MASK: u8 = 0b00111111; // 0x3F = 6 criteria
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct SalvagePoolParams {
@@ -40,10 +53,15 @@ pub struct SalvagePool<'info> {
     #[account(seeds = [ProtocolConfig::SEED], bump = protocol_config.bump)]
     pub protocol_config: Account<'info, ProtocolConfig>,
 
-    /// EligibilityCert PDA from the GraveScanner program. We validate the
-    /// owner program and the seed derivation here without taking a hard
-    /// dependency on the GraveScanner account types.
-    /// CHECK: owner program and PDA derivation are validated in the handler.
+    /// EligibilityCert PDA from the GraveScanner program.
+    ///
+    /// Anchor validates here:
+    ///   - PDA derivation under `grave_scanner::ID` (via `seeds::program`)
+    ///   - 8-byte discriminator (via `Account<EligibilityCert>`)
+    ///   - Owner program == `grave_scanner::ID` (Account<...> default behavior)
+    ///
+    /// Pool / AMM / freshness / criteria-bitmap checks are layered in the
+    /// handler — `Account<...>` only validates the wire format and ownership.
     #[account(
         seeds = [
             ELIGIBILITY_CERT_SEED,
@@ -51,10 +69,13 @@ pub struct SalvagePool<'info> {
             params.pool_address.as_ref(),
         ],
         seeds::program = grave_scanner::ID,
-        bump,
+        bump = eligibility_cert.bump,
     )]
-    pub eligibility_cert: UncheckedAccount<'info>,
+    pub eligibility_cert: Account<'info, EligibilityCert>,
 
+    /// Per-pool registry; init-on-PDA is the canonical double-salvage defense
+    /// (a second salvage_pool against the same pool fails because this PDA
+    /// already exists).
     #[account(
         init,
         payer = salvor,
@@ -64,6 +85,7 @@ pub struct SalvagePool<'info> {
     )]
     pub pool_registry: Account<'info, PoolRegistry>,
 
+    /// Per-pool immutable receipt; second canonical defense layer.
     #[account(
         init,
         payer = salvor,
@@ -73,9 +95,15 @@ pub struct SalvagePool<'info> {
     )]
     pub salvage_receipt: Account<'info, SalvageReceipt>,
 
-    /// CHECK: lp_holder_pool_vault PDA. Receives the LP-holder share. This
-    /// account is UNSWEEPABLE by any admin key (Charter invariant). It is
-    /// only debited by `claim_lp_proceeds` against a valid Merkle proof.
+    /// CHECK: LP-holder share vault — native-SOL system account, system-owned,
+    /// 0-data. Created lazily on first salvage of this pool via a manual
+    /// system_program::create_account CPI in the handler. Anchor 0.32 rejects
+    /// `init`/`init_if_needed` on `SystemAccount`, so the explicit CPI is the
+    /// replacement pattern. Subsequent (would-be) salvages of the same pool
+    /// are blocked at the `pool_registry` init gate, so the lazy-init only
+    /// matters on the first call. Charter invariant: this account is
+    /// UNSWEEPABLE by any admin key, ever; only `claim_lp_proceeds` may debit
+    /// it against a valid Merkle proof.
     #[account(
         mut,
         seeds = [LP_HOLDER_POOL_SEED, params.pool_address.as_ref()],
@@ -100,32 +128,98 @@ pub struct SalvagePool<'info> {
 pub fn handler(ctx: Context<SalvagePool>, params: SalvagePoolParams) -> Result<()> {
     let cfg = &ctx.accounts.protocol_config;
 
+    // Gate 1: emergency pause. claim_lp_proceeds stays live during pause;
+    // only salvage_pool is gated.
     require!(!cfg.emergency_paused, GraveVaultError::ProtocolPaused);
 
-    // EligibilityCert ownership check. The seeds::program above validates the
-    // PDA was derived under GraveScanner; we additionally check the owner.
-    require_keys_eq!(
-        *ctx.accounts.eligibility_cert.owner,
-        grave_scanner::ID,
+    let cert = &ctx.accounts.eligibility_cert;
+
+    // Gate 2: cert freshness. `is_expired` does the canonical comparison
+    // `now >= expires_at`. The TTL window is governance-configurable in
+    // GraveScanner ProtocolConfig (floored at MIN_CERT_TTL_SECONDS = 600s
+    // by `update_protocol_config`).
+    let clock = Clock::get()?;
+    require!(
+        !cert.is_expired(clock.unix_timestamp),
+        GraveVaultError::EligibilityCertExpired
+    );
+
+    // Gate 3: cert criteria bitmap. All six derelict-pool criteria must
+    // have passed at Phase 2. Anything else means the cert was issued in
+    // a degraded mode and is not authoritative for salvage.
+    require!(
+        cert.criteria_bitmap == ALL_CRITERIA_MASK,
         GraveVaultError::InvalidEligibilityCert
     );
 
-    // TODO(GraveVault m1): deserialise EligibilityCert via grave_scanner::state
-    // type once the cross-program account binding is wired up. For now the
-    // seed-based derivation gates correctness.
+    // Gate 4: cert binds to THIS pool / THIS AMM. Anchor's seed derivation
+    // gates the PDA path; we additionally require the cert's stored fields
+    // match the params (defense in depth against a malicious cross-pool
+    // submission with a forged seed match).
+    require_keys_eq!(
+        cert.amm_program_id,
+        params.amm_program_id,
+        GraveVaultError::InvalidEligibilityCert
+    );
+    require_keys_eq!(
+        cert.pool_address,
+        params.pool_address,
+        GraveVaultError::InvalidEligibilityCert
+    );
 
-    // TODO(GraveVault m1): read cert.expires_at and require !cert.is_expired(now).
-
-    // Pre-flight: verify pool address consistency.
+    // Gate 5: pool address consistency between accounts and params.
     require_keys_eq!(
         ctx.accounts.pool.key(),
         params.pool_address,
         GraveVaultError::PreflightFailed
     );
 
-    // TODO(GraveVault m2): CPI to AMM remove_liquidity.
-    // TODO(GraveVault m3): CPI to Jupiter v6 swap (skip below dust).
-    // TODO(GraveVault m4): compute 40/40/20 distribution and route lamports.
+    // Lazy-init the LP-holder share vault. Anchor 0.32 forbids
+    // `init`/`init_if_needed` on `SystemAccount`, so we issue the
+    // create_account CPI ourselves. On the second salvage attempt for the
+    // same pool, this branch is unreachable because the `pool_registry`
+    // init constraint above already failed — so this is effectively first-
+    // salvage-only and the safety footgun cited by upstream does not apply.
+    let vault = &ctx.accounts.lp_holder_pool_vault;
+    if vault.lamports() == 0 {
+        let rent = Rent::get()?.minimum_balance(0);
+        let pool_bytes = params.pool_address.to_bytes();
+        let vault_bump = ctx.bumps.lp_holder_pool_vault;
+        let seeds: &[&[u8]] = &[LP_HOLDER_POOL_SEED, &pool_bytes, &[vault_bump]];
+        let signer_seeds: &[&[&[u8]]] = &[seeds];
+
+        system_program::create_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                CreateAccount {
+                    from: ctx.accounts.salvor.to_account_info(),
+                    to: vault.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            rent,
+            0,
+            &system_program::ID,
+        )?;
+    }
+
+    // ---- Pre-flight complete. Below this line is m4–m7 territory. ----
+
+    // TODO(GraveVault m4): LP holder snapshot + Merkle root verification.
+    //   — Today: trust salvor-supplied root, lock it into PoolRegistry.
+    //   — Future: parse on-chain LP token holders and recompute root.
+    // TODO(GraveVault m5): CPI to AMM remove_liquidity (Raydium V4 first).
+    //   — Today: stub (no CPI). lp_holder_pool_total_lamports stays 0.
+    //   — Future: vault_authority PDA-signs the LP burn / withdrawal.
+    // TODO(GraveVault m6): CPI to Jupiter v6 swap (skip below dust).
+    //   — Today: stub. min_quote_output_lamports parameter is captured
+    //     but not enforced because nothing is being swapped yet.
+    // TODO(GraveVault m7): compute 40/40/20 distribution and route lamports.
+    //   — Today: stub. SalvageReceipt distribution fields are zeroed.
+
+    // Capture min_quote_output_lamports in a local so the unused-variable
+    // lint stays quiet through m6. Removing this is part of m6.
+    let _expected_quote_floor = params.min_quote_output_lamports;
 
     let registry = &mut ctx.accounts.pool_registry;
     registry.amm_program_id = params.amm_program_id;
@@ -133,9 +227,8 @@ pub fn handler(ctx: Context<SalvagePool>, params: SalvagePoolParams) -> Result<(
     registry.salvor = ctx.accounts.salvor.key();
     registry.lp_snapshot_merkle_root = params.lp_snapshot_merkle_root;
     registry.lp_total_supply_at_snapshot = params.lp_total_supply_at_snapshot;
-    registry.lp_holder_pool_total_lamports = 0; // populated post-distribution
+    registry.lp_holder_pool_total_lamports = 0; // populated by m7
     registry.lp_holder_pool_claimed_lamports = 0;
-    let clock = Clock::get()?;
     registry.salvaged_at_slot = clock.slot;
     registry.salvaged_at_ts = clock.unix_timestamp;
     registry.bump = ctx.bumps.pool_registry;
