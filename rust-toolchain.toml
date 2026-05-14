@@ -1,9 +1,9 @@
 [toolchain]
-# Host toolchain for `cargo check` / `clippy` / `fmt`. The on-chain BPF build
-# is performed by Solana platform-tools' embedded Rust toolchain (currently
-# Solana 2.0.x), so this pin only affects host-side compilation of proc
-# macros and tooling. 1.85 is required by the modern SPL crate ecosystem
-# (digest 0.11 -> block-buffer 0.12 require edition2024 = Rust 1.85+).
-channel = "1.85.0"
+# Host toolchain for `cargo check` / `clippy` / `fmt`. The on-chain BPF
+# build runs on Solana platform-tools' embedded Rust toolchain; this pin
+# only affects host-side compilation of proc macros and tooling. 1.91.1
+# is the version aligned with the official Solana 3.x stack
+# (https://solana.com/docs/intro/installation).
+channel = "1.91.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
