@@ -15,7 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOLANA_VERSION: 2.0.21
+  # Solana 2.2.18 ships platform-tools v1.50 (cargo 1.85). Earlier 2.x
+  # versions (e.g. 2.0.21, 2.1.x) ship cargo 1.75/1.79, which cannot
+  # parse the `edition2024` manifests pulled in transitively by
+  # anchor-lang 0.31.1's solana-program 2.3.0 dep chain. The on-chain
+  # ABI is unchanged; only the BPF compile toolchain advances.
+  SOLANA_VERSION: 2.2.18
   ANCHOR_VERSION: 0.31.1
   # Host toolchain. Must match rust-toolchain.toml — the modern SPL crate
   # ecosystem (digest 0.11 / block-buffer 0.12) requires edition2024 = 1.85+.
