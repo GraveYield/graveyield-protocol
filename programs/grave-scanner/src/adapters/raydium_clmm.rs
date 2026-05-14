@@ -9,7 +9,6 @@
 // single vault pair. v1.1 milestone.
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::pubkey;
 
 use super::PoolData;
 use crate::errors::GraveScannerError;

@@ -8,25 +8,25 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# MSRV pin: matches rust-toolchain.toml and Solana 2.0.x BPF compilation.
-# Cargo 1.84+ uses this for MSRV-aware dependency resolution; on Cargo 1.79
-# this is informational and the lockfile drives compatibility.
-rust-version = "1.79"
+# Aligned with the official Solana 3.x stack (rust 1.91.1 per
+# https://solana.com/docs/intro/installation). Cargo's MSRV-aware resolver
+# uses this when resolving dep versions.
+rust-version = "1.91"
 license = "Apache-2.0"
 authors = ["GraveYield Protocol contributors"]
-repository = "https://github.com/graveyieldprotocol/protocol"
+repository = "https://github.com/GraveYield-Protocol/protocol"
 homepage = "https://***REMOVED***"
 readme = "README.md"
 
 [workspace.dependencies]
-anchor-lang = "0.31.1"
-anchor-spl = "0.31.1"
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
 
 # cargo-build-sbf reads this to pick the platform-tools version for the
-# BPF compile. v2.2.18's default is v1.48 (cargo 1.84), which can't parse
-# the edition2024 manifests pulled in transitively by anchor-lang 0.31.1.
-# v1.54 (2026-03-06) ships cargo 1.85+, which is the first BPF toolchain
-# that handles edition2024 cleanly.
+# BPF compile. v1.54 (2026-03-06) ships cargo 1.85+, the first BPF
+# toolchain that handles edition2024 manifests. Solana 3.0.10 + Anchor
+# 0.32.1 still default to older platform-tools (cargo 1.84) so the
+# explicit pin remains the source of truth for our reproducible build.
 [workspace.metadata.solana]
 tools-version = "v1.54"
 

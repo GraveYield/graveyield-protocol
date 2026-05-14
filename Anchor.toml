@@ -1,10 +1,8 @@
 [toolchain]
-anchor_version = "0.31.1"
-# 2.2.18 ships platform-tools v1.50 (cargo 1.85), the first BPF toolchain
-# that handles the `edition2024` manifests pulled in transitively by
-# anchor-lang 0.31.1. Earlier 2.x versions (2.0.21, 2.1.x) ship cargo
-# 1.75/1.79 and fail at dep-fetch time. On-chain runtime ABI unchanged.
-solana_version = "2.2.18"
+# Aligned with the official Solana 3.x stack (per
+# https://solana.com/docs/intro/installation).
+anchor_version = "0.32.1"
+solana_version = "3.0.10"
 
 [features]
 resolution = true
