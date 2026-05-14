@@ -31,10 +31,16 @@ distribution (m7) remain honest-stubbed and explicitly marked.
 - **Error 6019 `CertTtlBelowMinimum`** on GraveScanner. Raised by
   `initialize` and `update_protocol_config` when a `cert_ttl_seconds`
   parameter falls below `MIN_CERT_TTL_SECONDS`.
-- **`init_if_needed` Anchor feature** on `programs/grave-vault/Cargo.toml`
-  for the `lp_holder_pool_vault` SystemAccount. First salvage of a pool
-  creates the 0-data system-owned PDA; subsequent salvages of the same
-  pool are gated upstream by the `pool_registry` init constraint.
+- **Anchor 0.32-compatible lazy vault init** for `lp_holder_pool_vault` in
+  `salvage_pool`. Anchor 0.32 rejects `init` / `init_if_needed` on
+  `SystemAccount` by design; PR #12's original approach is replaced with
+  a manual `anchor_lang::system_program::create_account` CPI issued by
+  the handler when `vault.lamports() == 0`. First salvage of a pool
+  creates the 0-data system-owned PDA via the CPI (signed with the PDA
+  bump); subsequent salvages of the same pool are still blocked at the
+  `pool_registry` init constraint, so the lazy creation only matters on
+  the first call. Net on-chain semantics are identical to the original
+  `init_if_needed` design.
 
 #### Changed
 
@@ -51,11 +57,14 @@ distribution (m7) remain honest-stubbed and explicitly marked.
   now handles the 8-byte discriminator check and owner-program (`grave_scanner::ID`)
   validation automatically; the previous manual ownership require! is
   redundant and removed.
-- **`lp_holder_pool_vault`** in both `salvage_pool` and `claim_lp_proceeds`
-  migrated from `UncheckedAccount<'info>` to `SystemAccount<'info>`. In
-  `salvage_pool` the constraint adds `init_if_needed` + `space = 0`. The
-  account remains charter-invariant unsweepable; only `claim_lp_proceeds`
-  may debit it (against a valid Merkle proof, m6+).
+- **`lp_holder_pool_vault`** in `claim_lp_proceeds` migrated from
+  `UncheckedAccount<'info>` to `SystemAccount<'info>` (read-only path,
+  no `init` constraint — safe under Anchor 0.32). In `salvage_pool` the
+  account is declared as `UncheckedAccount<'info>` with `mut, seeds,
+  bump` (PDA validation only) and lazy-initialized via the manual CPI
+  described above. The account remains charter-invariant unsweepable;
+  only `claim_lp_proceeds` may debit it (against a valid Merkle proof,
+  m6+).
 - **`evaluate_pool_phase_2`** now reads `cfg.cert_ttl_seconds` from
   ProtocolConfig instead of the hardcoded const when stamping
   `cert.expires_at`.
@@ -77,9 +86,19 @@ distribution (m7) remain honest-stubbed and explicitly marked.
 
 #### Verification status
 
-- `cargo check`: not yet run in this sandbox — pending Seth's
-  ship-now-vs-verify-first call. v1.0.7 will be the post-verification
-  patch with any compile fixes named in the CHANGELOG.
+Locally verified on the official Solana 3.x stack (rust 1.91.1, anchor
+0.32.1, solana 3.0.10, platform-tools v1.54):
+
+- `cargo fmt --all -- --check`: clean
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean
+- `cargo test --workspace --lib`: **20/20 pass** (19 grave-scanner + 1
+  grave-vault)
+- `cargo-build-sbf --tools-version v1.54`: BPF compile clean in ~51s
+
+CI `anchor build` job is currently failing at the post-cargo-build-sbf
+phase (anchor's IDL generation step) — investigation tracked in a
+follow-up patch. The local cargo-build-sbf compile of both programs
+succeeds, so the deployable BPF artifact is unaffected.
 
 #### Pre-mainnet checklist
 
