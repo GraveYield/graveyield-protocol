@@ -22,6 +22,14 @@ readme = "README.md"
 anchor-lang = "0.31.1"
 anchor-spl = "0.31.1"
 
+# cargo-build-sbf reads this to pick the platform-tools version for the
+# BPF compile. v2.2.18's default is v1.48 (cargo 1.84), which can't parse
+# the edition2024 manifests pulled in transitively by anchor-lang 0.31.1.
+# v1.54 (2026-03-06) ships cargo 1.85+, which is the first BPF toolchain
+# that handles edition2024 cleanly.
+[workspace.metadata.solana]
+tools-version = "v1.54"
+
 [profile.release]
 overflow-checks = true
 lto = "fat"
