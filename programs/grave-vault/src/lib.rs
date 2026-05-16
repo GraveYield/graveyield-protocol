@@ -23,19 +23,7 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.31.1's `#[program]` macro expansion calls the deprecated
-// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
-// 2.x). Until Anchor's upstream fix lands, we silence the lint at crate level
-// so `cargo clippy -D warnings` stays green. The deprecation does not affect
-// runtime behaviour — `realloc` is still available, just discouraged.
 #![allow(deprecated)]
-// Anchor 0.31.x's `#[program]` macro and Solana's
-// `solana_program_entrypoint::custom_panic_default!` macro emit
-// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
-// `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
-// trip the `unexpected_cfgs` lint because the consuming crate did not declare
-// them. We silence at crate level until the upstream macros emit
-// `check-cfg` directives themselves.
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
@@ -43,13 +31,11 @@ use anchor_lang::prelude::*;
 pub mod constants;
 pub mod errors;
 pub mod instructions;
+pub mod merkle;
 pub mod state;
 
 use instructions::*;
 
-// Localnet placeholder (deterministic SHA-256 seed; not a real keypair). Run
-// `anchor keys list && anchor keys sync` after generating real keypairs to
-// replace this and the matching entry in Anchor.toml.
 declare_id!("FZbMHXKRsgXXoEGfSPF5gw74ThKBauThDfpCPt1MvKfw");
 
 #[program]
@@ -62,7 +48,6 @@ pub mod grave_vault {
     }
 
     /// Update GraveVault protocol config. Multisig + 72h timelock.
-    /// Cannot raise `protocol_share_bps` above the Charter ceiling (2000 bps).
     pub fn update_protocol_config(
         ctx: Context<UpdateProtocolConfig>,
         params: UpdateProtocolConfigParams,

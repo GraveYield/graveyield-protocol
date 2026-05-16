@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased — m6: claim_lp_proceeds Merkle verification]
+
+### Added
+- **`programs/grave-vault/src/merkle.rs`** — SHA-256 sorted-pair Merkle proof verifier matching OpenZeppelin / Uniswap convention. `compute_leaf(holder, balance)` produces `sha256(pubkey || balance_le_u64)`; `verify_proof(root, leaf, proof)` walks the proof in sorted-pair order. 7 host unit tests cover deterministic-leaf, distinct-leaf, two-leaf tree, four-leaf balanced tree, sorted-pair order invariance, empty-proof edge case, and tampered-leaf rejection.
+
+### Changed
+- **`claim_lp_proceeds` handler** — replaces the m3 placeholder (`require!(!params.merkle_proof.is_empty(), …)`) with a real Merkle verification against `pool_registry.lp_snapshot_merkle_root`. The pro-rata math, conservation check, and `LpClaimProcessed` event are unchanged from m3.
+- **`claim_lp_proceeds` SOL transfer wired** — replaces the m3 `TODO(GraveVault m6)` comment with a real `system_program::transfer` CPI signed by `lp_holder_pool_vault`'s own seeds via `invoke_signed`. The vault is a system-owned PDA created by salvage_pool's lazy-init; its seeds are its signing authority.
+- **`claim_lp_proceeds` defensive checks** added:
+  - `lp_balance_at_snapshot > 0` (rejects zero-balance claims with `InvalidClaimProof`)
+  - `pool_registry.lp_total_supply_at_snapshot > 0` (prevents division-by-zero if PoolRegistry is corrupted)
+- **`lib.rs`** — `+ pub mod merkle;`.
+
+### Sync convention
+- No new error codes required. `InvalidClaimProof` (7010) and `ClaimAlreadyProcessed` (7011) already cover the m6 surface. `docs/error_codes.md` unchanged.
+
+### Unverified
+- BPF compile via `anchor build` (CI gate).
+- End-to-end localnet smoke test: snapshot a Raydium V4 SOL/X pool's LP holders, salvage it via m5, then claim from multiple holders against the sealed root. Tracked in `PRE_MAINNET_CHECKLIST.md` as a v1.0-release-blocker.
+- Real off-chain GraveScanner v2 indexer integration. The Merkle leaf encoding (`sha256(pubkey || balance_le_u64)`) is documented in this file and the canon — the off-chain builder MUST match it byte-for-byte.
+
 All notable changes to the GraveYield protocol monorepo are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
