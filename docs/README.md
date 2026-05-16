@@ -26,6 +26,12 @@ canon outside this list is either superseded or unrelated to the project.
 | Charter invariants (the things governance cannot change) | [`architecture/charter-invariants.md`](architecture/charter-invariants.md) |
 | Priority-fee policy (Charter ceiling + operator margin) | [`architecture/priority-fee-policy.md`](architecture/priority-fee-policy.md) |
 
+## Reference
+
+| Topic | Document |
+|-------|----------|
+| Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
+
 ## Glossary
 
 [`glossary.md`](glossary.md) defines the canonical v4.0 vocabulary. It is the
