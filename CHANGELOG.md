@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased — m5: salvage_pool execution path]
+
+### Added
+- **GraveVault salvage_pool execution path** end-to-end (m5):
+  - `cpi/raydium_v4.rs` — real Raydium V4 `withdraw` CPI (vault_authority PDA-signs `user_owner`; 18-account list; 9-byte data `[tag=4][amount_le]`; AMM authority constant validation; pre/post balance deltas).
+  - `cpi/jupiter.rs` — Jupiter v6 swap CPI helper (forwards salvor's pre-computed route data + accounts; vault_authority signs).
+  - `cpi/raydium_clmm.rs`, `cpi/orca_whirlpool.rs`, `cpi/pump_swap.rs` — honest-stub adapters; revert `AmmCpiUnimplemented` (7017).
+  - `cpi/mod.rs` — dispatcher by `pool.owner`.
+- **salvage_pool handler** rewritten to wire: salvor→vault LP transfer, dispatched remove_liquidity CPI, Jupiter swap (or dust skip), WSOL→SOL unwrap via `close_account` to `vault_sol_holding_account`, 40/40/20 distribution via three `system_program::transfer` calls, PoolRegistry + SalvageReceipt population, `PoolSalvaged` + `SalvageCompleted` emit.
+- **Five new error codes** (7015-7019): `AmmRedemptionFailed`, `JupiterSwapFailed`, `AmmCpiUnimplemented`, `InvalidSnapshotData`, `UnsupportedBaseToken`. Mirrored to `docs/error_codes.md` in lock-step per the sync convention.
+- **New PDA seeds**: `VAULT_AUTHORITY_SEED` (singleton signer), `VAULT_SOL_HOLDING_SEED` (per-pool, transient native-SOL holding for unwrap).
+- **New constants**: `WSOL_MINT`, `RAYDIUM_V4_PROGRAM_ID`, `RAYDIUM_V4_AMM_AUTHORITY` (`5Q544...`), `RAYDIUM_CLMM_PROGRAM_ID`, `ORCA_WHIRLPOOL_PROGRAM_ID`, `PUMP_SWAP_PROGRAM_ID`, `JUPITER_V6_PROGRAM_ID`, `RAYDIUM_V4_INSTRUCTION_TAG_WITHDRAW = 4`, `RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED = 11`, `BPS_DENOMINATOR = 10_000`, `HARD_MAX_SLIPPAGE_BPS = 1_000`.
+- **PRE_MAINNET_CHECKLIST**: new rows `CPI-006/007/008` (CLMM/Orca/PumpSwap stubs) + `CPI-009` (Raydium V4 account-ordering verification against a live mainnet pool — blocking row).
+
+### Changed
+- `salvage_pool` instruction signature now takes `Context<'_, '_, '_, 'info, SalvagePool<'info>>` (explicit `'info` threading per Anchor 0.31+ lifetime invariance — see failure-pattern memory).
+- `SalvagePoolParams` extended with `salvor_lp_amount`, `jupiter_route_data: Vec<u8>`, `max_slippage_bps_override: Option<u16>`, `jupiter_route_accounts_len: u8`.
+- `SalvagePool` Accounts struct extended with `vault_authority`, `vault_sol_holding_account`, `salvor_lp_token_account`, `vault_lp_token_account`, `vault_base_token_account`, `vault_memecoin_token_account`, `lp_mint`, `memecoin_mint`, `wsol_mint` (pinned via `address` constraint), `token_program`, `associated_token_program`.
+
+### Unverified
+- BPF compile via `anchor build` (deferred to CI on this PR).
+- Live Raydium V4 fork test of the exact 18-account ordering. The `amm_authority` constant check provides one assertion; full integration is `CPI-009` in `PRE_MAINNET_CHECKLIST.md`.
+- Real Jupiter v6 swap end-to-end. The CPI helper forwards what the salvor's bot quotes; verification is a localnet smoke test post-merge.
+- Pool orientation: `base_is_coin_side` is currently hardcoded `true` (assumes WSOL is the pool's coin side). A SOL/X pool where WSOL is the PC side will need the bot to invert its submission ordering; a runtime parse of pool data to detect orientation is in `PRE-MAINNET-TODO(CPI)` comments in `salvage_pool.rs`.
+
 All notable changes to the GraveYield protocol monorepo are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

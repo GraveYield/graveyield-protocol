@@ -57,6 +57,10 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | CPI-003 | `programs/grave-scanner/src/adapters/orca_whirlpool.rs` | 🟧 | Orca Whirlpool layout + token-vault reserve aggregation. |
 | CPI-004 | `programs/grave-scanner/src/adapters/pumpswap.rs` | 🟧 | PumpSwap pool layout parsing. |
 | CPI-005 | `programs/grave-scanner/src/adapters/meteora.rs` | 🟡 | Meteora DLMM / Dynamic AMM pool layout parsing. v1.1 milestone. |
+| CPI-006 | `programs/grave-vault/src/cpi/raydium_clmm.rs` | 🟧 | Raydium CLMM (concentrated liquidity) `remove_liquidity` CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
+| CPI-007 | `programs/grave-vault/src/cpi/orca_whirlpool.rs` | 🟧 | Orca Whirlpool position-burn CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
+| CPI-008 | `programs/grave-vault/src/cpi/pump_swap.rs` | 🟧 | PumpSwap `remove_liquidity` CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
+| CPI-009 | `programs/grave-vault/src/cpi/raydium_v4.rs` | 🟥 | Verify Raydium V4 withdraw account ordering against a live mainnet pool (e.g. `9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2`) via `solana-program-test` fork test before mainnet. The `amm_authority` constant check catches an obviously-wrong layout but not subtle swaps. |
 
 ### KEYS
 

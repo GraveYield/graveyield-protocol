@@ -23,24 +23,23 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.31.1's `#[program]` macro expansion calls the deprecated
-// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
-// 2.x). Until Anchor's upstream fix lands, we silence the lint at crate level
-// so `cargo clippy -D warnings` stays green. The deprecation does not affect
-// runtime behaviour — `realloc` is still available, just discouraged.
+// Anchor's `#[program]` macro expansion calls deprecated SDK methods
+// (`AccountInfo::realloc()` etc.) on Anchor 0.31.x/0.32.x with Solana SDK
+// 2.x/3.x. We silence the lint at crate level so `cargo clippy -D warnings`
+// stays green until upstream removes the deprecation churn.
 #![allow(deprecated)]
-// Anchor 0.31.x's `#[program]` macro and Solana's
-// `solana_program_entrypoint::custom_panic_default!` macro emit
-// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
-// `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
-// trip the `unexpected_cfgs` lint because the consuming crate did not declare
-// them. We silence at crate level until the upstream macros emit
-// `check-cfg` directives themselves.
+// Anchor's `#[program]` macro and Solana's `custom_panic_default!` emit
+// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`,
+// and `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+
+// these trip the `unexpected_cfgs` lint because the consuming crate did
+// not declare them. We silence at crate level until the upstream macros
+// emit `check-cfg` directives.
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
 
 pub mod constants;
+pub mod cpi;
 pub mod errors;
 pub mod instructions;
 pub mod state;
@@ -79,7 +78,10 @@ pub mod grave_vault {
     /// Permissionless. Executes a salvage: pre-flight, LP snapshot, CPI to AMM
     /// remove_liquidity, CPI to Jupiter v6 swap, 40/40/20 distribution, and
     /// emits a `SalvageCompleted` event with a SalvageReceipt PDA.
-    pub fn salvage_pool(ctx: Context<SalvagePool>, params: SalvagePoolParams) -> Result<()> {
+    pub fn salvage_pool<'info>(
+        ctx: Context<'_, '_, '_, 'info, SalvagePool<'info>>,
+        params: SalvagePoolParams,
+    ) -> Result<()> {
         instructions::salvage_pool::handler(ctx, params)
     }
 
