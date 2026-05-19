@@ -94,10 +94,18 @@ jobs:
           tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
           "$CACHE_DEST/rust/bin/cargo" --version
           "$CACHE_DEST/rust/bin/rustc" --version
+      # `anchor build` invokes `cargo-build-sbf` for the BPF compile AND
+      # `anchor idl build` for IDL generation. The IDL step requires a
+      # nightly Rust toolchain (Anchor 0.32.1 hasn't migrated to stable IDL
+      # gen yet). Since this workflow only installs stable, we run with
+      # `--no-idl` and treat IDL generation as a follow-up workstream — it
+      # produces TS client types but isn't a blocker for the on-chain
+      # program. A later PR can add `dtolnay/rust-toolchain@nightly` plus
+      # a dedicated IDL-build step.
       - name: Anchor build
         run: |
           set -o pipefail
-          anchor build 2>&1 | tee /tmp/anchor-build.log
+          anchor build --no-idl 2>&1 | tee /tmp/anchor-build.log
       - name: Upload anchor build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
