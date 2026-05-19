@@ -61,14 +61,20 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      # cargo-binstall fetches a prebuilt anchor-cli binary in ~10s instead
-      # of compiling from source (~5-7 min, which has been intermittently
-      # cancelled on ubuntu-latest runners during the dependency-fetch
-      # phase). Drops total anchor-build job time from ~10 min to ~2 min.
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+      # cargo-binstall was the original choice for speed but silently
+      # no-ops on anchor-cli 0.32.x: it exits 0 without installing the
+      # `anchor` binary on PATH (verified across multiple CI runs — the
+      # Install Anchor CLI step reports 0 seconds and success, then
+      # `anchor build` exits in 1 second with "command not found").
+      # cargo install --locked compiles from source (~5-7 min cold, cached
+      # by Swatinem/rust-cache@v2) and reliably places `anchor` in
+      # ~/.cargo/bin. The trailing `anchor --version` is a load-bearing
+      # assertion so future install regressions fail here rather than
+      # leaking to the build step where the symptom is opaque.
       - name: Install Anchor CLI
-        run: cargo binstall --no-confirm --version ${ANCHOR_VERSION} anchor-cli
+        run: |
+          cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+          anchor --version
       # Capture anchor build's full output to a file and upload it as a
       # workflow artifact when the job fails — needed because the actual
       # error message is otherwise only visible via the GitHub Actions
