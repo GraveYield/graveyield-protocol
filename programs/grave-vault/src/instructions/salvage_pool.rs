@@ -108,7 +108,7 @@ pub struct SalvagePoolParams {
 #[instruction(params: SalvagePoolParams)]
 pub struct SalvagePool<'info> {
     #[account(seeds = [ProtocolConfig::SEED], bump = protocol_config.bump)]
-    pub protocol_config: Account<'info, ProtocolConfig>,
+    pub protocol_config: Box<Account<'info, ProtocolConfig>>,
 
     /// EligibilityCert PDA from the GraveScanner program.
     #[account(
@@ -120,7 +120,7 @@ pub struct SalvagePool<'info> {
         seeds::program = grave_scanner::ID,
         bump = eligibility_cert.bump,
     )]
-    pub eligibility_cert: Account<'info, EligibilityCert>,
+    pub eligibility_cert: Box<Account<'info, EligibilityCert>>,
 
     /// Per-pool registry; init-on-PDA is the canonical double-salvage defense.
     #[account(
@@ -130,7 +130,7 @@ pub struct SalvagePool<'info> {
         seeds = [POOL_REGISTRY_SEED, params.pool_address.as_ref()],
         bump,
     )]
-    pub pool_registry: Account<'info, PoolRegistry>,
+    pub pool_registry: Box<Account<'info, PoolRegistry>>,
 
     /// Per-pool immutable receipt; second canonical defense layer.
     #[account(
@@ -140,7 +140,7 @@ pub struct SalvagePool<'info> {
         seeds = [SALVAGE_RECEIPT_SEED, params.pool_address.as_ref()],
         bump,
     )]
-    pub salvage_receipt: Account<'info, SalvageReceipt>,
+    pub salvage_receipt: Box<Account<'info, SalvageReceipt>>,
 
     /// CHECK: LP-holder share vault — native-SOL system account, system-owned,
     /// 0-data. Lazy-init via system_program::create_account on first salvage.
@@ -193,7 +193,7 @@ pub struct SalvagePool<'info> {
         token::mint = lp_mint,
         token::authority = salvor,
     )]
-    pub salvor_lp_token_account: Account<'info, TokenAccount>,
+    pub salvor_lp_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Vault's LP token account. Receives the salvor's LP transfer, then
     /// the Raydium V4 withdraw burns the full balance. `init_if_needed`
@@ -205,7 +205,7 @@ pub struct SalvagePool<'info> {
         associated_token::mint = lp_mint,
         associated_token::authority = vault_authority,
     )]
-    pub vault_lp_token_account: Account<'info, TokenAccount>,
+    pub vault_lp_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Vault's WSOL token account. Receives the WSOL portion of Raydium V4
     /// withdraw + the Jupiter swap output. Closed at end of handler to
@@ -216,7 +216,7 @@ pub struct SalvagePool<'info> {
         associated_token::mint = wsol_mint,
         associated_token::authority = vault_authority,
     )]
-    pub vault_base_token_account: Account<'info, TokenAccount>,
+    pub vault_base_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Vault's memecoin token account. Receives the memecoin portion of
     /// Raydium V4 withdraw; spent by the Jupiter swap.
@@ -226,20 +226,20 @@ pub struct SalvagePool<'info> {
         associated_token::mint = memecoin_mint,
         associated_token::authority = vault_authority,
     )]
-    pub vault_memecoin_token_account: Account<'info, TokenAccount>,
+    pub vault_memecoin_token_account: Box<Account<'info, TokenAccount>>,
 
     /// LP token mint. Anchor validates the vault_lp_token_account's mint
     /// against this. Salvor passes the pool's actual LP mint.
-    pub lp_mint: Account<'info, Mint>,
+    pub lp_mint: Box<Account<'info, Mint>>,
 
     /// Memecoin (non-base) mint. Salvor passes the pool's non-WSOL mint.
-    pub memecoin_mint: Account<'info, Mint>,
+    pub memecoin_mint: Box<Account<'info, Mint>>,
 
     /// Wrapped SOL mint. Anchor's `address` constraint pins this to the
     /// fixed network constant — a salvor cannot supply a fake WSOL mint
     /// to spoof base-token detection.
     #[account(address = WSOL_MINT)]
-    pub wsol_mint: Account<'info, Mint>,
+    pub wsol_mint: Box<Account<'info, Mint>>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
