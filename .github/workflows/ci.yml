@@ -74,6 +74,26 @@ jobs:
       # error message is otherwise only visible via the GitHub Actions
       # web UI logs page (the Composio integration this repo uses for
       # programmatic CI inspection does not expose log download).
+      # Solana 3.0.10's bundled platform-tools v1.51 ships cargo 1.84,
+      # which can't parse edition2024 manifests (blake3 0.12, hashbrown,
+      # digest, crypto-common — all transitive deps of Anchor 0.32.1's SPL
+      # deps). cargo-build-sbf 3.0.10's `--tools-version` flag is silently
+      # ignored, and `[workspace.metadata.solana] tools-version = "v1.54"`
+      # isn't honored either, so we replace the cached platform-tools
+      # directory with v1.54 contents (cargo 1.89) before `anchor build`
+      # invokes cargo-build-sbf. The cache key stays `v1.51` because
+      # cargo-build-sbf 3.0.10 hardcodes it.
+      - name: Pin platform-tools v1.54 (edition2024 fix)
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/platform-tools.tar.bz2 \
+            "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+          CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
+          rm -rf "$CACHE_DEST"
+          mkdir -p "$CACHE_DEST"
+          tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
+          "$CACHE_DEST/rust/bin/cargo" --version
+          "$CACHE_DEST/rust/bin/rustc" --version
       - name: Anchor build
         run: |
           set -o pipefail
