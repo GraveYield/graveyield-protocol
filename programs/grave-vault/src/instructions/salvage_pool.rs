@@ -84,7 +84,6 @@ pub struct SalvagePoolParams {
     pub min_quote_output_lamports: u64,
 
     // ---- m5 additions ----
-
     /// LP amount the salvor transfers into the vault for burning. Must
     /// equal the total LP the salvor wants this salvage to extract (the
     /// CPI burns the full vault LP balance — partial burns aren't
@@ -168,7 +167,6 @@ pub struct SalvagePool<'info> {
     pub pool: UncheckedAccount<'info>,
 
     // -------------------- m5 additions --------------------
-
     /// CHECK: Singleton vault authority PDA. Signs the inner Raydium V4
     /// withdraw CPI (as `user_owner`), the Jupiter swap CPI, the WSOL
     /// close, and the three system_program::transfer distribution legs.
@@ -410,10 +408,7 @@ pub fn handler<'info>(
         let _swap_output = {
             let input = JupiterSwapInput {
                 vault_authority: &ctx.accounts.vault_authority.to_account_info(),
-                destination_token_account: &ctx
-                    .accounts
-                    .vault_base_token_account
-                    .to_account_info(),
+                destination_token_account: &ctx.accounts.vault_base_token_account.to_account_info(),
                 route_accounts: jupiter_remaining,
                 route_data: params.jupiter_route_data.clone(),
                 vault_authority_bump: ctx.bumps.vault_authority,
@@ -464,7 +459,8 @@ pub fn handler<'info>(
 
     {
         let bump = [ctx.bumps.vault_authority];
-        let signer_seeds: &[&[u8]] = &[VAULT_AUTHORITY_SEED, &bump];
+        let seeds: &[&[u8]] = &[VAULT_AUTHORITY_SEED, &bump];
+        let signer_seeds: &[&[&[u8]]] = &[seeds];
         let close_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             CloseAccount {
@@ -472,7 +468,7 @@ pub fn handler<'info>(
                 destination: ctx.accounts.vault_sol_holding_account.to_account_info(),
                 authority: ctx.accounts.vault_authority.to_account_info(),
             },
-            &[signer_seeds],
+            signer_seeds,
         );
         token::close_account(close_ctx)?;
     }
@@ -641,19 +637,11 @@ fn transfer_from_vault_sol_holding<'info>(
     if amount == 0 {
         return Ok(());
     }
-    let ix = anchor_lang::solana_program::system_instruction::transfer(
-        source.key,
-        to.key,
-        amount,
-    );
+    let ix = anchor_lang::solana_program::system_instruction::transfer(source.key, to.key, amount);
     let bump_seed = [bump];
     let seeds: &[&[u8]] = &[VAULT_SOL_HOLDING_SEED, pool_address_bytes, &bump_seed];
-    invoke_signed(
-        &ix,
-        &[source.to_account_info(), to.clone()],
-        &[seeds],
-    )
-    .map_err(|_| error!(GraveVaultError::MathOverflow))
+    invoke_signed(&ix, &[source.to_account_info(), to.clone()], &[seeds])
+        .map_err(|_| error!(GraveVaultError::MathOverflow))
 }
 
 // =====================================================================

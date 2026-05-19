@@ -89,8 +89,7 @@ pub fn swap<'a, 'info>(input: JupiterSwapInput<'a, 'info>) -> Result<JupiterSwap
     // Build account list for invoke_signed — must include every account
     // referenced by the instruction's metas. The salvor provided them in
     // `route_accounts`.
-    let mut account_infos: Vec<AccountInfo<'info>> =
-        Vec::with_capacity(input.route_accounts.len());
+    let mut account_infos: Vec<AccountInfo<'info>> = Vec::with_capacity(input.route_accounts.len());
     for acct in input.route_accounts.iter() {
         account_infos.push((*acct).clone());
     }

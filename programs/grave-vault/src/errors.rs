@@ -66,7 +66,6 @@ pub enum GraveVaultError {
     TimelockNotElapsed = 7014,
 
     // ----- m5 additions (CPI execution path) -----
-
     /// AMM remove_liquidity CPI returned an error or zero output.
     #[msg("AMM redemption CPI failed.")]
     AmmRedemptionFailed = 7015,
