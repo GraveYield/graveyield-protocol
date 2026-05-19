@@ -113,16 +113,9 @@ pub fn handler(ctx: Context<ClaimLpProceeds>, params: ClaimLpProceedsParams) -> 
 
     // ---------------- Verify Merkle proof ----------------
 
-    let leaf = merkle::compute_leaf(
-        &ctx.accounts.lp_holder.key(),
-        params.lp_balance_at_snapshot,
-    );
+    let leaf = merkle::compute_leaf(&ctx.accounts.lp_holder.key(), params.lp_balance_at_snapshot);
     require!(
-        merkle::verify_proof(
-            registry.lp_snapshot_merkle_root,
-            leaf,
-            &params.merkle_proof,
-        ),
+        merkle::verify_proof(registry.lp_snapshot_merkle_root, leaf, &params.merkle_proof,),
         GraveVaultError::InvalidClaimProof
     );
 

@@ -15,7 +15,7 @@
 // at salvage time and is immutable thereafter.
 
 use anchor_lang::prelude::Pubkey;
-use anchor_lang::solana_program::hash::hash;
+use solana_sha256_hasher::hash;
 
 /// Compute the canonical leaf hash for an LP-holder snapshot entry.
 ///
