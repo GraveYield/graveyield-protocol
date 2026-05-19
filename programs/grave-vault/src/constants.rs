@@ -81,41 +81,29 @@ pub const ELIGIBILITY_CERT_SEED: &[u8] = b"eligibility_cert";
 // =====================================================================
 
 /// Wrapped SOL mint — fixed Solana network constant.
-pub const WSOL_MINT: Pubkey = anchor_lang::solana_program::pubkey!(
-    "So11111111111111111111111111111111111111112"
-);
+pub const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 
 /// Raydium V4 AMM program — mainnet.
-pub const RAYDIUM_V4_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!(
-    "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
-);
+pub const RAYDIUM_V4_PROGRAM_ID: Pubkey = pubkey!("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 
 /// Raydium V4 AMM authority — fixed PDA derived from the V4 program.
 /// Used to validate the `amm_authority` account passed by the salvor in
 /// `remaining_accounts` rather than trusting it blindly.
-pub const RAYDIUM_V4_AMM_AUTHORITY: Pubkey = anchor_lang::solana_program::pubkey!(
-    "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"
-);
+pub const RAYDIUM_V4_AMM_AUTHORITY: Pubkey =
+    pubkey!("5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1");
 
 /// Raydium CLMM (concentrated liquidity) program — m5 honest-stub target.
-pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!(
-    "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
-);
+pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey = pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
 
 /// Orca Whirlpool program — m5 honest-stub target.
-pub const ORCA_WHIRLPOOL_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!(
-    "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
-);
+pub const ORCA_WHIRLPOOL_PROGRAM_ID: Pubkey =
+    pubkey!("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc");
 
 /// PumpSwap program — m5 honest-stub target.
-pub const PUMP_SWAP_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!(
-    "PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGhXkP"
-);
+pub const PUMP_SWAP_PROGRAM_ID: Pubkey = pubkey!("PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGhXkP");
 
 /// Jupiter v6 aggregator program — mainnet.
-pub const JUPITER_V6_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!(
-    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-);
+pub const JUPITER_V6_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 
 // =====================================================================
 // Raydium V4 withdraw CPI layout.

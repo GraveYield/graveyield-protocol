@@ -148,7 +148,10 @@ pub fn remove_liquidity<'a, 'info>(
             false,
         ),
         // 11 market_pc_vault
-        AccountMeta::new(*input.remaining_accounts[ra_idx::MARKET_PC_VAULT].key, false),
+        AccountMeta::new(
+            *input.remaining_accounts[ra_idx::MARKET_PC_VAULT].key,
+            false,
+        ),
         // 12 market_vault_signer
         AccountMeta::new_readonly(
             *input.remaining_accounts[ra_idx::MARKET_VAULT_SIGNER].key,
@@ -227,10 +230,7 @@ pub fn remove_liquidity<'a, 'info>(
     // something went wrong (e.g. the pool is empty, or accounts were
     // mis-mapped). We reject it explicitly rather than let the downstream
     // distribution math silently emit zero salvor / lp_holder shares.
-    require!(
-        base_received > 0,
-        GraveVaultError::AmmRedemptionFailed
-    );
+    require!(base_received > 0, GraveVaultError::AmmRedemptionFailed);
 
     Ok(RemoveLiquidityOutput {
         base_received,
