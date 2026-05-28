@@ -13,13 +13,14 @@
 //   - docs/architecture/eligibility-anchors.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.31.1's `#[program]` macro expansion calls the deprecated
+// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
 // `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
-// 2.x). Until Anchor's upstream fix lands, we silence the lint at crate level
-// so `cargo clippy -D warnings` stays green. The deprecation does not affect
-// runtime behaviour — `realloc` is still available, just discouraged.
+// 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
+// crate level so `cargo clippy -D warnings` stays green. The deprecation
+// does not affect runtime behaviour — `realloc` is still available, just
+// discouraged.
 #![allow(deprecated)]
-// Anchor 0.31.x's `#[program]` macro and Solana's
+// Anchor 0.32.x's `#[program]` macro and Solana's
 // `solana_program_entrypoint::custom_panic_default!` macro emit
 // `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
 // `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
@@ -107,5 +108,14 @@ pub mod grave_scanner {
         params: UpdateProtocolConfigParams,
     ) -> Result<()> {
         instructions::update_protocol_config::handler(ctx, params)
+    }
+
+    /// Multisig-only, immediate. Toggles `paused` in ProtocolConfig. When
+    /// `true`, both `evaluate_pool_phase_1` and `evaluate_pool_phase_2` revert
+    /// with `ProtocolPaused`. `sweep_stale_anchor`, `invalidate_anchor`, and
+    /// config updates remain callable so the multisig can recover the protocol
+    /// from a paused state. Mirrors GraveVault's `emergency_pause`.
+    pub fn emergency_pause(ctx: Context<EmergencyPause>, paused: bool) -> Result<()> {
+        instructions::emergency_pause::handler(ctx, paused)
     }
 }

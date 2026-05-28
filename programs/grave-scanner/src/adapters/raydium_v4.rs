@@ -36,7 +36,7 @@ pub const PROGRAM_ID: Pubkey = pubkey!("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt
 /// SPL Token Program ID — both the vault SPL token accounts and the LP
 /// mint are owned by this program. We verify ownership explicitly rather
 /// than relying on `anchor_spl::Account<T>::try_from`, which was tripping
-/// the BPF compile under Anchor 0.31.1.
+/// the BPF compile under Anchor 0.31.x / 0.32.x.
 const SPL_TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 /// Canonical AmmInfo account size on Raydium V4. Pool accounts that
@@ -88,7 +88,7 @@ mod offsets {
 /// deserialization AND the `find_account_by_key` helper. Everything is
 /// inlined inside this function so no cross-function lifetime constraint
 /// requires explicit `'info` threading on the calling handler — the
-/// `#[program]` macro under Anchor 0.31.1 rejects generic-lifetime
+/// `#[program]` macro under Anchor 0.31.x / 0.32.x rejects generic-lifetime
 /// instruction handlers at BPF compile time.
 pub fn parse(
     pool_account_info: &AccountInfo,
