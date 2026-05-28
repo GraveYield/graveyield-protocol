@@ -67,8 +67,15 @@ jobs:
       # phase). Drops total anchor-build job time from ~10 min to ~2 min.
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
+      # `--force` is required because Swatinem/rust-cache restores
+      # `~/.cargo/.crates2.json` (the binstall "is-installed" registry)
+      # but does NOT restore `~/.cargo/bin/`. Without `--force`, binstall
+      # finds the cached metadata, reports "already installed", and skips
+      # the actual binary install — leaving subsequent `anchor build`
+      # steps with `command not found`. See:
+      # https://github.com/Swatinem/rust-cache/issues/161
       - name: Install Anchor CLI
-        run: cargo binstall --no-confirm --version ${ANCHOR_VERSION} anchor-cli
+        run: cargo binstall --no-confirm --force --version ${ANCHOR_VERSION} anchor-cli
       # Capture anchor build's full output to a file and upload it as a
       # workflow artifact when the job fails — needed because the actual
       # error message is otherwise only visible via the GitHub Actions
