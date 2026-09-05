@@ -1,94 +1,157 @@
 // SPDX-License-Identifier: Apache-2.0
+//
+// GraveVault error codes. The on-chain code numbers are stable and MUST match
+// the spec (docs/error_codes.md, Combined Tech Doc v3.0.1 §3.5).
+//
+// Anchor's `#[error_code]` macro emits `From<MyError> for u32` as
+// `(self as u32) + OFFSET`, where OFFSET defaults to 6000. We override OFFSET
+// to 7000 so the discriminants below stay at 0..=14 and the on-chain codes
+// land at the canonical 7000..=7014 range documented in `docs/error_codes.md`.
+//
+// Without the `offset = 7000` override, the explicit discriminants (7000..)
+// would compound with the 6000 default offset and emit codes 13000..=13014
+// instead — silently breaking every downstream consumer (indexer parsers,
+// SDK error matchers, IDL clients).
+//
+// Do not renumber existing variants. New variants append at the next free
+// discriminant.
 
 use anchor_lang::prelude::*;
 
-#[error_code]
+#[error_code(offset = 7000)]
 pub enum GraveVaultError {
-    /// Caller lacks the multisig authority required for this instruction.
+    /// On-chain code 7000. Caller lacks the multisig authority required.
     #[msg("Unauthorized: caller is not the protocol multisig.")]
-    Unauthorized = 7000,
+    Unauthorized = 0,
 
-    /// EligibilityCert PDA missing, expired, or owned by the wrong program.
+    /// On-chain code 7001. EligibilityCert PDA missing or owned by the wrong program.
     #[msg("Invalid or expired EligibilityCert.")]
-    InvalidEligibilityCert = 7001,
+    InvalidEligibilityCert = 1,
 
-    /// EligibilityCert TTL has passed. Re-run Phase 2 to mint a fresh cert.
+    /// On-chain code 7002. EligibilityCert TTL has passed. Re-run Phase 2.
     #[msg("EligibilityCert is expired.")]
-    EligibilityCertExpired = 7002,
+    EligibilityCertExpired = 2,
 
-    /// Protocol is paused — only `claim_lp_proceeds` is callable.
+    /// On-chain code 7003. Protocol is paused — only `claim_lp_proceeds` is callable.
     #[msg("Protocol is paused. salvage_pool is unavailable.")]
-    ProtocolPaused = 7003,
+    ProtocolPaused = 3,
 
-    /// Distribution shares (LP / salvor / protocol) did not sum to 10_000 bps.
+    /// On-chain code 7004. Distribution shares did not sum to 10_000 bps.
     #[msg("Share basis-point sum is not exactly 10_000.")]
-    InvalidShareSplit = 7004,
+    InvalidShareSplit = 4,
 
-    /// Attempted to raise `protocol_share_bps` above the Charter ceiling.
+    /// On-chain code 7005. `protocol_share_bps` exceeds the Charter ceiling.
     #[msg("Protocol share exceeds Charter ceiling (PROTOCOL_SHARE_BPS_CEILING).")]
-    ProtocolShareExceedsCeiling = 7005,
+    ProtocolShareExceedsCeiling = 5,
 
-    /// Attempted to sweep, close, or otherwise drain `lp_holder_pool_vault`.
-    /// This account is unsweepable by any admin key, ever (Charter invariant).
+    /// On-chain code 7006. Charter invariant: `lp_holder_pool_vault` is unsweepable.
     #[msg("Charter violation: lp_holder_pool_vault is unsweepable.")]
-    LpHolderPoolUnsweepable = 7006,
+    LpHolderPoolUnsweepable = 6,
 
-    /// Slippage on the Jupiter swap leg exceeded the configured maximum.
+    /// On-chain code 7007. Slippage on the Jupiter swap leg exceeded the maximum.
     #[msg("Slippage exceeded configured maximum.")]
-    SlippageExceeded = 7007,
+    SlippageExceeded = 7,
 
-    /// Transaction priority fee exceeds the Charter ceiling.
+    /// On-chain code 7008. Transaction priority fee exceeds the Charter ceiling.
     #[msg("Priority fee exceeds Charter ceiling.")]
-    PriorityFeeExceedsCeiling = 7008,
+    PriorityFeeExceedsCeiling = 8,
 
-    /// Arithmetic overflow during distribution math.
+    /// On-chain code 7009. Arithmetic overflow during distribution math.
     #[msg("Arithmetic overflow during distribution.")]
-    MathOverflow = 7009,
+    MathOverflow = 9,
 
-    /// LP holder is not in the snapshot Merkle tree, or proof is invalid.
+    /// On-chain code 7010. Claim proof failed verification against snapshot root.
     #[msg("Claim proof failed verification against the snapshot Merkle root.")]
-    InvalidClaimProof = 7010,
+    InvalidClaimProof = 10,
 
-    /// Claim has already been processed for this (pool, lp_holder) pair.
+    /// On-chain code 7011. Claim record already exists for this (pool, lp_holder).
     #[msg("Claim record already exists; proceeds were already withdrawn.")]
-    ClaimAlreadyProcessed = 7011,
+    ClaimAlreadyProcessed = 11,
 
-    /// Quote output below the Jupiter dust threshold; salvage skipped or aborted.
+    /// On-chain code 7012. Quote output below the Jupiter dust threshold.
     #[msg("Output below Jupiter dust threshold.")]
-    BelowDustThreshold = 7012,
+    BelowDustThreshold = 12,
 
-    /// Pre-flight check against the on-chain pool failed.
+    /// On-chain code 7013. Pre-flight check against the on-chain pool failed.
     #[msg("Pre-flight check against pool state failed.")]
-    PreflightFailed = 7013,
+    PreflightFailed = 13,
 
-    /// Timelock window has not yet elapsed for a queued parameter change.
+    /// On-chain code 7014. Timelock window has not yet elapsed.
     #[msg("Timelock window has not elapsed.")]
-    TimelockNotElapsed = 7014,
+    TimelockNotElapsed = 14,
 
     // ----- m5 additions (CPI execution path) -----
     /// AMM remove_liquidity CPI returned an error or zero output.
     #[msg("AMM redemption CPI failed.")]
-    AmmRedemptionFailed = 7015,
+    AmmRedemptionFailed = 15,
 
     /// Jupiter v6 swap CPI returned an error or zero output.
     #[msg("Jupiter v6 swap CPI failed.")]
-    JupiterSwapFailed = 7016,
+    JupiterSwapFailed = 16,
 
     /// AMM CPI adapter is registered but not implemented (CLMM / Orca / PumpSwap
     /// pre-mainnet stubs). Pool owner does not match the Raydium V4 program.
     /// See docs/PRE_MAINNET_CHECKLIST.md for the live list.
     #[msg("AmmCpiUnimplemented: AMM CPI adapter is a pre-mainnet stub.")]
-    AmmCpiUnimplemented = 7017,
+    AmmCpiUnimplemented = 17,
 
     /// Snapshot `lp_total_supply_at_snapshot` does not match the on-chain
     /// LP mint supply at salvage time. The salvor's snapshot is stale or
     /// the LP supply moved between snapshot and submission.
     #[msg("Snapshot mismatch with on-chain LP token state.")]
-    InvalidSnapshotData = 7018,
+    InvalidSnapshotData = 18,
 
     /// Pool base token is not WSOL. USDC/USDT base support is a v1.1
     /// deliverable that requires a token-account variant of
     /// `lp_holder_pool_vault` and protocol_treasury.
     #[msg("Unsupported base token: pool base must be WSOL (v1.0).")]
-    UnsupportedBaseToken = 7019,
+    UnsupportedBaseToken = 19,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Locks down the on-chain error code numbering against accidental drift.
+    ///
+    /// `docs/error_codes.md` documents 7000..=7014 as the canonical GraveVault
+    /// range. Without `#[error_code(offset = 7000)]`, Anchor would add the
+    /// default 6000 offset on top of any explicit discriminant — silently
+    /// shifting every code by +6000 and breaking downstream consumers.
+    #[test]
+    fn on_chain_codes_match_docs() {
+        let cases: &[(GraveVaultError, u32)] = &[
+            (GraveVaultError::Unauthorized, 7000),
+            (GraveVaultError::InvalidEligibilityCert, 7001),
+            (GraveVaultError::EligibilityCertExpired, 7002),
+            (GraveVaultError::ProtocolPaused, 7003),
+            (GraveVaultError::InvalidShareSplit, 7004),
+            (GraveVaultError::ProtocolShareExceedsCeiling, 7005),
+            (GraveVaultError::LpHolderPoolUnsweepable, 7006),
+            (GraveVaultError::SlippageExceeded, 7007),
+            (GraveVaultError::PriorityFeeExceedsCeiling, 7008),
+            (GraveVaultError::MathOverflow, 7009),
+            (GraveVaultError::InvalidClaimProof, 7010),
+            (GraveVaultError::ClaimAlreadyProcessed, 7011),
+            (GraveVaultError::BelowDustThreshold, 7012),
+            (GraveVaultError::PreflightFailed, 7013),
+            (GraveVaultError::TimelockNotElapsed, 7014),
+            (GraveVaultError::AmmRedemptionFailed, 7015),
+            (GraveVaultError::JupiterSwapFailed, 7016),
+            (GraveVaultError::AmmCpiUnimplemented, 7017),
+            (GraveVaultError::InvalidSnapshotData, 7018),
+            (GraveVaultError::UnsupportedBaseToken, 7019),
+        ];
+        for (variant, expected) in cases {
+            let actual: u32 = u32::from(*variant);
+            assert_eq!(
+                actual,
+                *expected,
+                "{} expected on-chain code {}, got {}",
+                variant.name(),
+                expected,
+                actual,
+            );
+        }
+    }
 }

@@ -50,10 +50,10 @@ anchor test                        # localnet integration tests
 
 Required toolchain (pinned in `rust-toolchain.toml`, `Anchor.toml`, `package.json`):
 
-- Solana CLI **2.0.x**
-- Anchor **0.31.x**
-- Rust **1.79+** stable
-- Node **20 LTS**
+- Solana CLI **3.0.10**
+- Anchor **0.32.1**
+- Rust **1.91.1** stable
+- Node **24 LTS**
 - pnpm **9**
 
 ## Workflow
@@ -103,7 +103,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 feat(grave-vault): add claim_lp_proceeds instruction
 fix(grave-scanner): tighten epoch confirmation check
 docs(charter): clarify 20% protocol-share ceiling
-chore(ci): pin anchor 0.31.1
+chore(ci): pin anchor 0.32.1
 ```
 
 Scopes mirror the workspace tree: `grave-scanner`, `grave-vault`, `sdk`, `indexer`, `adapters`,

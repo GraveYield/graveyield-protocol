@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // See programs/grave-scanner/src/instructions/mod.rs for the rationale on
-// `#[allow(ambiguous_glob_reexports)]`. Anchor 0.31.x's `#[program]` macro
+// `#[allow(ambiguous_glob_reexports)]`. Anchor 0.32.x's `#[program]` macro
 // requires the glob form to bring each instruction's auto-generated
 // `__cpi_client_accounts_*` / `__client_accounts_*` modules into scope.
 
