@@ -97,3 +97,50 @@ pub enum GraveScannerError {
     #[msg("CertTtlBelowMinimum: cert_ttl_seconds below MIN_CERT_TTL_SECONDS floor.")]
     CertTtlBelowMinimum = 19,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Locks down the on-chain error code numbering against accidental drift.
+    ///
+    /// Anchor's `#[error_code]` macro adds the default 6000 offset to every
+    /// Rust discriminant. We rely on the discriminants below being 0..=19
+    /// (with the 12..=14 gap) so the on-chain codes match the documented
+    /// 6000..=6019 range in `docs/error_codes.md`. A future contributor who
+    /// switches to explicit `= 6000`-style discriminants would unknowingly
+    /// shift every code by +6000.
+    #[test]
+    fn on_chain_codes_match_docs() {
+        let cases: &[(GraveScannerError, u32)] = &[
+            (GraveScannerError::Unauthorized, 6000),
+            (GraveScannerError::PoolNotEligible, 6001),
+            (GraveScannerError::LaunchPriceNotFound, 6002),
+            (GraveScannerError::UnsupportedAmm, 6003),
+            (GraveScannerError::MathOverflow, 6004),
+            (GraveScannerError::InvalidClock, 6005),
+            (GraveScannerError::InvariantViolation, 6006),
+            (GraveScannerError::AmmAdapterUnimplemented, 6007),
+            (GraveScannerError::LockerAdapterUnimplemented, 6008),
+            (GraveScannerError::PoolDataParseError, 6009),
+            (GraveScannerError::ProtocolPaused, 6010),
+            (GraveScannerError::CriteriaBitmapMismatch, 6011),
+            (GraveScannerError::AnchorNotFound, 6015),
+            (GraveScannerError::EpochConfirmationPending, 6016),
+            (GraveScannerError::AnchorInvalidated, 6017),
+            (GraveScannerError::AnchorNotStale, 6018),
+            (GraveScannerError::CertTtlBelowMinimum, 6019),
+        ];
+        for (variant, expected) in cases {
+            let actual: u32 = u32::from(*variant);
+            assert_eq!(
+                actual,
+                *expected,
+                "{} expected on-chain code {}, got {}",
+                variant.name(),
+                expected,
+                actual,
+            );
+        }
+    }
+}

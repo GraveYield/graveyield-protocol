@@ -3,10 +3,12 @@
 # Exits non-zero if any required tool is missing or has an unexpected major/minor.
 set -euo pipefail
 
-EXPECTED_SOLANA_MAJOR_MINOR="2.0"
-EXPECTED_ANCHOR_MAJOR_MINOR="0.31"
-EXPECTED_RUST_MIN="1.79"
-EXPECTED_NODE_MAJOR="20"
+# Expected versions reflect what's pinned in Anchor.toml, rust-toolchain.toml,
+# and package.json. Bump these together when the workspace toolchain moves.
+EXPECTED_SOLANA_MAJOR_MINOR="3.0"
+EXPECTED_ANCHOR_MAJOR_MINOR="0.32"
+EXPECTED_RUST_MIN="1.91"
+EXPECTED_NODE_MAJOR="24"
 EXPECTED_PNPM_MAJOR="9"
 
 err=0
