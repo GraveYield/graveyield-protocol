@@ -20,7 +20,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 anchor-lang = "0.32.1"
-anchor-spl = "1.0.3"
+anchor-spl = "0.32.1"
 
 # cargo-build-sbf reads this to pick the platform-tools version for the
 # BPF compile. v1.54 (2026-03-06) ships cargo 1.85+, the first BPF

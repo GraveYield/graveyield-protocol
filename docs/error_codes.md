@@ -49,13 +49,12 @@ future v4.x additions to the pre-anchor error space.
 | 6018 | `AnchorNotStale` | `sweep_stale_anchor` called before the staleness window elapsed. |
 | 6019 | `CertTtlBelowMinimum` | `update_protocol_config` rejected a `cert_ttl_seconds` value below `MIN_CERT_TTL_SECONDS` (600s = 10 min). |
 
-## GraveVault — 7000-7014
+## GraveVault — 7000-7019
 
 Source: [`../programs/grave-vault/src/errors.rs`](../programs/grave-vault/src/errors.rs).
-New error codes from milestones m5/m6/m7 (e.g. `AmmRedemptionFailed`,
-`JupiterSwapFailed`, `AmmCpiUnimplemented`, `InvalidSnapshotData`,
-`UnsupportedBaseToken`) will append at 7015+ and must be added here in
-lock-step with the Rust source.
+Codes 7015-7019 added by m5 (salvage_pool execution path). Future m6/m7
+additions append at 7020+ and must land in lock-step with the Rust
+source per the sync convention.
 
 | Code | Name | Condition |
 |------|------|-----------|
@@ -74,6 +73,11 @@ lock-step with the Rust source.
 | 7012 | `BelowDustThreshold` | Quote output below the Jupiter dust threshold; salvage skipped or aborted. |
 | 7013 | `PreflightFailed` | Pre-flight check against the on-chain pool failed. |
 | 7014 | `TimelockNotElapsed` | Timelock window has not yet elapsed for a queued parameter change. |
+| 7015 | `AmmRedemptionFailed` | AMM `remove_liquidity` CPI returned an error or zero output. |
+| 7016 | `JupiterSwapFailed` | Jupiter v6 swap CPI returned an error or zero output. |
+| 7017 | `AmmCpiUnimplemented` | AMM CPI adapter is a pre-mainnet stub (CLMM / Orca Whirlpool / PumpSwap). Pool owner is not the Raydium V4 program. See [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
+| 7018 | `InvalidSnapshotData` | Salvor's `lp_total_supply_at_snapshot` does not match the on-chain LP mint supply at salvage time. |
+| 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. USDC/USDT base support is a v1.1 deliverable. |
 
 ## Drift from the v3.0 .docx snapshot
 
@@ -96,4 +100,4 @@ rather than re-tabulating the codes.
 
 ---
 
-*Mirrored from `errors.rs` files on 2026-05-16.*
+*Mirrored from `errors.rs` files on 2026-05-16. Last verified at PR m5 (GraveVault 7000-7019, GraveScanner 6000-6019).*
