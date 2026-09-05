@@ -23,17 +23,20 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
-// Anchor's `#[program]` macro expansion calls deprecated SDK methods
-// (`AccountInfo::realloc()` etc.) on Anchor 0.31.x/0.32.x with Solana SDK
-// 2.x/3.x. We silence the lint at crate level so `cargo clippy -D warnings`
-// stays green until upstream removes the deprecation churn.
+// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
+// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
+// 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
+// crate level so `cargo clippy -D warnings` stays green. The deprecation
+// does not affect runtime behaviour — `realloc` is still available, just
+// discouraged.
 #![allow(deprecated)]
-// Anchor's `#[program]` macro and Solana's `custom_panic_default!` emit
-// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`,
-// and `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+
-// these trip the `unexpected_cfgs` lint because the consuming crate did
-// not declare them. We silence at crate level until the upstream macros
-// emit `check-cfg` directives.
+// Anchor 0.32.x's `#[program]` macro and Solana's
+// `solana_program_entrypoint::custom_panic_default!` macro emit
+// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
+// `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
+// trip the `unexpected_cfgs` lint because the consuming crate did not declare
+// them. We silence at crate level until the upstream macros emit
+// `check-cfg` directives themselves.
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
