@@ -4,8 +4,8 @@
 
 [![CI](https://github.com/graveyieldprotocol/protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/graveyieldprotocol/protocol/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Solana 2.0](https://img.shields.io/badge/solana-2.0.x-14F195.svg)](https://docs.solanalabs.com/)
-[![Anchor 0.31](https://img.shields.io/badge/anchor-0.31.x-512DA8.svg)](https://www.anchor-lang.com/)
+[![Solana 3.0](https://img.shields.io/badge/solana-3.0.x-14F195.svg)](https://solana.com/docs/intro/installation)
+[![Anchor 0.32](https://img.shields.io/badge/anchor-0.32.x-512DA8.svg)](https://www.anchor-lang.com/)
 
 GraveYield is the **settlement layer for derelict liquidity** on Solana. When AMM pools cross all
 six derelict-pool criteria — long inactivity, ≥99% price collapse, low TVL, no LP burn or lock,
@@ -35,15 +35,15 @@ protocol/
 
 ## Toolchain
 
-Pinned defaults:
+Pinned defaults (sources: `Anchor.toml`, `rust-toolchain.toml`, `package.json`):
 
-| Tool       | Version    |
-|------------|------------|
-| Solana CLI | 2.0.x      |
-| Anchor     | 0.31.x     |
-| Rust       | 1.79+ (stable) |
-| Node       | 20 LTS     |
-| pnpm       | 9          |
+| Tool       | Version          |
+|------------|------------------|
+| Solana CLI | 3.0.10           |
+| Anchor     | 0.32.1           |
+| Rust       | 1.91.1 (stable)  |
+| Node       | 24 LTS           |
+| pnpm       | 9                |
 
 Run `./scripts/check-toolchain.sh` to verify your local installation.
 
@@ -53,7 +53,7 @@ Run `./scripts/check-toolchain.sh` to verify your local installation.
 # Install JS workspace deps
 pnpm install
 
-# Build Anchor programs (requires Solana 2.0.x + Anchor 0.31.x)
+# Build Anchor programs (requires Solana 3.0.x + Anchor 0.32.x)
 anchor build
 
 # Run TypeScript typecheck across all packages

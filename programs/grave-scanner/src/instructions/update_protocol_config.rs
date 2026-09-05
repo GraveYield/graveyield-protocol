@@ -15,6 +15,10 @@ pub struct UpdateProtocolConfigParams {
     pub price_collapse_bps: Option<u16>,
     pub min_tvl_lamports: Option<u64>,
     pub anchor_staleness_seconds: Option<u64>,
+    /// LP-supply dust threshold for Criterion 4 ("LP not burned"). Pools
+    /// with `lp_supply <= lp_burn_dust_threshold` are treated as burned.
+    /// Governance-tunable to match dust outcomes seen on mainnet.
+    pub lp_burn_dust_threshold: Option<u64>,
     /// EligibilityCert TTL in seconds. Floor: `MIN_CERT_TTL_SECONDS` (600).
     /// Any value below the floor reverts with `CertTtlBelowMinimum`.
     pub cert_ttl_seconds: Option<i64>,
@@ -51,6 +55,9 @@ pub fn handler(
     }
     if let Some(v) = params.anchor_staleness_seconds {
         cfg.anchor_staleness_seconds = v;
+    }
+    if let Some(v) = params.lp_burn_dust_threshold {
+        cfg.lp_burn_dust_threshold = v;
     }
     if let Some(v) = params.cert_ttl_seconds {
         // Hardcoded floor: governance cannot push cert_ttl below 600s.
