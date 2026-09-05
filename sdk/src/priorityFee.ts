@@ -13,6 +13,9 @@ import type { PriorityFeePolicy } from "./types.js";
 /** Default operational margin ratio: 25% of expected profit. */
 export const DEFAULT_MARGIN_RATIO = 0.25;
 
+/** Basis-point precision used when converting `marginRatio` (a JS number) to BN. */
+const MARGIN_RATIO_PRECISION_BPS = 10_000;
+
 /**
  * Compute the SDK's operational max compute-unit price for a transaction
  * given (a) the protocol Charter ceiling and (b) the salvor's expected
@@ -20,18 +23,29 @@ export const DEFAULT_MARGIN_RATIO = 0.25;
  *
  * The returned value is bounded above by the Charter ceiling. If the
  * computed value would exceed the ceiling, the function returns the ceiling.
+ *
+ * Math runs in BN throughout — `BN.toNumber()` throws for values above
+ * `Number.MAX_SAFE_INTEGER` (~9.0e15), which is reachable for real Solana
+ * lamport amounts. We instead quantise `marginRatio` to a 10_000-bps integer
+ * and multiply/divide in BN.
  */
 export function computeOperationalMaxLamportsPerCu(
   expectedProfitLamports: BN,
   protocolCeilingLamportsPerCu: BN,
   marginRatio: number = DEFAULT_MARGIN_RATIO,
 ): BN {
-  if (marginRatio < 0 || marginRatio > 1) {
-    throw new RangeError("marginRatio must be in [0, 1]");
+  if (!Number.isFinite(marginRatio) || marginRatio < 0 || marginRatio > 1) {
+    throw new RangeError("marginRatio must be a finite number in [0, 1]");
   }
-  const scaledProfit = new BN(
-    Math.floor(expectedProfitLamports.toNumber() * marginRatio),
+  if (expectedProfitLamports.isNeg()) {
+    throw new RangeError("expectedProfitLamports must be non-negative");
+  }
+  const marginBps = new BN(
+    Math.round(marginRatio * MARGIN_RATIO_PRECISION_BPS),
   );
+  const scaledProfit = expectedProfitLamports
+    .mul(marginBps)
+    .div(new BN(MARGIN_RATIO_PRECISION_BPS));
   if (scaledProfit.gt(protocolCeilingLamportsPerCu)) {
     return protocolCeilingLamportsPerCu;
   }
