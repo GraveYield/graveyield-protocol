@@ -61,30 +61,57 @@ jobs:
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      # cargo-binstall fetches a prebuilt anchor-cli binary in ~10s instead
-      # of compiling from source (~5-7 min, which has been intermittently
-      # cancelled on ubuntu-latest runners during the dependency-fetch
-      # phase). Drops total anchor-build job time from ~10 min to ~2 min.
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-      # `--force` is required because Swatinem/rust-cache restores
-      # `~/.cargo/.crates2.json` (the binstall "is-installed" registry)
-      # but does NOT restore `~/.cargo/bin/`. Without `--force`, binstall
-      # finds the cached metadata, reports "already installed", and skips
-      # the actual binary install — leaving subsequent `anchor build`
-      # steps with `command not found`. See:
-      # https://github.com/Swatinem/rust-cache/issues/161
+      # cargo-binstall was the original choice for speed but silently
+      # no-ops on anchor-cli 0.32.x: it exits 0 without installing the
+      # `anchor` binary on PATH (verified across multiple CI runs — the
+      # Install Anchor CLI step reports 0 seconds and success, then
+      # `anchor build` exits in 1 second with "command not found").
+      # cargo install --locked compiles from source (~5-7 min cold, cached
+      # by Swatinem/rust-cache@v2) and reliably places `anchor` in
+      # ~/.cargo/bin. The trailing `anchor --version` is a load-bearing
+      # assertion so future install regressions fail here rather than
+      # leaking to the build step where the symptom is opaque.
       - name: Install Anchor CLI
-        run: cargo binstall --no-confirm --force --version ${ANCHOR_VERSION} anchor-cli
+        run: |
+          cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+          anchor --version
       # Capture anchor build's full output to a file and upload it as a
       # workflow artifact when the job fails — needed because the actual
       # error message is otherwise only visible via the GitHub Actions
       # web UI logs page (the Composio integration this repo uses for
       # programmatic CI inspection does not expose log download).
+      # Solana 3.0.10's bundled platform-tools v1.51 ships cargo 1.84,
+      # which can't parse edition2024 manifests (blake3 0.12, hashbrown,
+      # digest, crypto-common — all transitive deps of Anchor 0.32.1's SPL
+      # deps). cargo-build-sbf 3.0.10's `--tools-version` flag is silently
+      # ignored, and `[workspace.metadata.solana] tools-version = "v1.54"`
+      # isn't honored either, so we replace the cached platform-tools
+      # directory with v1.54 contents (cargo 1.89) before `anchor build`
+      # invokes cargo-build-sbf. The cache key stays `v1.51` because
+      # cargo-build-sbf 3.0.10 hardcodes it.
+      - name: Pin platform-tools v1.54 (edition2024 fix)
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/platform-tools.tar.bz2 \
+            "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+          CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
+          rm -rf "$CACHE_DEST"
+          mkdir -p "$CACHE_DEST"
+          tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
+          "$CACHE_DEST/rust/bin/cargo" --version
+          "$CACHE_DEST/rust/bin/rustc" --version
+      # `anchor build` invokes `cargo-build-sbf` for the BPF compile AND
+      # `anchor idl build` for IDL generation. The IDL step requires a
+      # nightly Rust toolchain (Anchor 0.32.1 hasn't migrated to stable IDL
+      # gen yet). Since this workflow only installs stable, we run with
+      # `--no-idl` and treat IDL generation as a follow-up workstream — it
+      # produces TS client types but isn't a blocker for the on-chain
+      # program. A later PR can add `dtolnay/rust-toolchain@nightly` plus
+      # a dedicated IDL-build step.
       - name: Anchor build
         run: |
           set -o pipefail
-          anchor build 2>&1 | tee /tmp/anchor-build.log
+          anchor build --no-idl 2>&1 | tee /tmp/anchor-build.log
       - name: Upload anchor build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -103,7 +130,7 @@ jobs:
       # (upstream removed the bundled Node in v6). setup-node MUST come
       # first. The previous floating-tag failure at install time was this
       # ordering, not a regression in v6.0.7/v6.0.8.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
       # pnpm/action-setup@v6 auto-detects pnpm version from the
