@@ -30,7 +30,7 @@ idl-build = [
 anchor-debug = []
 
 [dependencies]
-anchor-lang = { workspace = true }
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
 grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
 # SHA-256 hasher for merkle.rs Merkle proof verification. Anchor 0.32
