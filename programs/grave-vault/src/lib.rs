@@ -45,6 +45,7 @@ pub mod constants;
 pub mod cpi;
 pub mod errors;
 pub mod instructions;
+pub mod merkle;
 pub mod state;
 
 use instructions::*;
