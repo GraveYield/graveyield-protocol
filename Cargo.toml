@@ -19,7 +19,7 @@ homepage = "https://graveyield.xyz"
 readme = "README.md"
 
 [workspace.dependencies]
-anchor-lang = "0.32.1"
+anchor-lang = "1.1.2"
 anchor-spl = "0.32.1"
 
 # cargo-build-sbf reads this to pick the platform-tools version for the
