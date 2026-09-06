@@ -42,6 +42,7 @@
 use anchor_lang::prelude::*;
 
 pub mod constants;
+pub mod cpi;
 pub mod errors;
 pub mod instructions;
 pub mod merkle;
@@ -81,7 +82,10 @@ pub mod grave_vault {
     /// Permissionless. Executes a salvage: pre-flight, LP snapshot, CPI to AMM
     /// remove_liquidity, CPI to Jupiter v6 swap, 40/40/20 distribution, and
     /// emits a `SalvageCompleted` event with a SalvageReceipt PDA.
-    pub fn salvage_pool(ctx: Context<SalvagePool>, params: SalvagePoolParams) -> Result<()> {
+    pub fn salvage_pool<'info>(
+        ctx: Context<'_, '_, '_, 'info, SalvagePool<'info>>,
+        params: SalvagePoolParams,
+    ) -> Result<()> {
         instructions::salvage_pool::handler(ctx, params)
     }
 
