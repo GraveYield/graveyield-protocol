@@ -37,4 +37,4 @@ grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
 # dropped the `solana_program::hash` re-export — sha256 now lives in
 # the standalone `solana-sha256-hasher` crate. Pinned at 2.x to match
 # the Solana 3.0.10 stack transitively pulled by anchor-lang 0.32.1.
-solana-sha256-hasher = "2"
+solana-sha256-hasher = "3"
