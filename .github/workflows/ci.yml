@@ -130,7 +130,7 @@ jobs:
       # (upstream removed the bundled Node in v6). setup-node MUST come
       # first. The previous floating-tag failure at install time was this
       # ordering, not a regression in v6.0.7/v6.0.8.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       # pnpm/action-setup@v6 auto-detects pnpm version from the
