@@ -71,6 +71,25 @@ jobs:
       # ~/.cargo/bin. The trailing `anchor --version` is a load-bearing
       # assertion so future install regressions fail here rather than
       # leaking to the build step where the symptom is opaque.
+      # Install system libraries needed by `anchor-cli` 0.32.1's transitive
+      # build deps before `cargo install` recompiles them from source.
+      # `hidapi 2.6.3` (pulled in via anchor-cli → solana-cli →
+      # solana-remote-wallet) runs `pkg-config --libs --cflags libudev` from
+      # its build.rs and panics with "could not find system library 'libudev'
+      # required by the 'hidapi' crate" when the dev headers are missing.
+      # The GitHub-hosted `ubuntu-latest` image ships `libudev1` (runtime) but
+      # NOT `libudev-dev` (headers), so a fresh build from source fails. When
+      # `Swatinem/rust-cache@v2` has a warm anchor-cli binary the build is
+      # skipped and the missing headers are masked — that's why some past runs
+      # passed. The cold path (PRs from forks, cache key rotation, weekly
+      # cache eviction) reliably reproduces the failure seen in run
+      # 37252277928. Install `libudev-dev` (and `libhidapi-dev` as a defensive
+      # measure against future hidapi version bumps that may also probe for
+      # the hidapi system library) before compiling anchor-cli.
+      - name: Install system libraries for anchor-cli build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
       - name: Install Anchor CLI
         run: |
           cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
