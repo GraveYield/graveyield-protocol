@@ -79,7 +79,7 @@ publishing snapshot.
 | Whitepaper v4.0 | [`docs/whitepaper.md`](docs/whitepaper.md) | `docs/published/GraveYield_Whitepaper_v4_0.docx` |
 | Technical Documentation v3.0 | [`docs/technical-documentation.md`](docs/technical-documentation.md) | `docs/published/GraveYield_TechnicalDocumentation_v3_0.docx` |
 | GraveScanner × GraveVault Combined v3.0 | [`docs/grave-scanner-grave-vault-combined.md`](docs/grave-scanner-grave-vault-combined.md) | `docs/published/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx` |
-| Legal Documentation v3.0 | [`docs/legal-documentation.md`](docs/legal-documentation.md) | `docs/published/GraveYield_LegalDocumentation_v3_0.docx` |
+| Legal Documentation v4.0 | [`docs/legal-documentation.md`](docs/legal-documentation.md) | `docs/published/GraveYield_LegalDocumentation_v4_0.docx` |
 | Liquidity Salvage Visual Deck | — | `docs/published/GraveYield_Liquidity_Salvage.pdf` |
 | GhostPools Research WP-2026-001r3 | [`docs/ghostpools-research.md`](docs/ghostpools-research.md) (cover) | `docs/published/GhostPools_Research_Paper_WP-2026-001r3.docx` |
 
