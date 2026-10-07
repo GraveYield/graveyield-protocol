@@ -13,3 +13,4 @@ export * from "./types.js";
 export * from "./priorityFee.js";
 export * from "./certifyAndSalvage.js";
 export * from "./lastSwapAttestation.js";
+export * from "./launchPriceAttestation.js";

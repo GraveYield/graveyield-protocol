@@ -172,6 +172,21 @@ pub enum GraveScannerError {
     /// the future relative to the current slot.
     #[msg("AttestationSlotInvalid: attestation issued_slot is zero or in the future.")]
     AttestationSlotInvalid = 31,
+
+    // ----- v4.3 launch-price attestation error codes (6032..=6033) -----
+    // ORACLE-001 (Phase 1.3, oracle-signed launch-price baseline).
+    /// On-chain code 6032. The attested launch price is zero — a price
+    /// collapse baseline must be strictly positive (C2's drop math is
+    /// undefined for a zero baseline).
+    #[msg("InvalidLaunchPrice: attested launch price is zero.")]
+    InvalidLaunchPrice = 32,
+
+    /// On-chain code 6033. The recorded launch-price baseline belongs to
+    /// a different token pair than the live pool under evaluation — the
+    /// recorded (base_mint, quote_mint) must equal the pool's parsed
+    /// mints before C2 can consume the price.
+    #[msg("LaunchPriceMintMismatch: launch price recorded for a different token pair.")]
+    LaunchPriceMintMismatch = 33,
 }
 
 #[cfg(test)]
@@ -181,9 +196,9 @@ mod tests {
     /// Locks down the on-chain error code numbering against accidental drift.
     ///
     /// Anchor's `#[error_code]` macro adds the default 6000 offset to every
-    /// Rust discriminant. We rely on the discriminants below being 0..=19
+    /// Rust discriminant. We rely on the discriminants below being 0..=33
     /// (with the 12..=14 gap) so the on-chain codes match the documented
-    /// 6000..=6019 range in `docs/error_codes.md`. A future contributor who
+    /// range in `docs/error_codes.md`. A future contributor who
     /// switches to explicit `= 6000`-style discriminants would unknowingly
     /// shift every code by +6000.
     #[test]
@@ -218,6 +233,8 @@ mod tests {
             (GraveScannerError::AttestationStale, 6029),
             (GraveScannerError::AttestationSlotHashMismatch, 6030),
             (GraveScannerError::AttestationSlotInvalid, 6031),
+            (GraveScannerError::InvalidLaunchPrice, 6032),
+            (GraveScannerError::LaunchPriceMintMismatch, 6033),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

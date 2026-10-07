@@ -52,8 +52,9 @@ evaluation instructions. Criterion 1 consumes an indexer-signed Ed25519
 attestation verified in-transaction against the protocol activity oracle
 (`ProtocolConfig.activity_oracle`) — see the evidence-status table in
 [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 and decision D8. Criterion 2
-currently consumes a caller-supplied launch price pending the
-ORACLE-001 blocker. Criterion 6 is the
+consumes an oracle-signed Ed25519 launch-price attestation verified
+in-transaction against the dedicated launch-price oracle
+(`ProtocolConfig.launch_price_oracle`) — see decision D9. Criterion 6 is the
 v4.0 addition: a Phase 1 `EligibilityAnchor` PDA records the first epoch
 in which all five other criteria pass; a Phase 2 `EligibilityCert` PDA can
 only be issued ≥ 2 epochs later, after re-verification. This forecloses a

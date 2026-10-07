@@ -303,6 +303,64 @@ mod tests {
         assert!(evaluate(&inputs, &default_thresholds(), Phase::One).is_err());
     }
 
+    /// Roadmap 1.3 "zero/near-zero values": a zero launch price can never
+    /// define a collapse baseline. The Phase 1.3 attestation path rejects
+    /// zero at record time (`InvalidLaunchPrice`, 6032); this evaluator
+    /// check is the second, independent layer.
+    #[test]
+    fn criterion_two_rejects_zero_launch_price() {
+        let mut inputs = passing_inputs();
+        inputs.launch_price_q64x64 = 0;
+        let err = evaluate(&inputs, &default_thresholds(), Phase::One).unwrap_err();
+        assert_err(err, GraveScannerError::LaunchPriceNotFound);
+    }
+
+    /// Roadmap 1.3 "extreme price cases": the minimum representable
+    /// non-zero Q64.64 price (1) is handled exactly — total collapse to
+    /// zero passes at the clamp ceiling, any current ≥ launch fails.
+    #[test]
+    fn compute_drop_bps_handles_minimum_representable_price() {
+        assert_eq!(compute_drop_bps(1, 0).unwrap(), 10_000);
+        assert_eq!(compute_drop_bps(1, 1).unwrap(), 0);
+        assert_eq!(compute_drop_bps(1, 2).unwrap(), 0);
+    }
+
+    /// Roadmap 1.3 "extreme price cases": a large-but-representable price
+    /// (2^100 Q64.64 — far beyond any real reserve ratio) still computes
+    /// an exact 10_000 bps drop with no overflow.
+    #[test]
+    fn compute_drop_bps_handles_large_representable_price() {
+        let launch = 1u128 << 100;
+        assert_eq!(compute_drop_bps(launch, 0).unwrap(), 10_000);
+        assert_eq!(compute_drop_bps(launch, launch / 4).unwrap(), 7_500);
+    }
+
+    /// Roadmap 1.3 "extreme price cases": the absolute maximum price
+    /// representable by real u64 vault reserves (`u64::MAX << 64`) makes
+    /// the `delta × 10_000` intermediate overflow u128. The failure is
+    /// FAIL-CLOSED (`MathOverflow` revert — never a false pass). This is
+    /// a documented v1.0 boundary (spec §6.4): pools launched above a
+    /// ~2^114.6 Q64.64 quote-per-base ratio cannot complete C2 evaluation
+    /// and are uncertifiable, not mis-certifiable.
+    #[test]
+    fn compute_drop_bps_beyond_real_reserve_scale_fails_closed() {
+        let launch = (u64::MAX as u128) << 64;
+        assert_eq!(
+            compute_drop_bps(launch, 0).unwrap_err(),
+            GraveScannerError::MathOverflow.into()
+        );
+        // Just below the overflow boundary the math stays exact: the
+        // largest safe launch price is one where delta × 10_000 fits
+        // u128, i.e. launch ≤ u128::MAX / 10_000.
+        let max_safe = u128::MAX / 10_000;
+        assert_eq!(compute_drop_bps(max_safe, 0).unwrap(), 10_000);
+        // One unit above the safe boundary overflows again.
+        assert_eq!(
+            compute_drop_bps(max_safe + 1, 0).unwrap_err(),
+            GraveScannerError::MathOverflow.into()
+        );
+    }
+
     #[test]
     fn criterion_three_rejects_pool_below_min_tvl() {
         let mut inputs = passing_inputs();

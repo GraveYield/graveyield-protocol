@@ -55,6 +55,15 @@ pub struct ProtocolConfig {
     /// via `update_protocol_config`.
     pub activity_oracle: Pubkey,
 
+    /// Public key whose Ed25519 signatures authorize Criterion 2
+    /// launch-price attestations (ORACLE-001, Phase 1.3 / spec D9). Kept
+    /// separate from `activity_oracle`: the launch-price baseline is
+    /// init-once and permanently binding, so its signing key is isolated
+    /// from the hotter activity-attestation key. Set to the initial
+    /// authority at `initialize`; rotatable independently via
+    /// `update_protocol_config`.
+    pub launch_price_oracle: Pubkey,
+
     /// Bump for ['protocol_config'] PDA.
     pub bump: u8,
 

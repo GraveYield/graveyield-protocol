@@ -9,8 +9,10 @@ Test plan (m1+):
 - `tests/grave-scanner/` — Phase 1/Phase 2 evaluation flows, multi-epoch gating,
   `invalidate_anchor`, `sweep_stale_anchor` rent recovery, error-code coverage,
   locker-evidence supply (marker PDA + TokenLock enumeration) for both phases,
-  and last-swap attestation supply (ed25519 verify instruction + 112-byte
-  message + SlotHashes-anchored freshness) for both phases.
+  launch-price attestation supply (ed25519 verify instruction + 168-byte
+  message) for `record_launch_price`, and last-swap attestation supply
+  (ed25519 verify instruction + 112-byte message + SlotHashes-anchored
+  freshness) for both phases.
 - `tests/grave-vault/` — `salvage_pool` happy path against a mocked Raydium V4
   pool, 40 / 40 / 20 distribution math, `claim_lp_proceeds` Merkle proofs,
   emergency-pause semantics. (Priority-fee ceiling enforcement is SDK-side
@@ -20,11 +22,16 @@ Test plan (m1+):
   Scanner → Vault handshake on `solana-test-validator`.
 
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`):
-56 total — 41 pre-existing (criteria 14, raydium_v4 layout 4, scanner errors 1,
-vault merkle 7, vault errors 1, plus 14 Phase 1.1 locker-adapter tests) + 15
-attestation-module tests (stale pool, recently active pool, and every
-manipulated-timestamp vector) including the expanded error-code lock test
-covering 6024–6031.
+85 total — scanner 76 (criteria 18 incl. the Phase 1.3 zero-baseline and
+extreme-price boundary tests, attestation 31: 16 last-swap [Phase 1.2] +
+15 launch-price [Phase 1.3], adapters 25: raydium_v4 layout 4 + locker 21
+[Phase 1.1], errors 1: the on-chain code lock test covering 6000–6033,
+plus anchor's `test_id`) and vault 9 (merkle 7 + errors 1 + `test_id`;
+the merkle tests require the `solana-sha256-hasher` `sha2`
+dev-dependency feature on host builds). Every manipulated-baseline
+vector — wrong oracle key, moved message offset, pool/mint/price binding
+mismatch, zero price, zero/future first-swap timestamp and slot,
+zero/future issued slot, truncated instruction data — is covered.
 
 Run:
 

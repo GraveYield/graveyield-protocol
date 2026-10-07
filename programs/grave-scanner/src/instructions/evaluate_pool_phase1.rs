@@ -119,6 +119,16 @@ pub fn handler(ctx: Context<EvaluatePoolPhase1>, params: EvaluatePoolPhase1Param
         ctx.remaining_accounts,
     )?;
 
+    // Criterion 2 integrity (ORACLE-001, Phase 1.3 / spec D9): the
+    // recorded launch-price baseline must belong to the same token pair
+    // as the live pool. A record made for a different pair can never
+    // feed the C2 collapse math — fail closed here.
+    require!(
+        ctx.accounts.launch_price.base_mint == pool_data.base_mint
+            && ctx.accounts.launch_price.quote_mint == pool_data.quote_mint,
+        GraveScannerError::LaunchPriceMintMismatch
+    );
+
     // Locker introspection. v1.0 supports the UNCX Raydium V4 locker
     // (LOCKER-001, Phase 1.1): the per-pool marker PDA gates the check —
     // absent on chain = no lock ever created (proven zero); present =

@@ -104,19 +104,28 @@ export function parseAttestationMessage(bytes: Uint8Array): LastSwapAttestation 
  *
  * Layout (110 bytes): Ed25519SignatureOffsets header (14B) + signature
  * (64B) + oracle public key (32B). The message offsets point at
- * `IX_DATA_MSG_OFFSET` inside the GraveScanner instruction at
+ * `messageAddressOffset` inside the GraveScanner instruction at
  * `scannerInstructionIndex`, so the runtime-verified signature covers
  * exactly the attestation bytes embedded in the scanner instruction.
+ *
+ * The default offset targets the C1 last-swap attestation
+ * (`IX_DATA_MSG_OFFSET` = 72). The C2 launch-price attestation embeds its
+ * 168-byte message at offset 152 and passes
+ * `messageAddressOffset: LAUNCH_PRICE_MSG_OFFSET` instead (see
+ * `launchPriceAttestation.ts`) — the precompile wire format is identical.
  */
 export function buildEd25519VerifyInstruction(opts: {
   /** 64-byte Ed25519 signature over the attestation message. */
   signature: Uint8Array;
   /** The activity oracle public key that produced the signature. */
   oraclePublicKey: PublicKey;
-  /** The 112-byte attestation message (for length validation). */
+  /** The attestation message (for length validation). */
   message: Uint8Array;
   /** Index of the GraveScanner instruction within the transaction. */
   scannerInstructionIndex: number;
+  /** Offset of the signed message inside the GraveScanner instruction
+   *  data. Defaults to `IX_DATA_MSG_OFFSET` (72). */
+  messageAddressOffset?: number;
 }): TransactionInstruction {
   if (opts.signature.length !== 64) {
     throw new Error("signature must be exactly 64 bytes");
@@ -127,11 +136,15 @@ export function buildEd25519VerifyInstruction(opts: {
   if (opts.scannerInstructionIndex < 0 || opts.scannerInstructionIndex > 0xfffe) {
     throw new Error("scannerInstructionIndex out of range");
   }
+  const messageAddressOffset = opts.messageAddressOffset ?? IX_DATA_MSG_OFFSET;
+  if (messageAddressOffset < 0 || messageAddressOffset > 0xffff) {
+    throw new Error("messageAddressOffset out of range");
+  }
   const data = Buffer.alloc(PRECOMPILE_PK_OFFSET + 32);
   const w = (off: number, v: number) => data.writeUInt16LE(v, off);
   w(0, PRECOMPILE_SIG_OFFSET); // signature_offset
   w(2, CUR_INSTRUCTION_INDEX); // signature_instruction_index
-  w(4, IX_DATA_MSG_OFFSET); // message_address_offset
+  w(4, messageAddressOffset); // message_address_offset
   w(6, opts.scannerInstructionIndex); // message_instruction_index
   w(8, 1); // num_signatures
   w(10, PRECOMPILE_PK_OFFSET); // public_key_offset
