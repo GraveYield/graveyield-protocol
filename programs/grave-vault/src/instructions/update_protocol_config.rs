@@ -8,6 +8,12 @@
 // The timelock itself is enforced by the multisig (Squads v4) via its
 // transaction-buffer scheduling; this instruction trusts that scheduling and
 // validates the new values on apply.
+//
+// PRE-MAINNET-TODO(GOV): pending_authority, pending_authority_eta, and
+// timelock_seconds are write-only reserved state — no instruction reads them
+// and TimelockNotElapsed is never raised | reverts: none | verify: either wire
+// an on-chain timelock or explicitly document these fields as reserved before
+// mainnet (PROTOCOL_SPEC.md D2)
 
 use anchor_lang::prelude::*;
 

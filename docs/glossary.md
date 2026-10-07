@@ -9,9 +9,9 @@ terminology lint enforced by CI (`scripts/terminology-lint.sh`).
 |------|---------|
 | **salvage** (n., v.) | The act of permissionlessly settling a derelict pool: removing LP, swapping the recovered tokens, and distributing proceeds 40 / 40 / 20. |
 | **salvor** | The actor performing a salvage. **A finder under maritime salvage law** — not a savior, not a rescuer. |
-| **derelict pool** | An AMM liquidity pool that meets all six eligibility criteria (long inactivity, ≥99% price collapse, low TVL, no LP burn, no LP lock, multi-epoch confirmation). |
+| **derelict pool** | An AMM liquidity pool that meets all six eligibility criteria (long inactivity, ≥99% price collapse, minimum residual TVL at or above the floor, no LP burn, no LP lock, multi-epoch confirmation). |
 | **EligibilityAnchor** | On-chain PDA written by Phase 1 of `evaluate_pool` recording `first_eligible_epoch`. |
-| **EligibilityCert** | On-chain PDA written by Phase 2 of `evaluate_pool` after multi-epoch confirmation. TTL = 1 hour. Consumed by `salvage_pool`. |
+| **EligibilityCert** | On-chain PDA written by Phase 2 of `evaluate_pool` after multi-epoch confirmation. TTL = `ProtocolConfig.cert_ttl_seconds` (default 1 hour; governance-configurable, floored at 10 minutes). Consumed by `salvage_pool`. |
 | **SalvageReceipt** | On-chain PDA issued at the end of a successful `salvage_pool` recording the 40/40/20 distribution. |
 | **`salvage_pool`** | The GraveVault instruction that executes a salvage. |
 | **`SalvageCompleted`** | The Anchor event emitted on the final state transition of `salvage_pool`. |

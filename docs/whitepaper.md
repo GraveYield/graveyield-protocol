@@ -13,8 +13,8 @@ GraveYield is the settlement layer for **derelict liquidity** on Solana.
 It is settlement infrastructure under maritime salvage framing — not a
 discretionary intervention. When an AMM liquidity pool crosses all six
 derelict-pool criteria — long inactivity, ≥99% price collapse from
-launch, residual TVL below threshold, LP not burned, LP not locked, and
-multi-epoch confirmation — anyone may permissionlessly settle the pool by
+launch, minimum residual TVL at or above the floor (0.5 SOL), LP not
+burned, LP not locked, and multi-epoch confirmation — anyone may permissionlessly settle the pool by
 removing the LP, swapping the recovered tokens, and distributing the
 proceeds 40 / 40 / 20 to the original LP holders, the salvor, and the
 protocol.
@@ -42,12 +42,16 @@ distribution is on-chain, and compensation is by formula.
 |---|-----------|-------------------|
 | 1 | Trading inactivity | ≥ 90 days since last swap |
 | 2 | Price collapse from launch | ≥ 99% in basis points (9_900 bps) |
-| 3 | Residual TVL | < 0.5 SOL |
+| 3 | Minimum residual TVL | ≥ 0.5 SOL (quote-side vault balance) |
 | 4 | LP not burned | (boolean) |
 | 5 | LP not locked | (boolean) |
 | 6 | Multi-epoch confirmation | ≥ 2 consecutive Solana epochs |
 
-Criteria 1-5 are evaluated against on-chain pool state. Criterion 6 is the
+Criteria 3–6 are evaluated against on-chain state read inside the
+evaluation instructions. Criteria 1 and 2 currently consume
+caller-supplied inputs (last-swap timestamp, launch price) pending the
+ORACLE-002 / ORACLE-001 blockers — see the evidence-status table in
+[`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5. Criterion 6 is the
 v4.0 addition: a Phase 1 `EligibilityAnchor` PDA records the first epoch
 in which all five other criteria pass; a Phase 2 `EligibilityCert` PDA can
 only be issued ≥ 2 epochs later, after re-verification. This forecloses a
@@ -75,7 +79,9 @@ asserted at every relevant code path:
 
 - 20% protocol share is a ceiling, not a target.
 - `lp_holder_pool_vault` is unsweepable by any admin key, ever.
-- 72h timelock on all parameter changes.
+- 72h timelock on all parameter changes (multisig-enforced via Squads
+  transaction buffers; not program-enforced in v1.0 — see
+  [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D2).
 - 7-day public notice on standard upgrades.
 - 24h timelock + 5-day public post-mortem on emergency upgrades.
 - `claim_lp_proceeds` stays live during emergency pause.

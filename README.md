@@ -89,7 +89,8 @@ These are **Charter-level prohibitions** — governance cannot raise or remove t
 
 - **20% protocol share is a ceiling**, not a target. Cannot be increased.
 - **`lp_holder_pool_vault` is unsweepable** by any admin key, ever.
-- **72h timelock** on all parameter changes; **7-day public notice** on standard upgrades.
+- **72h timelock** on all parameter changes (multisig-enforced via Squads
+  transaction buffers; not program-enforced in v1.0); **7-day public notice** on standard upgrades.
 - **Emergency upgrades** require 24h timelock and a 5-day post-mortem.
 - **Squads v4 multisig** 3-of-5 at launch, scaling to 4-of-7 post-audit.
 - **No token, NFT, points, airdrop, or staking** at any layer.

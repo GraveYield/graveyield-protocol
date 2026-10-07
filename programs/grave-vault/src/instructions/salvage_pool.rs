@@ -96,6 +96,14 @@ pub struct SalvagePoolParams {
     /// Optional per-tx slippage override (in bps). If `Some`, the effective
     /// slippage cap is `min(override, config.max_slippage_bps)`. Defaults
     /// to the protocol config value.
+    ///
+    /// PRE-MAINNET-TODO(SLIP): this parameter is declared but never read, as are
+    /// config.max_slippage_bps and HARD_MAX_SLIPPAGE_BPS — v1.0 on-chain
+    /// enforcement is exactly the Jupiter-leg floor
+    /// (min_quote_output_lamports) below | reverts: SlippageExceeded
+    /// (Jupiter-leg floor only) | verify: wire the global slippage ceiling or
+    /// remove the dead fields before mainnet; docs must not claim a
+    /// protocol-enforced global ceiling until then (PROTOCOL_SPEC.md D4)
     pub max_slippage_bps_override: Option<u16>,
     /// Number of `route_accounts` for the Jupiter swap — first N accounts
     /// in `remaining_accounts` after the Raydium V4 portion. The Raydium
@@ -437,6 +445,13 @@ pub fn handler<'info>(
         // Dust below threshold — emit log so the indexer can flag it but
         // don't revert. Memecoin balance remains in the vault token
         // account; rent-reclaim is a follow-up admin path (not m5).
+        //
+        // PRE-MAINNET-TODO(DUST): retained memecoin has no closure, sweep, or
+        // recovery path and the SalvageReceipt carries no field for it |
+        // reverts: none (logged and skipped; BelowDustThreshold is reserved
+        // and never raised) | verify: define the dust policy (ATA closure /
+        // sweep destination / receipt field) in Phase 4 before mainnet
+        // (PROTOCOL_SPEC.md D6)
         msg!(
             "salvage_pool: memecoin {} below dust threshold {}; skipping Jupiter swap",
             removal.memecoin_received,
