@@ -9,7 +9,20 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.4.0 — Phase 1.4: EligibilityCert lifecycle fixed
+> **Revisions:** rev 1.5.0 — Phase 2.1: Raydium V4 withdraw CPI proven and
+> fixed against the deployed mainnet bytecode (CPI-009 retired). Breaking
+> changes to `salvage_pool`: the LP is now burned **in place** in the
+> salvor's token account (the salvor signs the salvage transaction and acts
+> as the withdraw's `user_owner`); the vault LP ATA and the deposit step are
+> removed; the withdraw CPI carries 13 `remaining_accounts` (amm_authority,
+> open orders, target orders, both AMM vaults, market program, market, both
+> market vaults, market vault signer, event queue, bids, asks) plus two new
+> named accounts (`amm_program`, `jupiter_program`); the CPI's account list
+> must contain the callee program. Verified end-to-end (real LP burn + real
+> reserve transfers + real 40/40/20 settlement) against real mainnet
+> Raydium V4 / OpenBook / SPL-token bytecode in the
+> `solana-program-test` fork harness (§3, §6.1, §8 row 10, §9).
+> rev 1.4.0 — Phase 1.4: EligibilityCert lifecycle fixed
 > (B4): the Phase 2 cert PDA is expiry-gated reissuable in place
 > (`init_if_needed` + `CertStillValid` gate, new `reissue_generation`
 > counter, new error 6034; §2, §2.1, §3, §6.1/6.4, §7 D10, §8 row 9
@@ -51,7 +64,8 @@ terms used normatively in this file:
   formula, with no discretion.
 - **derelict pool** — an AMM liquidity pool for which all six criteria in
   §4 hold simultaneously.
-- **salvage** — the act of settling a derelict pool: deposit-and-burn LP,
+- **salvage** — the act of settling a derelict pool: burn LP in place in the
+  salvor's account,
   withdraw underlying tokens, convert to WSOL/SOL, distribute 40/40/20.
 - **EligibilityAnchor** — Phase 1 PDA recording `first_eligible_epoch`.
 - **EligibilityCert** — Phase 2 PDA authorising one salvage window.
@@ -245,7 +259,8 @@ LP mint's SPL supply field.
 
 **C5 — LP not locked.**
 `lp_locked_amount == 0` — exactly zero. One locked smallest unit fails
-the pool. Locked LP cannot be deposited and burned by the salvor, so any
+the pool. Locked LP cannot be withdrawn by the salvor (the withdraw burns
+the salvor's own LP balance in place), so any
 lock makes settlement impossible. Evidence status: implemented in Phase
 1.1 for the UNCX Raydium V4 locker (see §5); other lockers are out of
 v1.0 scope (LOCKER-002).
@@ -374,8 +389,9 @@ violate it).
 | Expired certs never brick a pool; two live certs per pool are impossible | Phase 2 reissues the cert PDA in place once `expires_at` has passed (`init_if_needed`); a live cert cannot be overwritten (`CertStillValid`, 6034); `reissue_generation` counts issues (D10). |
 | Cert freshness and binding | `salvage_pool` rejects expired certs, foreign pools, foreign AMM IDs, non-`0x3F` bitmaps. |
 | One salvage per pool, ever | `PoolRegistry` + `SalvageReceipt` init-on-PDA. |
-| LP is deposited before it is burned | Salvor-signed SPL transfer into the vault LP ATA; withdraw burns the full vault balance. |
-| Vault-side CPI authority | `vault_authority` singleton PDA signs every CPI and distribution; no caller key can move pool assets. |
+| LP is burned in place in the salvor's account | The withdraw CPI burns `salvor_lp_amount` from the salvor's LP account (the salvor signs the salvage transaction and is the withdraw's `user_owner`); the deployed Raydium V4 program enforces the burn amount against the signer's balance. Proven end-to-end against real mainnet V4 bytecode by the fork harness (CPI-009 retired). |
+| Vault-side CPI authority | `vault_authority` singleton PDA signs the Jupiter swap and every distribution; no caller key can move pool assets. (The V4 withdraw needs no vault signature: it burns the salvor's own LP and pays into vault-owned accounts.) |
+| Raydium V4 withdraw wire format is correct | 22-account ordering + 9-byte data proven against the deployed mainnet V4 bytecode: the fork harness executes a real LP burn and real reserve transfers end-to-end, and scrambled/malicious account submissions are rejected by the real program (CPI-009 retired). |
 | WSOL-only base token | `wsol_mint` address-pinned to the network constant. |
 | Snapshot consistency | `lp_total_supply_at_snapshot` must equal the live LP mint supply (`InvalidSnapshotData`). |
 | 40/40/20 shares sum to 10_000 bps; protocol share ≤ 20% | Re-checked in `salvage_pool` and in `update_protocol_config`; ceiling is a `const`. |

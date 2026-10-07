@@ -64,7 +64,6 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | CPI-006 | `programs/grave-vault/src/cpi/raydium_clmm.rs` | 🟧 | Raydium CLMM (concentrated liquidity) `remove_liquidity` CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
 | CPI-007 | `programs/grave-vault/src/cpi/orca_whirlpool.rs` | 🟧 | Orca Whirlpool position-burn CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
 | CPI-008 | `programs/grave-vault/src/cpi/pump_swap.rs` | 🟧 | PumpSwap `remove_liquidity` CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
-| CPI-009 | `programs/grave-vault/src/cpi/raydium_v4.rs` | 🟥 | Verify Raydium V4 withdraw account ordering against a live mainnet pool (e.g. `9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2`) via `solana-program-test` fork test before mainnet. The `amm_authority` constant check catches an obviously-wrong layout but not subtle swaps. |
 | CPI-010 | `programs/grave-vault/src/instructions/salvage_pool.rs` | 🟥 | Base-token orientation is hardcoded `base_is_coin_side = true` (marker present at the orientation comment). v1.0 is frozen WSOL-base-only (spec D5): `wsol_mint` is address-pinned, but a pool with WSOL on the PC side, or no WSOL side at all, is not rejected in pre-flight — it fails inside the Raydium CPI as `AmmRedemptionFailed`. Derive orientation from on-chain mints and raise `UnsupportedBaseToken` explicitly. |
 
 ### LOCKER (additional lockers)
@@ -119,6 +118,7 @@ after the PR lands so the row can be tagged to its exact post-merge SHA.
 | ID | File | Retired by | Merge SHA |
 | --- | --- | --- | --- |
 | CPI-001 | `programs/grave-scanner/src/adapters/raydium_v4.rs` | PR #13 (m4: Raydium V4 layout adapter) | `<filled by post-merge fix-up commit>` |
+| CPI-009 | `programs/grave-vault/src/cpi/raydium_v4.rs` | Phase 2.1 fork harness (`programs/grave-vault/tests/raydium_v4_fork.rs`). The Raydium V4 withdraw is proven against the real mainnet bytecode: real LP burn + real reserve transfers execute end-to-end through `salvage_pool`, and scrambled / forged / malicious account submissions are rejected by the deployed V4 program. Three latent defects were found and fixed by this work: the CPI sent 18 accounts where the deployed withdraw requires 22 (padding slots at positions 8/9, filled with the pool account — live traffic verified via `scripts/probe_v4_withdraw_order.mjs`); `pool` and `lp_mint` were passed read-only while the withdraw mutates them (PrivilegeEscalationAttempt); the CPI account list lacked the callee program account (MissingAccount). Note: the original example address `9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2` is a Raydium **CLMM** pool, not V4; the harness uses the canonical V4 SOL/USDC pool `58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2`. The withdraw also burns the salvor's LP in place (salvor = `user_owner`) instead of the removed vault-LP deposit step. | `<filled by post-merge fix-up commit>` |
 
 ## Audit handoff
 

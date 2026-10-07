@@ -51,6 +51,9 @@ pnpm-debug.log*
 coverage/
 *.lcov
 
+# Fork-harness fixtures (fetched by scripts/fetch_v4_fork_fixtures.mjs)
+programs/grave-vault/tests/fixtures/
+
 # Misc
 .cache/
 tmp/
