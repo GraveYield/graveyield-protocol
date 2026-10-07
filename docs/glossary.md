@@ -11,7 +11,7 @@ terminology lint enforced by CI (`scripts/terminology-lint.sh`).
 | **salvor** | The actor performing a salvage. **A finder under maritime salvage law** — not a savior, not a rescuer. |
 | **derelict pool** | An AMM liquidity pool that meets all six eligibility criteria (long inactivity, ≥99% price collapse, minimum residual TVL at or above the floor, no LP burn, no LP lock, multi-epoch confirmation). |
 | **EligibilityAnchor** | On-chain PDA written by Phase 1 of `evaluate_pool` recording `first_eligible_epoch`. |
-| **EligibilityCert** | On-chain PDA written by Phase 2 of `evaluate_pool` after multi-epoch confirmation. TTL = `ProtocolConfig.cert_ttl_seconds` (default 1 hour; governance-configurable, floored at 10 minutes). Consumed by `salvage_pool`. |
+| **EligibilityCert** | On-chain PDA written by Phase 2 of `evaluate_pool` after multi-epoch confirmation. TTL = `ProtocolConfig.cert_ttl_seconds` (default 1 hour; governance-configurable, floored at 10 minutes). Consumed by `salvage_pool`. Reissued in place by a later Phase 2 run once expired (spec D10): a live cert cannot be overwritten (`CertStillValid`, 6034), so two live certs for one pool are impossible; `reissue_generation` counts issues. |
 | **SalvageReceipt** | On-chain PDA issued at the end of a successful `salvage_pool` recording the 40/40/20 distribution. |
 | **`salvage_pool`** | The GraveVault instruction that executes a salvage. |
 | **activity oracle** | The governance-controlled public key (`ProtocolConfig.activity_oracle`) whose Ed25519 signatures authorize Criterion 1 last-swap attestations. Initialised to the protocol authority; rotatable via `update_protocol_config`. Derivation honesty and service availability are operator-enforced (spec §6.3 / D8). |

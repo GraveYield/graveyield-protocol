@@ -26,7 +26,13 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 
 [dependencies]
-anchor-lang = { workspace = true }
+# `init-if-needed` powers the D10 cert lifecycle: `evaluate_pool_phase2`
+# creates the EligibilityCert PDA with `init_if_needed` and reissues it
+# in place once expired (the handler's expiry gate + full-field rewrite
+# are the reinitialization-attack mitigations — see
+# instructions/evaluate_pool_phase2.rs and spec D10). Same pattern the
+# vault already uses for its PDAs.
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
 
 [dev-dependencies]
