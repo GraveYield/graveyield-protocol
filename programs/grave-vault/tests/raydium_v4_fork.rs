@@ -18,14 +18,22 @@
 //   3. the salvor's lamports.
 //
 // What this PROVES (the acceptance bar for CPI-009):
-//   - the vault's 20-account withdraw ordering is accepted by the deployed
+//   - the vault's 22-account withdraw ordering is accepted by the deployed
 //     Raydium V4 bytecode (a real LP burn + real reserve transfers execute),
-//   - `vault_authority` PDA-signs as `user_owner` for the burn,
+//   - the salvor signs as `user_owner` (their outer-transaction signature
+//     propagates through the vault's CPI),
 //   - LP supply decreases by exactly the burned amount,
 //   - balance deltas land in the right vault accounts and settle 40/40/20,
 //   - scrambled / malicious account submissions are rejected — by the vault's
 //     pre-flight where the vault is the defence, and by the real Raydium V4
 //     program where V4 is.
+//
+// NOTE (Phase 3): the Jupiter conversion pipeline is exercised by the
+// SIBLING harness `tests/jupiter_conversion_fork.rs` (dust threshold at the
+// protocol default, real V4 swapBaseIn through a test-only Jupiter stand-in
+// at the pinned Jupiter v6 program id). This file keeps the dust threshold
+// at u64::MAX so the conversion leg is skipped, exactly as shipped in
+// Phase 2.1 — it remains the regression lock for the withdraw CPI.
 //
 // Fixtures are fetched once via `scripts/fetch_v4_fork_fixtures.mjs` (they
 // are gitignored). Without them the tests SKIP with a message so CI stays

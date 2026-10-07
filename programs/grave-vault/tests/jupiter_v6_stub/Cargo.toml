@@ -1,0 +1,15 @@
+[package]
+name = "jupiter_v6_stub"
+description = "TEST-ONLY Jupiter v6 stand-in for the Phase 3 fork harness. Deploys at the pinned Jupiter v6 program id inside the in-process VM and executes a real Raydium V4 swapBaseIn CPI. Never deployed anywhere."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "jupiter_v6_stub"
+
+[dependencies]
+solana-program = "2.3"

@@ -9,7 +9,24 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.5.0 — Phase 2.1: Raydium V4 withdraw CPI proven and
+> **Revisions:** rev 1.6.0 — Phase 3: the Jupiter conversion pipeline proven
+> end-to-end in the fork harness (real withdraw + real V4 swapBaseIn against
+> byte-for-byte mainnet state of BOTH orientations — SOL/USDC coin=WSOL and
+> RAY/WSOL pc=WSOL — through a documented test-only stand-in deployed at the
+> pinned Jupiter v6 program id; the vault forwards routes verbatim and
+> assumes nothing about route internals). `salvage_pool` changes: base
+> orientation is DERIVED from the pool's on-chain AmmInfo mints
+> (`UnsupportedBaseToken` 7019 before any CPI for no-WSOL pools — CPI-010
+> retired) and the submitted `lp_mint`/`memecoin_mint` are bound to the
+> pool's own bytes; the protocol slippage ceiling is live (SLIP-001
+> retired): `config.max_slippage_bps`, `HARD_MAX_SLIPPAGE_BPS` and
+> `max_slippage_bps_override` are read, and the submitted floor must cover
+> the pool-implied conversion minus the effective cap BEFORE the swap CPI;
+> route-account vetting (D4 amendment): no route account may reference a
+> vault custody/state account and the vault's WSOL destination must be
+> present (N1 closed). No instruction-data shape change (the
+> `max_slippage_bps_override` parameter gained semantics; the wire layout
+> is unchanged). rev 1.5.0 — Phase 2.1: Raydium V4 withdraw CPI proven and
 > fixed against the deployed mainnet bytecode (CPI-009 retired). Breaking
 > changes to `salvage_pool`: the LP is now burned **in place** in the
 > salvor's token account (the salvor signs the salvage transaction and acts
@@ -154,10 +171,13 @@ evaluate_pool_phase_2 ── six criteria re-pass AND bitmap == anchor? ──> 
 salvage_pool:
   pre-flight: !paused; cert fresh; cert bitmap == 0x3F;
               cert binds (amm_program_id, pool_address); pool key matches
-  execute:   lazy-init system PDAs -> LP transfer salvor -> vault ->
-             Raydium V4 withdraw (full vault LP balance) ->
-             [memecoin >= dust threshold ? Jupiter v6 swap memecoin->WSOL
-              + swap-leg floor check : skip and log] ->
+  execute:   lazy-init system PDAs -> derive base orientation from the
+             pool's own mints (7019 if neither/both side is WSOL) + bind
+             submitted lp_mint/memecoin_mint to the pool bytes ->
+             Raydium V4 withdraw (burns the salvor's LP in place) ->
+             [memecoin >= dust threshold ? route-account vetting +
+              slippage ceiling on the submitted floor + Jupiter v6 swap
+              memecoin->WSOL + swap-leg floor check : skip and log] ->
              close vault WSOL ATA -> lamports into vault_sol_holding ->
              40/40/20 distribution (remainder -> protocol) ->
              PoolRegistry + SalvageReceipt + events
@@ -420,7 +440,7 @@ violate it).
 | Guarantee | Mechanism | Notes |
 |---|---|---|
 | Priority-fee ceiling | SDK `shouldRejectFee` + operational max `min(margin-ratio × expected profit, ceiling)` (default margin 25%) | A callee program cannot enforce a compute-unit price; the fee is paid by the transaction payer before program execution. `ProtocolConfig.max_priority_fee_ceiling_lamports` (default 1 SOL lamports/CU) is **advisory** config consumed by SDKs (D3). |
-| Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | On-chain, only the swap-leg floor is enforced. A route whose internal destination is not the vault WSOL ATA, and a floor of `0`, are **not** rejected by v1.0 code — tracked as SLIP-001/CPI-011 in the checklist (D4). |
+| Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | **On-chain (Phase 3):** the route is forwarded verbatim (no route-plan parsing), but every route account is vetted — none may reference a vault custody/state account — and the vault's WSOL destination must be present; the submitted floor must cover the pool-implied conversion minus the protocol slippage ceiling (SLIP-001 retired, D4); the swap-leg floor re-checks the delivered amount post-CPI. Proven against real bytecode for both orientations by the Phase 3 fork harness. |
 | Honest snapshot and Merkle tree construction | Off-chain snapshotter (Phase 5) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. |
 | Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
 | Activity-oracle honesty and availability (C1) | Off-chain indexer derives the last-swap time from Raydium V4 transaction history (`sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and signs attestations with `activity_oracle` | On-chain verification is cryptographic but cannot re-derive swap history itself (Raydium V4 `AmmInfo` stores no last-swap field; `SlotHashes` spans ≈ 512 slots). A buggy or colluding oracle could attest a wrong timestamp; the oracle key is governance-held and rotatable. Oracle downtime blocks new evaluations (availability, not integrity). ORACLE-003 in the checklist tracks the operational runbook. |
@@ -429,8 +449,11 @@ violate it).
 
 ### 6.4 Explicitly NOT guaranteed in v1.0
 
-- No global protocol-enforced slippage ceiling across both legs (only
-  the Jupiter-leg floor; see D4).
+- No protocol-enforced ceiling on how much BELOW the pool-implied price a
+  submitted conversion floor may sit relative to off-chain venues — the
+  ceiling is anchored to the salvaged pool's own post-withdraw reserve
+  ratio (see D4). Pools where a better route exists off-pool are
+  unaffected (better routes pass).
 - No on-chain timelock on config changes (see D2).
 - No recovery path for memecoin dust below the Jupiter dust threshold
   within the same salvage (retained in the vault memecoin ATA, logged;
@@ -481,22 +504,36 @@ above `min(ceiling, margin-ratio × expected profit)`. Error 7008
 (`PriorityFeeExceedsCeiling`) is reserved for a future design that can
 actually observe fees (it is never raised today).
 
-**D4 — Slippage model.** v1.0 on-chain enforcement is exactly one check:
-the Jupiter-leg floor `swap_output − raydium_base_received ≥
-min_quote_output_lamports` (`SlippageExceeded`). The config field
-`max_slippage_bps`, the constant `HARD_MAX_SLIPPAGE_BPS`, and the
-parameter `max_slippage_bps_override` are **declared but never read**
-(dead code). Decision: they are marked reserved for the Phase 3
-slippage rework (which must also pin the Jupiter route destination and
-set a floor on `min_quote_output_lamports`); until then no document may
-claim a protocol-enforced global slippage ceiling.
+**D4 — Slippage model.** On-chain enforcement is the Jupiter leg, in two
+layers. (1) **Ceiling on the submitted floor (Phase 3, SLIP-001):** when
+the swap leg is active, `min_quote_output_lamports` must be at least the
+pool-implied conversion of the received memecoin — computed from the
+POST-withdraw reserve ratio of the pool itself, so no oracle or caller
+input is trusted — minus the effective cap
+`min(config.max_slippage_bps, HARD_MAX_SLIPPAGE_BPS)` further tightened
+by `max_slippage_bps_override` (tighten-only). A floor below that bound
+reverts `SlippageExceeded` BEFORE the swap CPI: a losing route can never
+execute. (2) **Floor on the delivered output (unchanged):** the actual
+swap-leg output must meet `min_quote_output_lamports`
+(`SlippageExceeded`). Because the reference price is the salvaged pool's
+own state, a route that finds a BETTER price elsewhere always passes;
+only worse-than-cap conversions are blocked. The salvor must set the
+route's own Jupiter slippage plus fees inside the cap (documented
+interaction: route slippage + AMM fees ≤ protocol cap, or the salvage
+reverts safely and can be resubmitted with a tighter route).
 
-**D5 — Base-token orientation.** v1.0 is frozen as **WSOL-base pools
-only**, with `base_is_coin_side = true` hardcoded (`salvage_pool.rs`).
-The declared error `UnsupportedBaseToken` (7019) is not yet raised; a
-non-WSOL-base pool fails inside the Raydium CPI as
-`AmmRedemptionFailed`. Deriving orientation from on-chain mints is
-checklist item CPI-010; USDC/USDT-style settlement is a v1.1 deliverable.
+**D5 — Base-token orientation.** Orientation is **derived from the
+pool's own on-chain mints** (AmmInfo `coin_mint`@400 / `pc_mint`@432,
+Phase 3): exactly one side must be the address-pinned WSOL mint —
+coin = WSOL sets `base_is_coin_side = true`, pc = WSOL sets it false,
+and any other shape (USDC/USDT-style pairs — a v1.1 deliverable — or
+WSOL on both sides) reverts `UnsupportedBaseToken` (7019) BEFORE any
+CPI (CPI-010 retired). The submitted `lp_mint` and `memecoin_mint` are
+bound to the pool's own bytes (`PreflightFailed` 7013 otherwise),
+closing the desynchronisation path where the SPL token program
+would not catch a mismatched destination on Raydium's plain transfers.
+Both WSOL orientations are proven end-to-end by the Phase 3 fork
+harness (SOL/USDC and RAY/WSOL fixtures).
 
 **D6 — Dust policy.** Memecoin output below
 `jupiter_dust_threshold_lamports` (default 666_666 lamports-equivalent)
@@ -625,6 +662,9 @@ changed.
 | 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Fixed (Phase 1.1)** — UNCX Raydium V4 adapter implemented and mainnet-verified; residual scope in §6.3/LOCKER-002. |
 | 11 | `evaluate_pool_*` docs/comments: "last swap timestamp supplied by the salvor SDK and cross-checked by the indexer… taken at face value" (ORACLE-002) | Param was a plain `i64` — C1 was forgeable by any caller | **Fixed (Phase 1.2)** — replaced by the D8 attestation flow; adapter `0` sentinel and dead `PoolData.last_swap_unix_ts` field removed; errors 6024–6031 added; checklist ORACLE-002 retired, ORACLE-003 opened for the operational runbook. |
 | 12 | `record_launch_price` doc-comment: "cross-check launch_price_q64x64 against on-chain pool reserves at the supplied first_swap_slot rather than trusting the caller" (ORACLE-001) | Param was a caller-supplied `u128` written init-once with zero checks — fake-high baselines forged C2 collapses and fake-low baselines permanently denied salvage | **Fixed (Phase 1.3)** — replaced by the D9 attestation flow (168-byte oracle-signed message, mint-pair re-check at evaluation); errors 6032/6033 added; `LaunchPrice` gained attested `first_swap_slot`/`first_swap_unix_ts` provenance; checklist ORACLE-001 retired. |
+| 13 | `salvage_pool`: "Determine base orientation … Revert UnsupportedBaseToken otherwise" (B5/CPI-010) | `base_is_coin_side = true` hardcoded; the 7019 error was declared but never raised; a no-WSOL pool failed inside the Raydium CPI as `AmmRedemptionFailed` | **Fixed (Phase 3)** — orientation derived from the pool's own AmmInfo mints; 7019 raised pre-CPI; submitted `lp_mint`/`memecoin_mint` bound to the pool bytes; both orientations proven by the fork harness (SOL/USDC + RAY/WSOL); checklist CPI-010 retired. |
+| 14 | `salvage_pool` / spec: "effective slippage cap is min(override, config.max_slippage_bps)" (B6/SLIP-001) | `max_slippage_bps_override`, `config.max_slippage_bps` and `HARD_MAX_SLIPPAGE_BPS` were declared but never read; a salvor could submit `min_quote_output_lamports = 0` | **Fixed (Phase 3)** — the protocol slippage ceiling is live: the floor must cover the pool-implied conversion (post-withdraw reserve ratio) minus `min(config, hard ceiling, override)`; enforced before the swap CPI; checklist SLIP-001 retired; D4 amended. |
+| 15 | Spec §6.3: "A route whose internal destination is not the vault WSOL ATA … not rejected by v1.0 code" (N1) | The Jupiter route was forwarded with no account vetting and no destination binding beyond the post-swap floor; with floor `0` the gap was total | **Fixed (Phase 3)** — route-account vetting (no vault custody/state account may appear; the vault WSOL destination must be present) + the ceiling makes `floor = 0` impossible; the floor still re-checks the delivered amount. N1 closed; the checklist reference (CPI-011) is recorded as retired. |
 
 ## 9. Exit condition — the three answers
 

@@ -7,18 +7,19 @@
 // and credits base + memecoin to the vault's destination token accounts.
 // The account ordering + instruction encoding below mirror
 // the Raydium V4 withdraw wire format accepted by the DEPLOYED mainnet
-// program — 22 accounts + `[tag = 219][amount u64][min_coin u64][min_pc u64]`
+// program — 22 accounts + 9-byte data `[tag = 4][amount u64 LE]` (the
+// optional min_coin/min_pc slippage pair is omitted — absent = None)
 // — verified byte-for-byte against live mainnet withdraw transactions
-// (scripts/probe_v4_withdraw_order.mjs). min_coin / min_pc are sent as 0
-// (no bounds); the vault enforces its own post-CPI bounds
-// (`base_received > 0`, Jupiter-leg floor).
+// (scripts/probe_v4_withdraw_order.mjs) and executed end-to-end by the
+// fork harness. The vault enforces its own post-CPI bounds
+// (`base_received > 0`, the Phase 3 slippage ceiling + Jupiter-leg floor).
 //
-// Of the 20 accounts the V4 withdraw expects, 7 come from the named
-// salvage_pool `Accounts` struct (token_program, pool, lp_mint,
-// vault_lp_token_account, vault_base_token_account,
-// vault_memecoin_token_account, vault_authority). The remaining 13 come
-// from `remaining_accounts` and are pool-specific (OpenBook market +
-// vault internals). Their order is documented below.
+// Of the 22 accounts the V4 withdraw expects, 7 come from the named
+// salvage_pool `Accounts` struct: user_owner = the `salvor`, plus
+// token_program, pool, lp_mint, salvor_lp_token_account (the burn source),
+// vault_base_token_account and vault_memecoin_token_account. The remaining
+// 13 come from `remaining_accounts` and are pool-specific (OpenBook market
+// + vault internals). Their order is documented below.
 //
 // VERIFICATION (Phase 2.1, CPI-009): this exact ordering + count is proven
 // against the real mainnet Raydium V4 bytecode in the
@@ -43,8 +44,10 @@ use crate::errors::GraveVaultError;
 
 /// Indices into `remaining_accounts` (13 entries). Naming matches Raydium
 /// V4 source. The two padding accounts (filled with the pool account,
-/// positions 8/9 of the wire list) are handled internally.
-mod ra_idx {
+/// positions 8/9 of the wire list) are handled internally. Public because
+/// `salvage_pool` reads the AMM coin/pc vault balances at the same indices
+/// for the Phase 3 slippage ceiling.
+pub mod ra_idx {
     pub const AMM_AUTHORITY: usize = 0;
     pub const AMM_OPEN_ORDERS: usize = 1;
     pub const AMM_TARGET_ORDERS: usize = 2;
@@ -189,7 +192,8 @@ pub fn remove_liquidity<'a, 'info>(
         AccountMeta::new(*user_coin_acc.key, false),
         // 17 user_pc_account
         AccountMeta::new(*user_pc_acc.key, false),
-        // 18 user_owner = vault_authority (signer via invoke_signed; writable
+        // 18 user_owner = the SALVOR (their signature on the outer salvage
+        // transaction propagates through this plain invoke; writable
         // on live traffic)
         AccountMeta::new(*input.user_owner.key, true),
         // 19 market_event_queue (writable on live traffic)

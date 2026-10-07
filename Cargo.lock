@@ -2521,6 +2521,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "jupiter_v6_stub"
+version = "0.1.0"
+dependencies = [
+ "solana-program",
+]
+
+[[package]]
 name = "kaigan"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

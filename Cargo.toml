@@ -3,6 +3,11 @@ resolver = "2"
 members = [
     "programs/grave-scanner",
     "programs/grave-vault",
+    # TEST-ONLY Jupiter v6 stand-in for the Phase 3 fork harness (never
+    # deployed; built to SBF separately by scripts/build_fork_harness.sh).
+    # A workspace member so `cargo fmt --check` / `clippy -D warnings` cover
+    # it like every other crate.
+    "programs/grave-vault/tests/jupiter_v6_stub",
 ]
 
 [workspace.package]

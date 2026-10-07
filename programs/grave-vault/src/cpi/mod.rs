@@ -54,8 +54,10 @@ pub struct RemoveLiquidityInput<'a, 'info> {
     pub vault_memecoin_token_account: &'a AccountInfo<'info>,
     pub lp_mint: &'a AccountInfo<'info>,
     pub token_program: &'a AccountInfo<'info>,
-    /// LP amount to burn. Must equal the balance of `vault_lp_token_account`
-    /// at call time (we burn the full vault LP holding atomically).
+    /// LP amount to burn from the SALVOR's token account (must equal the
+    /// balance the salvor holds; the withdraw burns it in place and the
+    /// deployed V4 program enforces the amount against the signer's
+    /// balance).
     pub lp_amount: u64,
     /// `true` if pool's "coin" side is the base (WSOL), `false` if "pc" side
     /// is the base. Set by the salvage_pool handler after mint inspection.

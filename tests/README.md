@@ -32,28 +32,61 @@ pool. It proves: the 22-account withdraw ordering is accepted by the deployed
 V4 program; a real LP burn + real reserve transfers execute end-to-end;
 `vault_authority`'s roles; exact 40/40/20 settlement; and that scrambled /
 malicious account submissions are rejected (by the vault's pre-flight where
-the vault is the defence, and by the real V4 program where V4 is).
+the vault is the defence, and by the real V4 program where V4 is). Its dust
+threshold is `u64::MAX`, so the conversion leg is skipped — it remains the
+withdraw regression lock.
 
 The harness forges exactly three things: the EligibilityCert PDA (serialised
 with GraveScanner's own type), the salvor's LP balance, and the salvor's
 lamports.
 
+## Jupiter conversion fork harness (Phase 3, CPI-010 / SLIP-001)
+
+`programs/grave-vault/tests/jupiter_conversion_fork.rs` runs the FULL
+pipeline — withdraw leg AND conversion leg — in one transaction, against
+real mainnet bytecode for TWO pool orientations:
+
+- pool 1: SOL/USDC `58oQCh…` (coin = WSOL, `base_is_coin_side = true`),
+- pool 2: RAY/WSOL `AVs9TA…` (pc = WSOL, the inverted orientation).
+
+The Jupiter aggregator is exercised through `tests/jupiter_v6_stub/`, a
+DOCUMENTED test-only program deployed at the pinned Jupiter v6 program id
+inside the VM: it CPIs a real Raydium V4 `swapBaseIn` against the same
+mainnet pool state and can fail deterministically. The vault forwards routes
+verbatim and assumes nothing about route internals, so every defense proven
+through the stub (route vetting, slippage ceiling, swap-leg floor) holds
+against an arbitrary callee. The stub is never deployed anywhere.
+
+The harness forges exactly four things: the EligibilityCert PDA, the
+salvor's LP balance, the salvor's lamports, and the Jupiter stand-in itself.
+
+Proven: the full LP -> Raydium -> memecoin -> Jupiter -> WSOL -> SOL ->
+40/40/20 pipeline for both orientations with exact conservation; the
+protocol slippage ceiling (a zero or losing floor reverts 7007 BEFORE the
+swap; the per-tx override tightens it); route-account vetting (vault custody
+accounts forbidden, WSOL destination required); hijacked destinations deliver
+nothing; bad route data / failing aggregator revert atomically (7016);
+orientation derived from pool bytes (no-WSOL pools revert 7019 pre-CPI;
+foreign memecoin/LP mints revert 7013).
+
 Setup and run:
 
 ```bash
-# 1) build the vault program and copy it where the harness looks
-cd programs/grave-vault
-cargo build-sbf
-cp target/deploy/grave_vault.so tests/fixtures/grave_vault.so   # (repo-root target)
+# 1) build the vault program AND the Jupiter stand-in, copy both where the
+#    harness looks — or run scripts/build_fork_harness.sh for all steps
+cd programs/grave-vault && cargo build-sbf
+cd tests/jupiter_v6_stub && cargo build-sbf
+cp target/deploy/grave_vault.so tests/fixtures/grave_vault.so        # (repo-root target)
+cp target/deploy/jupiter_v6_stub.so tests/fixtures/jupiter_v6_stub.so
 
-# 2) fetch the mainnet fixtures (~3.2 MB, gitignored; ~23 RPC calls)
+# 2) fetch the mainnet fixtures (~7 MB, gitignored; both pools + 5 ELFs)
 node scripts/fetch_v4_fork_fixtures.mjs     # from the repo root
 
-# 3) run the fork suite
+# 3) run the fork suites
 cargo test -p grave-vault --test raydium_v4_fork
+cargo test -p grave-vault --test jupiter_conversion_fork
 ```
 
-Or all at once: `bash scripts/build_fork_harness.sh` (from the repo root).
 Without fixtures the fork tests SKIP with a message so CI stays green; the
 host unit tests below never need fixtures or a network.
 
@@ -66,7 +99,9 @@ zeroed-fresh reissuability, live-cert gate, layout stability, borsh
 reissue roundtrip], errors 1: the on-chain code lock test covering
 6000–6034, plus anchor's `test_id`) and vault 9 (merkle 7 + errors 1 +
 `test_id`; the merkle tests require the `solana-sha256-hasher` `sha2`
-dev-dependency feature on host builds). Every manipulated-baseline
+dev-dependency feature on host builds). Phase 3 adds 8 vault host tests
+(slippage-cap derivation 3 + orientation derivation 5 — see
+`salvage_pool.rs` `mod tests`). Every manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,
 zero/future issued slot, truncated instruction data — is covered.

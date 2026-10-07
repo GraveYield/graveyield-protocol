@@ -126,3 +126,26 @@ pub const RAYDIUM_V4_INSTRUCTION_TAG_WITHDRAW: u8 = 4;
 /// `programs/grave-vault/tests/raydium_v4_fork.rs` (CPI-009, Phase 2.1).
 /// See `cpi/raydium_v4.rs` for the layout.
 pub const RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED: usize = 13;
+
+// =====================================================================
+// Raydium V4 AmmInfo byte layout (Phase 3 additions).
+//
+// Canonical 752-byte pool-account layout, byte-verified against mainnet
+// state by `scripts/fetch_v4_fork_fixtures.mjs` and long proven by the
+// GraveScanner adapter (`programs/grave-scanner/src/adapters/raydium_v4.rs`,
+// offsets module). The vault reads the same fields to derive the base
+// orientation and bind the submitted mints to the pool's own bytes
+// (CPI-010) instead of trusting the submission.
+// =====================================================================
+
+/// Canonical AmmInfo account size.
+pub const RAYDIUM_V4_AMM_INFO_SIZE: usize = 752;
+
+/// AmmInfo byte offset of the coin-side vault mint (`coin_vault_mint`).
+pub const RAYDIUM_V4_OFF_COIN_MINT: usize = 400;
+
+/// AmmInfo byte offset of the pc-side vault mint (`pc_vault_mint`).
+pub const RAYDIUM_V4_OFF_PC_MINT: usize = 432;
+
+/// AmmInfo byte offset of the LP mint.
+pub const RAYDIUM_V4_OFF_LP_MINT: usize = 464;

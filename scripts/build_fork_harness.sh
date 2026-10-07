@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# scripts/build_fork_harness.sh — build + fetch + run the Phase 2.1 Raydium
-# V4 fork harness (programs/grave-vault/tests/raydium_v4_fork.rs).
+# scripts/build_fork_harness.sh — build + fetch + run BOTH fork harnesses:
+#   Phase 2.1 (withdraw CPI): programs/grave-vault/tests/raydium_v4_fork.rs
+#   Phase 3  (conversion pipeline): programs/grave-vault/tests/jupiter_conversion_fork.rs
 #
 # Requires: rustup (1.91.1 per rust-toolchain.toml), the Solana CLI 3.0.10
 # (cargo-build-sbf) with platform-tools >= v1.54, node (for the fixture
@@ -9,15 +10,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "==> [1/4] building grave_vault.so (cargo build-sbf)"
+echo "==> [1/5] building grave_vault.so (cargo build-sbf)"
 (cd programs/grave-vault && cargo build-sbf)
 
-echo "==> [2/4] copying the program into the fixture directory"
+echo "==> [2/5] building the test-only Jupiter stand-in (jupiter_v6_stub)"
+(cd programs/grave-vault/tests/jupiter_v6_stub && cargo build-sbf)
+
+echo "==> [3/5] copying the programs into the fixture directory"
 mkdir -p programs/grave-vault/tests/fixtures
 cp target/deploy/grave_vault.so programs/grave-vault/tests/fixtures/grave_vault.so
+cp target/deploy/jupiter_v6_stub.so programs/grave-vault/tests/fixtures/jupiter_v6_stub.so
 
-echo "==> [3/4] fetching mainnet fixtures (pool state + program ELFs)"
+echo "==> [4/5] fetching mainnet fixtures (both pools + program ELFs)"
 node scripts/fetch_v4_fork_fixtures.mjs
 
-echo "==> [4/4] running the fork suite"
+echo "==> [5/5] running both fork suites"
 cargo test -p grave-vault --test raydium_v4_fork -- --nocapture
+cargo test -p grave-vault --test jupiter_conversion_fork -- --nocapture
