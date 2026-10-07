@@ -64,20 +64,20 @@ source per the sync convention.
 | 7003 | `ProtocolPaused` | Protocol is paused — only `claim_lp_proceeds` is callable. |
 | 7004 | `InvalidShareSplit` | Distribution shares (LP / salvor / protocol) did not sum to 10_000 bps. |
 | 7005 | `ProtocolShareExceedsCeiling` | Attempted to raise `protocol_share_bps` above the Charter ceiling. |
-| 7006 | `LpHolderPoolUnsweepable` | Attempted to sweep, close, or otherwise drain `lp_holder_pool_vault`. This account is unsweepable by any admin key, ever — Charter invariant. |
+| 7006 | `LpHolderPoolUnsweepable` | Attempted to sweep, close, or otherwise drain `lp_holder_pool_vault`. This account is unsweepable by any admin key, ever — Charter invariant. *Reserved tripwire: no instruction path attempts a sweep in v1.0, so this error is never raised today.* |
 | 7007 | `SlippageExceeded` | Slippage on the Jupiter swap leg exceeded the configured maximum. |
-| 7008 | `PriorityFeeExceedsCeiling` | Transaction priority fee exceeds the Charter ceiling. |
+| 7008 | `PriorityFeeExceedsCeiling` | Transaction priority fee exceeds the Charter ceiling. *Reserved: priority fees are SDK/operator-enforced (a callee program cannot observe the compute-unit price); never raised in v1.0 — see [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D3.* |
 | 7009 | `MathOverflow` | Arithmetic overflow during distribution math. |
 | 7010 | `InvalidClaimProof` | LP holder is not in the snapshot Merkle tree, or proof is invalid. |
 | 7011 | `ClaimAlreadyProcessed` | Claim has already been processed for this `(pool, lp_holder)` pair. |
-| 7012 | `BelowDustThreshold` | Quote output below the Jupiter dust threshold; salvage skipped or aborted. |
+| 7012 | `BelowDustThreshold` | Quote output below the Jupiter dust threshold; salvage skipped or aborted. *Reserved: the v1.0 dust path skips the swap with a log and continues; it never reverts — see [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D6.* |
 | 7013 | `PreflightFailed` | Pre-flight check against the on-chain pool failed. |
-| 7014 | `TimelockNotElapsed` | Timelock window has not yet elapsed for a queued parameter change. |
+| 7014 | `TimelockNotElapsed` | Timelock window has not yet elapsed for a queued parameter change. *Reserved: the v1.0 timelock is multisig-enforced (Squads scheduling); never raised on-chain — see [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D2.* |
 | 7015 | `AmmRedemptionFailed` | AMM `remove_liquidity` CPI returned an error or zero output. |
 | 7016 | `JupiterSwapFailed` | Jupiter v6 swap CPI returned an error or zero output. |
 | 7017 | `AmmCpiUnimplemented` | AMM CPI adapter is a pre-mainnet stub (CLMM / Orca Whirlpool / PumpSwap). Pool owner is not the Raydium V4 program. See [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
 | 7018 | `InvalidSnapshotData` | Salvor's `lp_total_supply_at_snapshot` does not match the on-chain LP mint supply at salvage time. |
-| 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. USDC/USDT base support is a v1.1 deliverable. |
+| 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. USDC/USDT base support is a v1.1 deliverable. *Reserved: v1.0 hardcodes `base_is_coin_side = true`; non-WSOL-base pools currently fail inside the Raydium CPI as `AmmRedemptionFailed` — see [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D5 / checklist CPI-010.* |
 
 ## Drift from the v3.0 .docx snapshot
 

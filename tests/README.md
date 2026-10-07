@@ -10,7 +10,9 @@ Test plan (m1+):
   `invalidate_anchor`, `sweep_stale_anchor` rent recovery, error-code coverage.
 - `tests/grave-vault/` — `salvage_pool` happy path against a mocked Raydium V4
   pool, 40 / 40 / 20 distribution math, `claim_lp_proceeds` Merkle proofs,
-  emergency-pause semantics, priority-fee ceiling enforcement.
+  emergency-pause semantics. (Priority-fee ceiling enforcement is SDK-side
+  policy — covered by SDK unit tests, not program tests; see
+  `docs/PROTOCOL_SPEC.md` D3.)
 - `tests/integration/` — full certify-and-salvage flow exercising the
   Scanner → Vault handshake on `solana-test-validator`.
 

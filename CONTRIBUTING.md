@@ -123,7 +123,7 @@ A PR that touches them is automatically out-of-scope for normal review and must 
 governance discussion before any code is written:
 
 - **20% protocol share is a ceiling**, not a target. It can be lowered by governance with a
-  72h timelock, but **cannot be raised**.
+  72h timelock (multisig-enforced via Squads; not program-enforced in v1.0), but **cannot be raised**.
 - **`lp_holder_pool_vault` is unsweepable** by any admin key, ever. Emergency pause does not
   affect this.
 - **Standard upgrades** require 7-day public notice + 72h timelock.

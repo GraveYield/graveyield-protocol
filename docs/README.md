@@ -4,6 +4,14 @@ This directory is the **living source of truth** for GraveYield's specifications
 Every spec change lands here as a markdown PR alongside the corresponding code
 change. Spec drift is treated as a bug.
 
+## Governing specification
+
+[`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) is the frozen Phase 0 specification
+(what makes a pool derelict, who proves it, what the protocol guarantees —
+including the enforcement matrix and resolved terminology decisions). When
+any document below disagrees with it, `PROTOCOL_SPEC.md` wins until a spec
+PR revises both.
+
 ## Canonical spec set (locked, May 2026)
 
 The spec set is exactly six documents. Anything claiming to be GraveYield
