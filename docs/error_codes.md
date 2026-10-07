@@ -55,11 +55,13 @@ future v4.x additions to the pre-anchor error space.
 | 6024 | `AttestationMissing` | No `ed25519_program` verify instruction immediately precedes the scanner instruction (or the sysvar read failed) — no oracle signature was evaluated in this transaction. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 / D8. |
 | 6025 | `InvalidAttestationOffsets` | The precompile's `Ed25519SignatureOffsets` are malformed or do not bind the signature to exactly the 112-byte attestation embedded in the instruction data (wrong signature count, out-of-bounds offsets, wrong instruction index, non-canonical message offset). |
 | 6026 | `AttestationOracleMismatch` | The public key covered by the runtime-verified signature is not the configured `ProtocolConfig.activity_oracle`. |
-| 6027 | `AttestationBindingMismatch` | The attestation message binds a different `(amm_program_id, pool_address)` pair than the instruction params. |
+| 6027 | `AttestationBindingMismatch` | The attestation message binds different values than the instruction params echo: the `(amm_program_id, pool_address)` pair (C1), or the `(base_mint, quote_mint)` pair / launch price (C2, D9). |
 | 6028 | `AttestationTimestampInvalid` | The attested last-swap timestamp is the zero sentinel or lies in the future relative to the current `Clock`. |
 | 6029 | `AttestationStale` | The attestation's `issued_slot` no longer resolves in the `SlotHashes` sysvar — replay outside the ~512-slot freshness window. |
 | 6030 | `AttestationSlotHashMismatch` | The attested slot hash does not match the chain's `SlotHashes` entry for `issued_slot`. |
 | 6031 | `AttestationSlotInvalid` | The attestation's `issued_slot` is zero or in the future relative to the current slot. |
+| 6032 | `InvalidLaunchPrice` | The attested launch price is zero — a price-collapse baseline must be strictly positive. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 / D9. |
+| 6033 | `LaunchPriceMintMismatch` | The recorded launch-price baseline belongs to a different token pair than the live pool under evaluation — the recorded `(base_mint, quote_mint)` must equal the pool's parsed mints before C2 can consume the price. |
 
 ## GraveVault — 7000-7019
 
@@ -112,4 +114,4 @@ rather than re-tabulating the codes.
 
 ---
 
-*Mirrored from `errors.rs` files on 2026-05-16. Last verified at PR m5 (GraveVault 7000-7019, GraveScanner 6000-6019).*
+*Mirrored from `errors.rs` files on 2026-05-16. Last verified at Phase 1.3 (GraveScanner 6000-6033, GraveVault 7000-7019).*

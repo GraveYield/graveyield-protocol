@@ -56,8 +56,11 @@ pub mod grave_scanner {
         instructions::initialize::handler(ctx, params)
     }
 
-    /// Record an AMM pool's launch price snapshot (Phase 0).
-    /// Used by Criterion 2 (≥99% price collapse) during evaluate_pool.
+    /// Record an AMM pool's launch price snapshot (Phase 0). Used by
+    /// Criterion 2 (≥99% price collapse) during evaluate_pool. The price
+    /// is accepted ONLY as a 168-byte oracle-signed Ed25519 attestation
+    /// (ORACLE-001, Phase 1.3 / spec D9) verified via the ed25519
+    /// precompile — caller-supplied baselines revert. Init-once per pool.
     pub fn record_launch_price(
         ctx: Context<RecordLaunchPrice>,
         params: RecordLaunchPriceParams,

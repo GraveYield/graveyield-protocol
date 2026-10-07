@@ -48,6 +48,10 @@ pub fn handler(ctx: Context<Initialize>, params: InitializeParams) -> Result<()>
     // multisig runs the activity indexer until a dedicated oracle key is
     // rotated in via `update_protocol_config`). See spec D8.
     cfg.activity_oracle = params.authority;
+    // Same launch: the launch-price oracle key is separated from the
+    // activity key so the init-once C2 baseline is not signed by the hot
+    // activity key. Rotatable independently — see spec D9.
+    cfg.launch_price_oracle = params.authority;
 
     cfg.inactivity_seconds = if params.inactivity_seconds == 0 {
         DEFAULT_INACTIVITY_SECONDS

@@ -25,6 +25,11 @@ pub struct UpdateProtocolConfigParams {
     /// Rotate the Criterion 1 activity oracle (public key whose Ed25519
     /// signatures authorize last-swap attestations). Multisig-only.
     pub activity_oracle: Option<Pubkey>,
+    /// Rotate the Criterion 2 launch-price oracle (public key whose
+    /// Ed25519 signatures authorize launch-price attestations, spec D9).
+    /// Multisig-only. Rotation does NOT affect already-recorded
+    /// LaunchPrice PDAs (init-once).
+    pub launch_price_oracle: Option<Pubkey>,
 }
 
 #[derive(Accounts)]
@@ -73,6 +78,9 @@ pub fn handler(
     }
     if let Some(v) = params.activity_oracle {
         cfg.activity_oracle = v;
+    }
+    if let Some(v) = params.launch_price_oracle {
+        cfg.launch_price_oracle = v;
     }
 
     Ok(())

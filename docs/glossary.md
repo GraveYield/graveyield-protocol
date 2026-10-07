@@ -15,7 +15,10 @@ terminology lint enforced by CI (`scripts/terminology-lint.sh`).
 | **SalvageReceipt** | On-chain PDA issued at the end of a successful `salvage_pool` recording the 40/40/20 distribution. |
 | **`salvage_pool`** | The GraveVault instruction that executes a salvage. |
 | **activity oracle** | The governance-controlled public key (`ProtocolConfig.activity_oracle`) whose Ed25519 signatures authorize Criterion 1 last-swap attestations. Initialised to the protocol authority; rotatable via `update_protocol_config`. Derivation honesty and service availability are operator-enforced (spec §6.3 / D8). |
+| **launch-price oracle** | The governance-controlled public key (`ProtocolConfig.launch_price_oracle`) whose Ed25519 signatures authorize Criterion 2 launch-price attestations. Deliberately separate from the activity oracle: the init-once baseline is permanently binding, so its signing key is isolated from the hotter activity key. Initialised to the protocol authority; rotatable independently (spec §6.3 / D9). |
+| **launch price** | The quote-per-base price formed by a pool's vault balances immediately before the pool's first successful swap — the deployer-seeded initial market price. Stored init-once in the `LaunchPrice` PDA; only oracle-signed values are accepted (spec D9). |
 | **last-swap attestation** | The 112-byte signed message (`amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`) verified in-transaction via the `ed25519_program` precompile; the sole accepted C1 inactivity evidence. |
+| **launch-price attestation** | The 168-byte signed message (`amm_program_id ‖ pool_address ‖ base_mint ‖ quote_mint ‖ first_swap_slot ‖ first_swap_unix_ts ‖ launch_price_q64x64 ‖ issued_slot`) verified in-transaction via the `ed25519_program` precompile at `record_launch_price`; the sole accepted C2 baseline evidence. Carries no SlotHashes freshness check (historical fact + init-once PDA ⇒ replay is structurally impossible). |
 | **`SalvageCompleted`** | The Anchor event emitted on the final state transition of `salvage_pool`. |
 | **`PoolSalvaged`** | The Anchor event mirroring the pool-level outcome of a successful salvage. |
 

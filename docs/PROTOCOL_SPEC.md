@@ -9,14 +9,19 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.2.0 — Phase 1.2: C1 evidence implemented
-> (indexer-signed Ed25519 last-swap attestation, ORACLE-002 retired;
-> new `activity_oracle` config field; §4 C1, §5, §6.1/6.3, §7 D8, §8
-> row 11, §9 updated; breaking change to the `evaluate_pool_*`
-> instruction data). rev 1.1.0 — Phase 1.1: C5 evidence implemented
-> (UNCX Raydium AMM V4 locker adapter, LOCKER-001 retired; §4 C5, §5,
-> §6, §8 row 10 updated). All other sections unchanged from the Phase 0
-> freeze.
+> **Revisions:** rev 1.3.0 — Phase 1.3: C2 evidence implemented
+> (oracle-signed 168-byte Ed25519 launch-price attestation, ORACLE-001
+> retired; new `launch_price_oracle` config field; launch price defined
+> as the pre-first-swap reserve ratio; §2.1, §4 C2, §5, §6.1/6.3/6.4,
+> §7 D9, §8 row 12, §9 updated; breaking change to the
+> `record_launch_price` instruction data). rev 1.2.0 — Phase 1.2: C1
+> evidence implemented (indexer-signed Ed25519 last-swap attestation,
+> ORACLE-002 retired; new `activity_oracle` config field; §4 C1, §5,
+> §6.1/6.3, §7 D8, §8 row 11, §9 updated; breaking change to the
+> `evaluate_pool_*` instruction data). rev 1.1.0 — Phase 1.1: C5
+> evidence implemented (UNCX Raydium AMM V4 locker adapter, LOCKER-001
+> retired; §4 C5, §5, §6, §8 row 10 updated). All other sections
+> unchanged from the Phase 0 freeze.
 
 ## 0. Purpose
 
@@ -62,7 +67,7 @@ revision is out of scope.
 | Instruction | Effect |
 |---|---|
 | `initialize` | Creates `ProtocolConfig` (thresholds, cert TTL, pause flag). |
-| `record_launch_price` | Creates the init-once `LaunchPrice` PDA (Criterion 2 baseline). |
+| `record_launch_price` | Creates the init-once `LaunchPrice` PDA (Criterion 2 baseline) — only from an oracle-signed Ed25519 attestation (D9). |
 | `evaluate_pool_phase_1` | Evaluates all six criteria; writes `EligibilityAnchor` stamped with `first_eligible_epoch`. |
 | `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap; requires bitmap equality with the anchor; issues `EligibilityCert`. |
 | `invalidate_anchor` | Multisig-only: marks an anchor `invalidated` (censors a wrong Phase 1 pass). |
@@ -177,6 +182,29 @@ Requires a recorded launch price (`launch_price_q64x64 > 0`, else
 9_900 bps (99%). A pool that re-floated (current ≥ launch) yields 0 bps
 and fails. `current = 0` yields 10_000 bps and passes.
 
+*Definition of "launch price" (D9):* the quote-per-base price formed by
+the pool's vault balances **immediately before the pool's first
+successful swap** — the deployer-seeded initial market price. Recorded
+once per pool into the init-once `LaunchPrice` PDA, and only from an
+oracle-signed attestation (see §5). The evaluation handlers additionally
+re-check that the recorded `(base_mint, quote_mint)` pair equals the
+live pool's parsed mints (`LaunchPriceMintMismatch`, 6033) before the
+price may feed the collapse math.
+
+*Evidence (Phase 1.3, decision D9):* `launch_price_q64x64` is carried by
+a **168-byte Ed25519-signed attestation** issued by the protocol
+launch-price oracle (`ProtocolConfig.launch_price_oracle`) and verified
+on chain inside `record_launch_price` via the `ed25519_program`
+precompile — see §5. A caller-supplied price is accepted only when it
+byte-exactly echoes the attested price. Related reverts:
+`AttestationMissing` (6024), `InvalidAttestationOffsets` (6025),
+`AttestationOracleMismatch` (6026), `AttestationBindingMismatch`
+(6027), `InvalidLaunchPrice` (6032), `LaunchPriceMintMismatch` (6033).
+Unlike C1 there is no SlotHashes freshness check: the launch price is a
+time-invariant historical fact and the PDA is init-once, so replaying an
+old-but-valid attestation cannot overwrite anything (the second `init`
+fails).
+
 **C3 — Minimum residual TVL.**
 `current_tvl_lamports ≥ min_tvl_lamports`. Default: 0.5 SOL
 (`500_000_000` lamports). **Direction is normative and was previously
@@ -214,7 +242,7 @@ must satisfy before mainnet.
 | # | Input | Source today | Status |
 |---|---|---|---|
 | C1 | `last_swap_unix_ts` | **Indexer-signed Ed25519 attestation** (Phase 1.2): 112-byte message `amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`, signed by `ProtocolConfig.activity_oracle`, verified in-transaction through the `ed25519_program` precompile; `issued_slot` must resolve in `SlotHashes` with a byte-exact hash match. | **On-chain cryptographic (ORACLE-002 resolved).** Residual trust (documented, §6.3): the oracle's honesty about the derivation and the indexer's availability. |
-| C2 | `launch_price_q64x64` | `LaunchPrice` PDA; value is **caller-supplied** at `record_launch_price`, init-once, never cross-checked. | **Trusted input — blocker ORACLE-001.** |
+| C2 | `launch_price_q64x64` | **Oracle-signed Ed25519 attestation** (Phase 1.3): 168-byte message `amm_program_id ‖ pool_address ‖ base_mint ‖ quote_mint ‖ first_swap_slot ‖ first_swap_unix_ts ‖ launch_price_q64x64 ‖ issued_slot`, signed by `ProtocolConfig.launch_price_oracle`, verified in-transaction through the `ed25519_program` precompile at `record_launch_price`; the params echo of the attested price is mandatory. | **On-chain cryptographic (ORACLE-001 resolved).** Residual trust (documented, §6.3): the oracle's honesty about the historical derivation, the indexer's archive availability, and the init-once semantics (a mis-recorded baseline is permanent). |
 | C2 | `current_price_q64x64` | Derived on-chain: `(quote_reserve << 64) / base_reserve` from the pool's vault balances, after adapter validation (vault ownership = SPL Token program; vault mint == pool-declared mint). | Authoritative (spot price; manipulation analysis below). |
 | C3 | `current_tvl_lamports` | Quote-side vault balance, read on-chain from the SPL token account located by the pool's own `pc_vault` pointer. | Authoritative. |
 | C4 | `lp_supply` | LP mint SPL supply, read on-chain from the account located by the pool's own `lp_mint` pointer. | Authoritative. |
@@ -254,11 +282,29 @@ path; the residual risk is griefing, accepted for v1.0.
   replaced the `last_swap_unix_ts: i64` parameter with
   `msg: [u8; 112]` and gained `instruction_sysvar` + `slot_hashes`
   accounts.
-- **C2 (ORACLE-001):** the launch price must be verifiable against pool
-  reserves at a reference slot. `record_launch_price` gains no silent
-  authority: no writer class (including multisig) may set the baseline
-  without an on-chain check. Note: `RecordLaunchPriceParams` carries no
-  slot reference today; `recorded_slot` is the write-time `Clock::slot`.
+- **C2 (ORACLE-001, resolved in Phase 1.3):** the frozen requirement
+  "no writer class may set the baseline without an on-chain check" is
+  implemented as an Ed25519 attestation whose signing key is
+  protocol-registered (`ProtocolConfig.launch_price_oracle`, rotatable
+  via `update_protocol_config`, initialised to the protocol authority,
+  deliberately separate from the hotter `activity_oracle` key). The
+  on-chain check binds the signature to exactly the 168-byte message
+  embedded at the end of the `record_launch_price` instruction data
+  (canonical offsets in `grave-scanner/src/attestation.rs`), to the
+  `(amm_program_id, pool_address, base_mint, quote_mint,
+  launch_price_q64x64)` echo, to a strictly positive price, and to sane
+  first-swap timestamp/slot and issuance-slot values. There is no
+  SlotHashes freshness check by design (historical fact + init-once PDA
+  ⇒ replay is structurally impossible). Both evaluation handlers
+  re-check the recorded mint pair against the live pool before C2 can
+  consume the price. The derivation itself (Raydium V4 transaction
+  history via a full-archive RPC,
+  `sdk/src/launchPriceAttestation.ts::deriveLaunchPriceV4`) and the
+  oracle's operational availability remain SDK/operator-enforced
+  (§6.3). Pools that never swapped are outside the v1.0 domain (C1
+  cannot attest them either — see D8). *Breaking change:*
+  `record_launch_price` instruction data gained the `msg: [u8; 168]`
+  parameter and the `protocol_config` + `instruction_sysvar` accounts.
 - **C5 (LOCKER-001, resolved in Phase 1.1):** v1.0 introspects exactly
   one locker — UNCX Raydium AMM V4
   (`GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo`, official source
@@ -314,6 +360,7 @@ violate it).
 | Pause halts new activity | Scanner pause gates `evaluate_pool_*`; vault pause gates `salvage_pool`; neither gates governance or rent-reclaim paths. |
 | Cert TTL cannot be configured below 10 minutes | `MIN_CERT_TTL_SECONDS` floor in `initialize` and `update_protocol_config`. |
 | C1 inactivity evidence is oracle-signed | 112-byte Ed25519 attestation verified in-transaction via the `ed25519_program` precompile: signature bound to exactly the embedded message, oracle key = `ProtocolConfig.activity_oracle`, pool/AMM binding, non-future timestamp, `issued_slot` re-anchored in `SlotHashes` (errors 6024–6031). A caller-supplied timestamp is no longer an accepted input. |
+| C2 launch-price baseline is oracle-signed | 168-byte Ed25519 attestation verified in-transaction at `record_launch_price`: signature bound to exactly the embedded message, oracle key = `ProtocolConfig.launch_price_oracle`, pool/mint/price echo binding, positive price, first-swap timestamp/slot sanity (errors 6024–6027, 6032). Both evaluation handlers additionally reject a baseline whose recorded mint pair differs from the live pool's parsed mints (6033). A caller-supplied price is no longer an accepted input. |
 | Locker evidence is sound (UNCX v4) | Every supplied TokenLock is ownership-, discriminator-, size-, PDA-re-derivation- and binding-checked before its amount is summed; marker gate forbids silent omission (errors 6020–6023). |
 
 ### 6.2 Governance enforced (multisig process, not program code)
@@ -335,6 +382,7 @@ violate it).
 | Honest snapshot and Merkle tree construction | Off-chain snapshotter (Phase 5) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. |
 | Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
 | Activity-oracle honesty and availability (C1) | Off-chain indexer derives the last-swap time from Raydium V4 transaction history (`sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and signs attestations with `activity_oracle` | On-chain verification is cryptographic but cannot re-derive swap history itself (Raydium V4 `AmmInfo` stores no last-swap field; `SlotHashes` spans ≈ 512 slots). A buggy or colluding oracle could attest a wrong timestamp; the oracle key is governance-held and rotatable. Oracle downtime blocks new evaluations (availability, not integrity). ORACLE-003 in the checklist tracks the operational runbook. |
+| Launch-price oracle honesty and archive availability (C2) | Off-chain indexer derives the pre-first-swap reserve ratio from full-history Raydium V4 transaction data (`sdk/src/launchPriceAttestation.ts::deriveLaunchPriceV4`, fail-closed on incomplete history) and signs attestations with `launch_price_oracle` | On-chain verification cannot re-derive historical vault balances (Solana programs cannot read past account state). A buggy or colluding oracle could attest a wrong baseline; because the `LaunchPrice` PDA is init-once, a wrong record is permanent — mitigated by key separation from the activity oracle, governance rotation, and the ORACLE-003 runbook (shared with C1). |
 | Transaction construction quality | SDK transaction builders (Phase 8) | Account ordering, compute limits, retries (locker introspection costs one PDA re-derivation per supplied TokenLock). |
 
 ### 6.4 Explicitly NOT guaranteed in v1.0
@@ -348,6 +396,11 @@ violate it).
 - No protection against a front-run salvage race between competing
   salvors beyond first-transaction-wins (single `PoolRegistry` slot).
 - No non-WSOL quote/base support (see D5).
+- No C2 evaluation for pools launched above a ~2^114.6 Q64.64
+  quote-per-base ratio: the `drop × 10_000` intermediate overflows u128
+  and the evaluation fails closed with `MathOverflow` (uncertifiable,
+  never mis-certifiable). Pinned by the
+  `compute_drop_bps_beyond_real_reserve_scale_fails_closed` test.
 - No locker introspection beyond the UNCX Raydium V4 locker — LP locked
   in PinkSale / Team Finance / Streamflow / others is invisible to
   on-chain C5 in v1.0 (LOCKER-002; mitigated SDK-side).
@@ -442,6 +495,38 @@ This is a **breaking change** to the `evaluate_pool_phase_1` /
 `evaluate_pool_phase_2` instruction data (`last_swap_unix_ts: i64` →
 `msg: [u8; 112]` + two sysvar accounts), accepted pre-mainnet.
 
+**D9 — Launch-price evidence model (Phase 1.3).** C2's baseline is
+carried by a **168-byte Ed25519 attestation** signed by a
+`launch_price_oracle` key (separate from `activity_oracle` — the
+baseline is init-once and permanently binding, so its signing key is
+isolated from the hotter activity-attestation key) and verified on chain
+through the `ed25519_program` precompile inside `record_launch_price`.
+"Launch price" is hereby **defined** as the quote-per-base price formed
+by the pool's vault balances immediately before the pool's first
+successful swap (the deployer-seeded initial market price); pools that
+never swapped are outside the v1.0 domain because C1 cannot attest them
+either. Rationale: Solana programs cannot read historical account state,
+so no on-chain derivation of a launch-time price exists; the previous
+state (any caller could write any baseline into the init-once PDA) had
+two live attack vectors — a fake-high baseline (false C2 collapse) and a
+fake-low baseline (permanent C2 denial-of-service on the pool's salvage
+path). The message layout is `amm_program_id ‖ pool_address ‖ base_mint
+‖ quote_mint ‖ first_swap_slot ‖ first_swap_unix_ts ‖
+launch_price_q64x64 ‖ issued_slot` (fixed offsets, mirrored byte-for-
+byte by the SDK); the on-chain check requires the precompile signature
+to cover exactly those 168 bytes, binds the instruction params as an
+echo of the attested fields, rejects zero prices and
+zero/future first-swap timestamps and slots, and deliberately applies no
+SlotHashes freshness check (a launch price is a time-invariant
+historical fact and the init-once PDA makes replay structurally
+impossible). Both evaluation handlers re-check the recorded mint pair
+against the live pool's parsed mints before C2 consumes the price. What
+remains operator-enforced is documented in §6.3 (derivation honesty,
+archive availability) and the init-once permanence is an accepted
+boundary. This is a **breaking change** to the `record_launch_price`
+instruction data (added `msg: [u8; 168]` + `protocol_config` +
+`instruction_sysvar` accounts), accepted pre-mainnet.
+
 ## 8. Documentation / code discrepancy ledger
 
 | # | Document claim | Reality (code) | Resolution |
@@ -457,6 +542,7 @@ This is a **breaking change** to the `evaluate_pool_phase_1` /
 | 9 | EligibilityCert lifecycle: cert PDA is init-once | An expired cert permanently bricks that pool's salvage path (B4) | **Tracked** — Phase 1.4 engineering blocker. |
 | 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Fixed (Phase 1.1)** — UNCX Raydium V4 adapter implemented and mainnet-verified; residual scope in §6.3/LOCKER-002. |
 | 11 | `evaluate_pool_*` docs/comments: "last swap timestamp supplied by the salvor SDK and cross-checked by the indexer… taken at face value" (ORACLE-002) | Param was a plain `i64` — C1 was forgeable by any caller | **Fixed (Phase 1.2)** — replaced by the D8 attestation flow; adapter `0` sentinel and dead `PoolData.last_swap_unix_ts` field removed; errors 6024–6031 added; checklist ORACLE-002 retired, ORACLE-003 opened for the operational runbook. |
+| 12 | `record_launch_price` doc-comment: "cross-check launch_price_q64x64 against on-chain pool reserves at the supplied first_swap_slot rather than trusting the caller" (ORACLE-001) | Param was a caller-supplied `u128` written init-once with zero checks — fake-high baselines forged C2 collapses and fake-low baselines permanently denied salvage | **Fixed (Phase 1.3)** — replaced by the D9 attestation flow (168-byte oracle-signed message, mint-pair re-check at evaluation); errors 6032/6033 added; `LaunchPrice` gained attested `first_swap_slot`/`first_swap_unix_ts` provenance; checklist ORACLE-001 retired. |
 
 ## 9. Exit condition — the three answers
 
@@ -465,11 +551,15 @@ This is a **breaking change** to the `evaluate_pool_phase_1` /
   with identical bitmaps.
 - **Who proves it?** Whoever submits the transactions — but every input
   must ultimately trace to on-chain state verifiable inside the
-  instruction (§5). C1 is now carried by a governance-oracle-signed
-  attestation verified in-transaction (D8, Phase 1.2); C5 is
-  implemented for the UNCX Raydium V4 locker with its completeness
-  boundary documented in §6.3. The remaining trusted input is C2's
-  launch-price baseline (ORACLE-001, Phase 1.3 blocker).
+  instruction (§5). C1 is carried by a governance-oracle-signed
+  attestation verified in-transaction (D8, Phase 1.2); C2's baseline is
+  carried by a dedicated-oracle-signed attestation verified
+  in-transaction (D9, Phase 1.3); C5 is implemented for the UNCX
+  Raydium V4 locker with its completeness boundary documented in §6.3.
+  Every criterion input now has an on-chain cryptographic evidence path;
+  the residual trust is exactly the §6.3 oracle-honesty/availability
+  boundary (shared runbook, ORACLE-003) plus the C5 enumeration
+  completeness boundary.
 - **What does the protocol guarantee?** Exactly the §6 matrix — no more,
   no less. Anything not listed there is not guaranteed, and §6.4 lists
   the sharpest edges explicitly.

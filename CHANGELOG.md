@@ -1,5 +1,80 @@
 # Changelog
 
+## [Unreleased — Phase 1.3: authoritative launch price (ORACLE-001)]
+
+### Added
+- **Oracle-signed launch-price baseline (spec `PROTOCOL_SPEC.md` §5 /
+  decision D9).** "Launch price" is now defined normatively as the
+  quote-per-base price formed by the pool's vault balances immediately
+  before the pool's first successful swap (the deployer-seeded initial
+  market price). The value reaches `record_launch_price` only as a
+  168-byte Ed25519 attestation
+  `amm_program_id ‖ pool_address ‖ base_mint ‖ quote_mint ‖
+  first_swap_slot ‖ first_swap_unix_ts ‖ launch_price_q64x64 ‖
+  issued_slot` verified in-transaction via the `ed25519_program`
+  precompile. This closes two live attack vectors of the caller-supplied
+  baseline: fake-high prices (forged C2 collapses) and fake-low prices
+  (permanent C2 denial-of-service on the init-once record).
+- **`ProtocolConfig.launch_price_oracle`** — new governance-controlled
+  signing key for C2 attestations, deliberately separate from the hotter
+  `activity_oracle` key (the init-once baseline is permanently binding).
+  Initialised to the protocol authority at `initialize`; rotatable
+  independently via `update_protocol_config` (new `launch_price_oracle:
+  Option<Pubkey>` param).
+- **`LaunchPrice` provenance fields** — attested `first_swap_slot` and
+  `first_swap_unix_ts` persisted alongside the price (reserved space
+  shrunk 32 → 16 bytes; total account size unchanged), making the
+  init-once baseline auditable against the original attestation.
+- **Evaluation-time mint-pair re-check** — both `evaluate_pool_phase_1`
+  and `evaluate_pool_phase_2` now reject a baseline recorded for a
+  different token pair than the live pool's parsed mints.
+- **Scanner errors 6032–6033** — `InvalidLaunchPrice` (zero attested
+  price), `LaunchPriceMintMismatch` (baseline mint pair ≠ live pool).
+- **`sdk/src/launchPriceAttestation.ts`** — canonical 168-byte message
+  builder/parser (byte-for-byte mirror of the on-chain layout),
+  `buildLaunchPriceEd25519VerifyInstruction` (precompile wiring at
+  message offset 152), `readV4PoolPair`, and
+  `deriveLaunchPriceV4`: fail-closed operator/indexer tooling that
+  paginates signature history back to genesis, identifies the first swap
+  by opposite-direction vault-balance deltas (deposits/initialization
+  move both vaults the same way), and computes
+  `(pc_vault_pre << 64) / coin_vault_pre` — the exact on-chain price
+  formula. Incomplete history, missing block times, pruned transactions,
+  and zero pre-swap base liquidity all throw; a never-swapped pool
+  returns `null`.
+- **Extreme-price boundary tests** — `compute_drop_bps` pinned at the
+  minimum representable price, large-representable prices, and the
+  fail-closed `MathOverflow` boundary above ~2^114.6 Q64.64 (spec §6.4).
+
+### Changed
+- **BREAKING (pre-mainnet):** `record_launch_price` instruction data
+  gained `msg: [u8; 168]` (the signed attestation, now the last params
+  field) and the accounts gained `protocol_config` +
+  `instruction_sysvar`. A caller-supplied price that does not byte-exactly
+  echo the attested price reverts (`AttestationBindingMismatch`, 6027).
+  The instruction is now pause-gated like the evaluation path.
+- **`attestation.rs` refactor** — the Ed25519 offset validator is
+  generalized (`verify_ed25519_offsets_at`) with the C1 validator kept as
+  a thin wrapper at the canonical offset 72; the C2 path validates at
+  offset 152 over a 320-byte instruction. A shared
+  `load_instruction_pair` helper replaces duplicated sysvar loading.
+- **SDK `buildEd25519VerifyInstruction`** — accepts an optional
+  `messageAddressOffset` (defaults to the C1 offset 72, wire format
+  unchanged).
+- **`programs/grave-vault/Cargo.toml`** — added `solana-sha256-hasher`
+  with the `sha2` feature as a dev-dependency. The dependabot 2.3.0 →
+  3.1.0 bump had silently broken the merkle host tests on host builds
+  (`hashv` panics off-chain without the software feature); the tests
+  compile but failed at runtime since that bump. Caught by the Phase 1.3
+  verification pass; on-chain BPF builds are unaffected.
+
+### Verified
+- `cargo test -p grave-scanner` 76/76, `cargo test -p grave-vault` 9/9,
+  `clippy -D warnings` clean, `fmt --check` clean, terminology lint pass,
+  workspace typecheck green, and a 26-check TS↔Rust wire-format
+  verification (independent encoder vs SDK builder vs byte-slice
+  assertions vs precompile offsets).
+
 ## [Unreleased — Phase 1.2: authoritative last-swap evidence (ORACLE-002)]
 
 ### Added
