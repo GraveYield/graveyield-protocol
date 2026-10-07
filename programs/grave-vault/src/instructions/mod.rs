@@ -14,10 +14,13 @@ pub use initialize::*;
 #[allow(ambiguous_glob_reexports)]
 pub use salvage_pool::*;
 #[allow(ambiguous_glob_reexports)]
+pub use sweep_dust::*;
+#[allow(ambiguous_glob_reexports)]
 pub use update_protocol_config::*;
 
 pub mod claim_lp_proceeds;
 pub mod emergency_pause;
 pub mod initialize;
 pub mod salvage_pool;
+pub mod sweep_dust;
 pub mod update_protocol_config;

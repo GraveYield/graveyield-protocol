@@ -106,6 +106,18 @@ pub enum GraveVaultError {
     /// `lp_holder_pool_vault` and protocol_treasury.
     #[msg("Unsupported base token: pool base must be WSOL (v1.0).")]
     UnsupportedBaseToken = 19,
+
+    // ----- Phase 4 additions (D6 dust policy) -----
+    /// `sweep_dust` found no retained memecoin: the vault memecoin ATA is
+    /// empty (the conversion leg fully drained it) or the pool was fully
+    /// converted. Nothing to recover.
+    #[msg("No retained memecoin to sweep.")]
+    DustNothingToSweep = 20,
+
+    /// `sweep_dust` already ran for this pool: the receipt records the
+    /// sweep timestamp and a second sweep would double-credit the treasury.
+    #[msg("Dust for this pool was already swept.")]
+    DustAlreadySwept = 21,
 }
 
 #[cfg(test)]
@@ -141,6 +153,8 @@ mod tests {
             (GraveVaultError::AmmCpiUnimplemented, 7017),
             (GraveVaultError::InvalidSnapshotData, 7018),
             (GraveVaultError::UnsupportedBaseToken, 7019),
+            (GraveVaultError::DustNothingToSweep, 7020),
+            (GraveVaultError::DustAlreadySwept, 7021),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

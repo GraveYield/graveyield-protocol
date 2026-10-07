@@ -93,6 +93,8 @@ source per the sync convention.
 | 7017 | `AmmCpiUnimplemented` | AMM CPI adapter is a pre-mainnet stub (CLMM / Orca Whirlpool / PumpSwap). Pool owner is not the Raydium V4 program. See [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
 | 7018 | `InvalidSnapshotData` | Salvor's `lp_total_supply_at_snapshot` does not match the on-chain LP mint supply at salvage time. |
 | 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. Raised by `salvage_pool` when the pool's on-chain AmmInfo mints (coin@400 / pc@432) show neither — or both — sides as WSOL, BEFORE any CPI. Exactly one WSOL side is required in v1.0; both orientations (coin=WSOL, pc=WSOL) are supported and fork-proven (Phase 3, CPI-010 retired). USDC/USDT-style settlement (no WSOL side) remains a v1.1 deliverable. |
+| 7020 | `DustNothingToSweep` | `sweep_dust` found no retained memecoin: the vault memecoin ATA is empty (the conversion leg fully drained it) or the pool was fully converted. Phase 4, D6. |
+| 7021 | `DustAlreadySwept` | `sweep_dust` already ran for this pool: the receipt stamps `dust_swept_at_ts` and a second sweep would double-credit the treasury. One-shot by design (Phase 4, D6). |
 
 ## Drift from the v3.0 .docx snapshot
 

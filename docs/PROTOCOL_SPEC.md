@@ -9,7 +9,20 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.6.0 — Phase 3: the Jupiter conversion pipeline proven
+> **Revisions:** rev 1.7.0 — Phase 4: settlement economics proven and the
+> D6 dust policy implemented. `salvage_pool` records `memecoin_mint` and
+> the retained memecoin amount (`dust_memecoin_lamports`) on the receipt
+> (below-threshold dust AND swap-leg route residual; existing receipt byte
+> offsets stable, pinned by a layout unit test); the new permissionless
+> one-shot `sweep_dust` instruction recovers the retained memecoin to the
+> protocol treasury's ATA, closes the vault ATA (rent to the caller), and
+> stamps `dust_swept_at_ts` (D6 retired — `DustNothingToSweep` 7020 /
+> `DustAlreadySwept` 7021). The D7 invariant is proven end-to-end in the
+> new `settlement_economics_fork.rs` (default AND custom share configs;
+> exact conservation; rounding remainder accrues to protocol by
+> construction) together with the claims-side economics (real Merkle
+> tree, exact pro-rata floors, no-overclaim, claims live during pause).
+> rev 1.6.0 — Phase 3: the Jupiter conversion pipeline proven
 > end-to-end in the fork harness (real withdraw + real V4 swapBaseIn against
 > byte-for-byte mainnet state of BOTH orientations — SOL/USDC coin=WSOL and
 > RAY/WSOL pc=WSOL — through a documented test-only stand-in deployed at the
@@ -416,6 +429,10 @@ violate it).
 | Snapshot consistency | `lp_total_supply_at_snapshot` must equal the live LP mint supply (`InvalidSnapshotData`). |
 | 40/40/20 shares sum to 10_000 bps; protocol share ≤ 20% | Re-checked in `salvage_pool` and in `update_protocol_config`; ceiling is a `const`. |
 | Settlement conservation | Protocol share is computed as the remainder (`total − salvor − lp`), so the three transfers exactly exhaust the recovered lamports; no dust or remainder is dropped from accounting. |
+| D7 invariant proven on real fixtures | `settlement_economics_fork.rs` (Phase 4): exact conservation for the default 40/40/20 AND a custom asymmetric config (4001/4000/1999); floor roundings accrue to the protocol share; host unit tests pin `split_proceeds` for the rounding edges the fixtures cannot reach. |
+| Retained memecoin is recorded, never silently lost | The receipt carries `memecoin_mint` + `dust_memecoin_lamports` (below-threshold dust and route residual alike); the settlement splits only the WSOL side. |
+| Dust recovery is permissionless, one-shot, and unpinnable | `sweep_dust` moves the vault memecoin ATA balance to the treasury ATA (destination pinned by derivation), closes the ATA (rent to the caller), stamps the receipt; foreign mint 7013, empty ATA 7020, second sweep 7021; a hijacked destination fails with zero state movement (fork-proven). |
+| Claims economics hold to the lamport | Fork-proven with a real 3-holder Merkle tree: exact `floor(lp_share × balance / supply)` payouts, cumulative-claimed tracking, claim-side rounding remainder stays in the bucket, double claims fail, claims live during pause. |
 | `lp_holder_pool_vault` cannot be swept by any key | No instruction path other than `claim_lp_proceeds` debits it. |
 | One claim per (pool, holder); no overclaim | `ClaimRecord` init-on-PDA + Merkle proof + cumulative-claimed cap (`ClaimAlreadyProcessed`, `InvalidClaimProof`). |
 | Claims survive pause | `claim_lp_proceeds` does not read the pause flag. |
@@ -455,9 +472,11 @@ violate it).
   ratio (see D4). Pools where a better route exists off-pool are
   unaffected (better routes pass).
 - No on-chain timelock on config changes (see D2).
-- No recovery path for memecoin dust below the Jupiter dust threshold
-  within the same salvage (retained in the vault memecoin ATA, logged;
-  policy = D6/Phase 4).
+- Memecoin retained below the Jupiter dust threshold (or as route
+  residual) stays OUT of the settlement until someone calls
+  `sweep_dust`: it is recorded on the receipt and recoverable
+  permissionlessly to the treasury ATA (D6/Phase 4), but it is never
+  converted within the same salvage and never distributed as proceeds.
 - No protection against a front-run salvage race between competing
   salvors beyond first-transaction-wins (single `PoolRegistry` slot).
 - No on-chain revocation of a **live** cert: `invalidate_anchor`
@@ -535,13 +554,22 @@ would not catch a mismatched destination on Raydium's plain transfers.
 Both WSOL orientations are proven end-to-end by the Phase 3 fork
 harness (SOL/USDC and RAY/WSOL fixtures).
 
-**D6 — Dust policy.** Memecoin output below
+**D6 — Dust policy (Phase 4).** Memecoin output below
 `jupiter_dust_threshold_lamports` (default 666_666 lamports-equivalent)
 is **not** swapped: the skip is logged, the tokens remain in the vault
-memecoin ATA, and the receipt records SOL amounts only. A complete dust
-policy (ATA closure, sweep destination, receipt field for dust amount)
-is a Phase 4 deliverable; until then the protocol accounts for dust as
-"retained, unconverted" rather than pretending it was distributed.
+memecoin ATA, and the settlement covers only the WSOL side. The retained
+amount is RECORDED on the receipt (`dust_memecoin_lamports`, alongside
+`memecoin_mint`) and is never counted as distributed proceeds —
+"retained, unconverted". The recovery path is the permissionless one-shot
+`sweep_dust`: it transfers the vault memecoin ATA's ENTIRE balance
+(covering the skip path and any swap-leg route residual alike) to the
+protocol treasury's ATA for the same mint — destination pinned by ATA
+derivation, so no caller can redirect value — closes the vault ATA
+(rent reclaimed by the caller), stamps `dust_swept_at_ts`, and emits
+`DustSwept`. Reverts: foreign mint (`PreflightFailed` 7013), empty ATA
+(`DustNothingToSweep` 7020), second sweep (`DustAlreadySwept` 7021).
+`lp_holder_pool_vault` is untouched (Charter). Fork-proven by
+`settlement_economics_fork.rs` (record/sweep/adversarial matrix).
 
 **D7 — Settlement invariant (normative).** For every successful
 salvage:

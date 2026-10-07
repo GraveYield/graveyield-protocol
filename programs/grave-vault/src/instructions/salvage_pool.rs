@@ -50,9 +50,11 @@
 //          b. Assert the swap-leg output (post-swap vault WSOL balance
 //             minus base_received) >= min_quote_output_lamports
 //             (SlippageExceeded otherwise) — the D4 Jupiter-leg floor.
-//        Else: skip swap. Memecoin remains in the vault token account; it
-//        is unrecoverable for this salvage but is documented in the
-//        SalvageReceipt (dust policy: D6 / Phase 4).
+//        Else: skip swap (D6). The retained memecoin is NOT lost and NOT
+//        distributed: it stays in the vault memecoin ATA, is recorded on
+//        the SalvageReceipt (`dust_memecoin_lamports`), and is recovered
+//        permissionlessly by `sweep_dust` (Phase 4) — treasury ATA
+//        destination, ATA closure, one-shot via `dust_swept_at_ts`.
 //    15. Close vault_base_token_account (now holding the entire WSOL
 //        recovery): destination = vault_sol_holding_account. Returns
 //        WSOL + rent as native SOL.
@@ -587,18 +589,15 @@ pub fn handler<'info>(
             GraveVaultError::SlippageExceeded
         );
     } else {
-        // Dust below threshold — emit log so the indexer can flag it but
-        // don't revert. Memecoin balance remains in the vault token
-        // account; rent-reclaim is a follow-up admin path (not m5).
-        //
-        // PRE-MAINNET-TODO(DUST): retained memecoin has no closure, sweep, or
-        // recovery path and the SalvageReceipt carries no field for it |
-        // reverts: none (logged and skipped; BelowDustThreshold is reserved
-        // and never raised) | verify: define the dust policy (ATA closure /
-        // sweep destination / receipt field) in Phase 4 before mainnet
-        // (PROTOCOL_SPEC.md D6)
+        // Dust below threshold (D6) — emit log so the indexer can flag it
+        // but don't revert. Phase 4 policy: the retained memecoin stays in
+        // the vault token account, is recorded on the SalvageReceipt
+        // (`dust_memecoin_lamports`, written below from the ATA's final
+        // balance so it covers this path AND any swap-leg route residual),
+        // and is recovered permissionlessly via `sweep_dust` (protocol
+        // treasury ATA destination + vault-ATA closure, one-shot).
         msg!(
-            "salvage_pool: memecoin {} below dust threshold {}; skipping Jupiter swap",
+            "salvage_pool: memecoin {} below dust threshold {}; skipping Jupiter swap (recoverable via sweep_dust)",
             removal.memecoin_received,
             cfg.jupiter_dust_threshold_lamports
         );
@@ -655,20 +654,8 @@ pub fn handler<'info>(
     );
 
     let total = total_recovered_wsol;
-    let salvor_share = (total as u128)
-        .checked_mul(cfg.salvor_share_bps as u128)
-        .ok_or(error!(GraveVaultError::MathOverflow))?
-        .checked_div(BPS_DENOMINATOR as u128)
-        .ok_or(error!(GraveVaultError::MathOverflow))? as u64;
-    let lp_holder_share = (total as u128)
-        .checked_mul(cfg.lp_holder_share_bps as u128)
-        .ok_or(error!(GraveVaultError::MathOverflow))?
-        .checked_div(BPS_DENOMINATOR as u128)
-        .ok_or(error!(GraveVaultError::MathOverflow))? as u64;
-    let protocol_share = total
-        .checked_sub(salvor_share)
-        .and_then(|x| x.checked_sub(lp_holder_share))
-        .ok_or(error!(GraveVaultError::MathOverflow))?;
+    let (salvor_share, lp_holder_share, protocol_share) =
+        split_proceeds(total, cfg.salvor_share_bps, cfg.lp_holder_share_bps)?;
 
     // Three system transfers, all signed by vault_authority. We could also
     // bypass system_program by directly decrementing/incrementing lamports
@@ -723,6 +710,15 @@ pub fn handler<'info>(
     receipt.total_proceeds_lamports = total;
     receipt.issued_at_slot = clock.slot;
     receipt.issued_at_ts = clock.unix_timestamp;
+    // Phase 4 (D6): the receipt now fully identifies the memecoin side and
+    // records exactly how much of it the vault retained (below-threshold
+    // dust or route residual). The retained amount is outside the 40/40/20
+    // settlement; `sweep_dust` recovers it to the treasury ATA and stamps
+    // `dust_swept_at_ts` (0 = not yet swept).
+    ctx.accounts.vault_memecoin_token_account.reload()?;
+    receipt.memecoin_mint = ctx.accounts.memecoin_mint.key();
+    receipt.dust_memecoin_lamports = ctx.accounts.vault_memecoin_token_account.amount;
+    receipt.dust_swept_at_ts = 0;
     receipt.bump = ctx.bumps.salvage_receipt;
     receipt._reserved = [0u8; 32];
 
@@ -812,6 +808,38 @@ fn effective_slippage_cap_bps(config_bps: u16, override_bps: Option<u16>) -> u16
     }
 }
 
+/// D7 settlement split (normative). Returns
+/// `(salvor_share, lp_holder_share, protocol_share)` where the first two
+/// are `floor(total × bps / 10_000)` and the protocol share is the
+/// REMAINDER — so the three transfers exactly exhaust `total` with no
+/// rounding loss dropped from accounting, and rounding losses accrue to
+/// the protocol share by construction.
+///
+/// Validated by the fork harness end-to-end (Phase 4,
+/// `settlement_economics_fork.rs`) and by the unit tests below for the
+/// rounding edges the real fixtures cannot reach.
+pub(crate) fn split_proceeds(
+    total: u64,
+    salvor_share_bps: u16,
+    lp_holder_share_bps: u16,
+) -> Result<(u64, u64, u64)> {
+    let salvor = (total as u128)
+        .checked_mul(salvor_share_bps as u128)
+        .ok_or(error!(GraveVaultError::MathOverflow))?
+        .checked_div(BPS_DENOMINATOR as u128)
+        .ok_or(error!(GraveVaultError::MathOverflow))? as u64;
+    let lp = (total as u128)
+        .checked_mul(lp_holder_share_bps as u128)
+        .ok_or(error!(GraveVaultError::MathOverflow))?
+        .checked_div(BPS_DENOMINATOR as u128)
+        .ok_or(error!(GraveVaultError::MathOverflow))? as u64;
+    let protocol = total
+        .checked_sub(salvor)
+        .and_then(|x| x.checked_sub(lp))
+        .ok_or(error!(GraveVaultError::MathOverflow))?;
+    Ok((salvor, lp, protocol))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -840,6 +868,67 @@ mod tests {
         assert_eq!(effective_slippage_cap_bps(5_000, Some(2_000)), 1_000);
         // Zero override = strictest possible cap.
         assert_eq!(effective_slippage_cap_bps(300, Some(0)), 0);
+    }
+
+    // ---- split_proceeds (D7 settlement invariant)
+
+    /// The protocol share is the remainder and always covers the floored
+    /// protocol-bps amount: rounding losses accrue to it, never away.
+    fn assert_d7(total: u64, salvor_bps: u16, lp_bps: u16) {
+        let (s, l, p) = split_proceeds(total, salvor_bps, lp_bps).unwrap();
+        assert_eq!(s, (total as u128 * salvor_bps as u128 / 10_000) as u64);
+        assert_eq!(l, (total as u128 * lp_bps as u128 / 10_000) as u64);
+        // Conservation: the three shares EXACTLY exhaust the total.
+        assert_eq!(s + l + p, total, "D7 violated at total={total}");
+        // The remainder never under-pays the floored protocol bps.
+        let p_floor =
+            (total as u128 * (10_000 - salvor_bps as u128 - lp_bps as u128) / 10_000) as u64;
+        assert!(p >= p_floor, "protocol share below floor at total={total}");
+    }
+
+    #[test]
+    fn split_defaults_40_40_20() {
+        assert_d7(1_000_000_000, 4_000, 4_000);
+        // Odd totals: floors bite, remainder lands on protocol.
+        assert_d7(1, 4_000, 4_000);
+        assert_d7(9_999, 4_000, 4_000);
+        assert_d7(123_457, 4_000, 4_000);
+    }
+
+    #[test]
+    fn split_sub_lamport_totals_round_entirely_to_protocol() {
+        // total = 1: both 40% floors are 0, protocol absorbs the whole unit.
+        let (s, l, p) = split_proceeds(1, 4_000, 4_000).unwrap();
+        assert_eq!((s, l, p), (0, 0, 1));
+        // total = 9999: 40% floors are 3999 each, protocol gets 2001
+        // (its bps floor 1999 + the two lamports lost to rounding).
+        let (s, l, p) = split_proceeds(9_999, 4_000, 4_000).unwrap();
+        assert_eq!((s, l, p), (3_999, 3_999, 2_001));
+    }
+
+    #[test]
+    fn split_asymmetric_shares_remainder_by_construction() {
+        // The harness's custom-config shape: lp=4001, salvor=4000,
+        // protocol=1999 (sum 10_000, protocol within the 20% ceiling).
+        assert_d7(1_000_001, 4_000, 4_001);
+        // Rounding edge: total = 10_001 → salvor floor 4000
+        // (10001*4000/10000 = 4000.4), lp floor 4001
+        // (10001*4001/10000 = 4001.4); both floors pay their full bps here
+        // and protocol takes exactly its 1999-bps floor.
+        let (s, l, p) = split_proceeds(10_001, 4_000, 4_001).unwrap();
+        assert_eq!((s, l, p), (4_000, 4_001, 2_000));
+    }
+
+    #[test]
+    fn split_extreme_shares_stay_exact() {
+        // 100% / 0% / 0%-shaped configs must still conserve exactly.
+        assert_d7(u64::MAX, 10_000, 0);
+        assert_d7(u64::MAX, 0, 10_000);
+        assert_d7(u64::MAX, 0, 0);
+        // u64::MAX with the default split: u128 intermediates cannot
+        // overflow (u64::MAX * 10_000 << u128::MAX) and the floors fit
+        // back into u64 by construction.
+        assert_d7(u64::MAX, 4_000, 4_000);
     }
 
     // ---- derive_pool_orientation (CPI-010)

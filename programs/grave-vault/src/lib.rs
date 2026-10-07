@@ -97,4 +97,14 @@ pub mod grave_vault {
     ) -> Result<()> {
         instructions::claim_lp_proceeds::handler(ctx, params)
     }
+
+    /// Permissionless (Phase 4, D6 dust policy). Recovers the memecoin
+    /// retained in the vault memecoin ATA after a salvage (below-threshold
+    /// dust or route residual — see `SalvageReceipt.dust_memecoin_lamports`)
+    /// to the protocol treasury's ATA for the same mint, closes the vault
+    /// ATA (rent reclaimed by the caller), and stamps the receipt. The
+    /// destination is pinned by ATA derivation and cannot be redirected.
+    pub fn sweep_dust(ctx: Context<SweepDust>, params: SweepDustParams) -> Result<()> {
+        instructions::sweep_dust::handler(ctx, params)
+    }
 }
