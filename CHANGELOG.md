@@ -1,5 +1,57 @@
 # Changelog
 
+## [Unreleased — Phase 1.4: eligibility certificate lifecycle (B4)]
+
+### Added
+- **Expiry-gated cert reissuance (spec `PROTOCOL_SPEC.md` §7 / decision
+  D10).** The `EligibilityCert` PDA was init-once: once it expired, the
+  pool's salvage path was permanently bricked — the vault's
+  `EligibilityCertExpired` (7002) message said "Re-run Phase 2", but
+  re-running Phase 2 reverted on re-creating an existing PDA. Phase 2
+  now creates the cert with `init_if_needed` and reissues it **in
+  place** once expired. One gate governs all lifecycle states: a fresh
+  (zeroed) PDA reads as expired (`expires_at == 0`), an expired cert is
+  reissuable, and a **live** cert reverts the new error 6034
+  `CertStillValid` — two live certs for one pool are structurally
+  impossible (single PDA + gate). Every reissue re-runs the full Phase 2
+  verification stack (fresh C1 attestation, six criteria, locker
+  evidence, mint-pair check, bitmap equality); there is no shortcut
+  path to a cert.
+- **`EligibilityCert.reissue_generation`** — auditable counter of
+  repeated Phase 2 attempts (1 = first issue, N = Nth reissue), carved
+  out of `_reserved` (64 → 56 bytes; total account size unchanged).
+  `EligibilityCertIssued` events now carry `generation`.
+- **Cert lifecycle host tests** — inclusive expiry boundary
+  (`[issued_at, expires_at)`), zeroed-fresh reissuability, live-cert
+  gate, layout stability, and a borsh roundtrip of the reissue
+  overwrite.
+- **Scanner error 6034** — `CertStillValid` (lock test extended to
+  6000–6034).
+
+### Changed
+- **`evaluate_pool_phase2` behavior:** a second Phase 2 call on an
+  expired cert now succeeds (in-place reissue) instead of reverting
+  `AccountAlreadyInitialized`; a call on a live cert reverts 6034. No
+  instruction data changed. `grave-scanner` now enables the
+  `anchor-lang` `init-if-needed` cargo feature (the reinitialization-
+  attack surface is closed by the expiry gate + unconditional full-field
+  rewrite; the vault already used the same feature for its PDAs).
+- **Failed salvage semantics documented** (no state change needed): a
+  reverting `salvage_pool` leaves the cert untouched (retry within the
+  TTL works); the vault's init-once `PoolRegistry`/`SalvageReceipt` PDAs
+  permanently settle a salvaged pool; a drained pool fails
+  re-certification at Criterion 3 (minimum TVL) regardless.
+- **Documented v1.0 boundaries (spec §6.4):** no on-chain revocation of
+  a live cert (`invalidate_anchor` censors the certification path
+  upstream only) and no post-salvage cert rent recovery — both reserved
+  for future revisions.
+
+### Verified
+- `cargo test -p grave-scanner` 81/81 (76 → 81: +5 cert lifecycle),
+  `cargo test -p grave-vault` 9/9, `clippy -D warnings` clean (scanner
+  + vault), `fmt --check` clean, terminology lint pass, workspace
+  typecheck green.
+
 ## [Unreleased — Phase 1.3: authoritative launch price (ORACLE-001)]
 
 ### Added

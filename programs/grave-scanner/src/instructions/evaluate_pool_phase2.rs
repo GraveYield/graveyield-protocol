@@ -6,6 +6,22 @@
 // floored at MIN_CERT_TTL_SECONDS=600s). GraveVault consumes the cert to
 // authorise `salvage_pool`.
 //
+// Cert lifecycle (spec D10, Phase 1.4): the cert PDA is created with
+// `init_if_needed` and the handler re-issues IN PLACE when the existing
+// cert is expired. One gate covers every state: a fresh (zeroed) PDA has
+// `expires_at == 0` (reissuable), an expired cert is reissuable, a live
+// cert reverts `CertStillValid` (6034) — so two live certs for one pool
+// are structurally impossible (single PDA + this gate). Reissuance runs
+// the FULL verification stack below — fresh C1 attestation, six criteria,
+// locker evidence, mint-pair check, bitmap equality. There is no
+// shortcut path to a cert.
+//
+// Failed salvage needs no special handling: `salvage_pool` reverts
+// atomically (cert untouched — retry within the TTL works), the vault's
+// init-once PoolRegistry/SalvageReceipt PDAs permanently settle a
+// salvaged pool, and a drained pool fails re-certification at Criterion
+// 3 (min TVL) regardless.
+//
 // Phase 2 also enforces that the bitmap matches the originating
 // EligibilityAnchor — a Phase 1 pass cannot be downgraded silently.
 
@@ -46,8 +62,12 @@ pub struct EvaluatePoolPhase2<'info> {
     )]
     pub eligibility_anchor: Account<'info, EligibilityAnchor>,
 
+    // `init_if_needed` + the expiry gate in the handler implement the
+    // D10 lifecycle: first issue on a fresh PDA, in-place reissue after
+    // expiry, `CertStillValid` on a live cert. The handler writes every
+    // field unconditionally, so no stale data survives a reissue.
     #[account(
-        init,
+        init_if_needed,
         payer = writer,
         space = 8 + EligibilityCert::INIT_SPACE,
         seeds = [
@@ -175,6 +195,16 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
         GraveScannerError::CriteriaBitmapMismatch
     );
 
+    // Lifecycle gate (spec D10): a live cert can never be overwritten.
+    // A fresh PDA (expires_at == 0) and an expired cert both pass — the
+    // account is then fully rewritten below.
+    require!(
+        ctx.accounts
+            .eligibility_cert
+            .is_expired(clock.unix_timestamp),
+        GraveScannerError::CertStillValid
+    );
+
     let cert = &mut ctx.accounts.eligibility_cert;
     cert.amm_program_id = params.amm_program_id;
     cert.pool_address = params.pool_address;
@@ -190,8 +220,14 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
         .checked_add(cfg.cert_ttl_seconds)
         .ok_or(GraveScannerError::MathOverflow)?;
     cert.criteria_bitmap = bitmap;
+    // 1 = first issue, N = Nth reissue (auditable repeated-Phase-2
+    // counter; the zeroed fresh PDA starts at 0).
+    cert.reissue_generation = cert
+        .reissue_generation
+        .checked_add(1)
+        .ok_or(GraveScannerError::MathOverflow)?;
     cert.bump = ctx.bumps.eligibility_cert;
-    cert._reserved = [0u8; 64];
+    cert._reserved = [0u8; 56];
 
     emit!(EligibilityCertIssued {
         amm_program_id: params.amm_program_id,
@@ -201,6 +237,7 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
         cert_epoch: cert.cert_epoch,
         expires_at: cert.expires_at,
         criteria_bitmap: bitmap,
+        generation: cert.reissue_generation,
     });
 
     Ok(())
@@ -215,4 +252,6 @@ pub struct EligibilityCertIssued {
     pub cert_epoch: u64,
     pub expires_at: i64,
     pub criteria_bitmap: u8,
+    /// 1 = first issue, N = Nth reissue (spec D10).
+    pub generation: u64,
 }

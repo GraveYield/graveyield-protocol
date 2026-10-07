@@ -9,16 +9,20 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.3.0 — Phase 1.3: C2 evidence implemented
-> (oracle-signed 168-byte Ed25519 launch-price attestation, ORACLE-001
-> retired; new `launch_price_oracle` config field; launch price defined
-> as the pre-first-swap reserve ratio; §2.1, §4 C2, §5, §6.1/6.3/6.4,
-> §7 D9, §8 row 12, §9 updated; breaking change to the
-> `record_launch_price` instruction data). rev 1.2.0 — Phase 1.2: C1
-> evidence implemented (indexer-signed Ed25519 last-swap attestation,
-> ORACLE-002 retired; new `activity_oracle` config field; §4 C1, §5,
-> §6.1/6.3, §7 D8, §8 row 11, §9 updated; breaking change to the
-> `evaluate_pool_*` instruction data). rev 1.1.0 — Phase 1.1: C5
+> **Revisions:** rev 1.4.0 — Phase 1.4: EligibilityCert lifecycle fixed
+> (B4): the Phase 2 cert PDA is expiry-gated reissuable in place
+> (`init_if_needed` + `CertStillValid` gate, new `reissue_generation`
+> counter, new error 6034; §2, §2.1, §3, §6.1/6.4, §7 D10, §8 row 9
+> updated; no instruction-data or account-size change). rev 1.3.0 —
+> Phase 1.3: C2 evidence implemented (oracle-signed 168-byte Ed25519
+> launch-price attestation, ORACLE-001 retired; new `launch_price_oracle`
+> config field; launch price defined as the pre-first-swap reserve ratio;
+> §2.1, §4 C2, §5, §6.1/6.3/6.4, §7 D9, §8 row 12, §9 updated; breaking
+> change to the `record_launch_price` instruction data). rev 1.2.0 —
+> Phase 1.2: C1 evidence implemented (indexer-signed Ed25519 last-swap
+> attestation, ORACLE-002 retired; new `activity_oracle` config field;
+> §4 C1, §5, §6.1/6.3, §7 D8, §8 row 11, §9 updated; breaking change to
+> the `evaluate_pool_*` instruction data). rev 1.1.0 — Phase 1.1: C5
 > evidence implemented (UNCX Raydium AMM V4 locker adapter, LOCKER-001
 > retired; §4 C5, §5, §6, §8 row 10 updated). All other sections
 > unchanged from the Phase 0 freeze.
@@ -69,7 +73,7 @@ revision is out of scope.
 | `initialize` | Creates `ProtocolConfig` (thresholds, cert TTL, pause flag). |
 | `record_launch_price` | Creates the init-once `LaunchPrice` PDA (Criterion 2 baseline) — only from an oracle-signed Ed25519 attestation (D9). |
 | `evaluate_pool_phase_1` | Evaluates all six criteria; writes `EligibilityAnchor` stamped with `first_eligible_epoch`. |
-| `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap; requires bitmap equality with the anchor; issues `EligibilityCert`. |
+| `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap; requires bitmap equality with the anchor; issues the `EligibilityCert` — or reissues it in place once expired (`CertStillValid` on a live cert; D10). |
 | `invalidate_anchor` | Multisig-only: marks an anchor `invalidated` (censors a wrong Phase 1 pass). |
 | `sweep_stale_anchor` | Permissionless rent reclaim for uncertified anchors older than `anchor_staleness_seconds` (default 14 days). |
 | `update_protocol_config` | Multisig-only threshold updates, bounded (cert TTL floor 600s; collapse bps ≤ 10_000). |
@@ -92,7 +96,7 @@ revision is out of scope.
 | `ProtocolConfig` | both | `["protocol_config"]` | governance-writable |
 | `LaunchPrice` | scanner | `["launch_price", amm_program_id, pool]` | init-once |
 | `EligibilityAnchor` | scanner | `["eligibility_anchor", amm_program_id, pool]` | once per anchor epoch; sweepable when stale |
-| `EligibilityCert` | scanner | `["eligibility_cert", amm_program_id, pool]` | init-once (lifecycle defect B4 — see §8) |
+| `EligibilityCert` | scanner | `["eligibility_cert", amm_program_id, pool]` | expiry-gated reissuance in place (D10) |
 | `PoolRegistry` | vault | `["pool_registry", pool]` | init-once at salvage |
 | `SalvageReceipt` | vault | `["salvage_receipt", pool]` | init-once at salvage |
 | `lp_holder_pool_vault` | vault | `["lp_holder_pool", pool]` | system-owned; only `claim_lp_proceeds` debits |
@@ -124,8 +128,13 @@ evaluate_pool_phase_1 ── all six criteria pass? ──> EligibilityAnchor
                                                        |
                                                        v
 evaluate_pool_phase_2 ── six criteria re-pass AND bitmap == anchor? ──> EligibilityCert
-        |                                                                (expires_at = now + cert_ttl_seconds)
-        x (reject / EpochConfirmationPending / CriteriaBitmapMismatch)
+        |                            AND cert expired-or-absent (D10)   (expires_at = now + cert_ttl_seconds,
+        |                                                                reissue_generation += 1)
+        x (reject / EpochConfirmationPending / CriteriaBitmapMismatch /
+           CertStillValid — live cert may not be overwritten)
+                                                       |
+          cert expires ────────────────────────────────<
+          (re-run Phase 2: full re-verification, in-place reissue)
                                                        |
                                                        v  (before expires_at)
 salvage_pool:
@@ -147,6 +156,22 @@ claim_lp_proceeds: Merkle proof (holder, balance_at_snapshot) against
 A pool is settled **at most once**: `PoolRegistry` and `SalvageReceipt`
 are `init`-constrained to the same pool PDA, so a second `salvage_pool`
 reverts before any lamports move.
+
+**Cert lifecycle (D10, Phase 1.4).** A cert PDA is issued by Phase 2,
+stays valid until `expires_at`, and is reissued **in place** by a later
+Phase 2 run once — and only once — it has expired: the PDA is created
+with `init_if_needed` and the handler reverts `CertStillValid`
+(6034) while a live cert exists, so two live certs for one pool are
+structurally impossible and a reissue always re-runs the full
+verification stack (fresh C1 attestation, six criteria, locker
+evidence, mint-pair check, bitmap equality). A fresh (zeroed) PDA reads
+as expired (`expires_at == 0`), which is why one gate governs first
+issue and every reissue. `reissue_generation` counts issues (1 = first
+issue). A **failed salvage** needs no extra state: the transaction
+reverts atomically (the cert is untouched — retry within the TTL
+works), the init-once registry/receipt PDAs permanently settle a
+salvaged pool, and a drained pool fails re-certification at Criterion 3
+(minimum TVL) regardless.
 
 ## 4. What makes a pool derelict — the six criteria
 
@@ -346,6 +371,7 @@ violate it).
 | All six criteria hold at Phase 1 and again at Phase 2 | Single pure evaluator; bitmap `0x3F` required. |
 | No silent downgrade between phases | Phase 2 bitmap must equal anchor bitmap (`CriteriaBitmapMismatch`). |
 | Multi-epoch cooling-off | `MIN_EPOCH_CONFIRMATION = 2` between anchor and cert. |
+| Expired certs never brick a pool; two live certs per pool are impossible | Phase 2 reissues the cert PDA in place once `expires_at` has passed (`init_if_needed`); a live cert cannot be overwritten (`CertStillValid`, 6034); `reissue_generation` counts issues (D10). |
 | Cert freshness and binding | `salvage_pool` rejects expired certs, foreign pools, foreign AMM IDs, non-`0x3F` bitmaps. |
 | One salvage per pool, ever | `PoolRegistry` + `SalvageReceipt` init-on-PDA. |
 | LP is deposited before it is burned | Salvor-signed SPL transfer into the vault LP ATA; withdraw burns the full vault balance. |
@@ -395,6 +421,13 @@ violate it).
   policy = D6/Phase 4).
 - No protection against a front-run salvage race between competing
   salvors beyond first-transaction-wins (single `PoolRegistry` slot).
+- No on-chain revocation of a **live** cert: `invalidate_anchor`
+  censors the certification path upstream, but a cert already issued
+  remains salvageable until `expires_at` (governance revocation of live
+  certs is reserved for a future revision; see D10).
+- No rent-recovery path for cert PDAs after a successful salvage (the
+  cert PDA persists; reissue overwrites it in place). Reserved for a
+  future close instruction.
 - No non-WSOL quote/base support (see D5).
 - No C2 evaluation for pools launched above a ~2^114.6 Q64.64
   quote-per-base ratio: the `drop × 10_000` intermediate overflows u128
@@ -527,6 +560,39 @@ boundary. This is a **breaking change** to the `record_launch_price`
 instruction data (added `msg: [u8; 168]` + `protocol_config` +
 `instruction_sysvar` accounts), accepted pre-mainnet.
 
+**D10 — Cert lifecycle: expiry-gated in-place reissuance (Phase 1.4).**
+The `EligibilityCert` PDA — the only artifact whose expiry previously
+permanently bricked a pool's salvage path (B4) — is now **reissued in
+place by Phase 2 itself** once it has expired. The account is created
+with `init_if_needed`; the handler reverts `CertStillValid` (6034)
+while the existing cert is live, so a live cert can never be
+overwritten and two live certs for one pool are structurally
+impossible (one PDA per pool + this gate). A fresh (zeroed) PDA reads
+as expired (`expires_at == 0`), which lets a single `is_expired` gate
+govern first issue and every reissue; the handler then rewrites every
+field unconditionally (no stale data survives). Reissuance is
+**deliberately not a separate instruction**: a `reissue_cert` entry
+point would duplicate the entire Phase 2 verification stack
+(attestation offsets, six criteria, locker evidence, mint-pair check,
+bitmap equality) and drift over time — running Phase 2 again *is* the
+reissue, and it re-enforces every freshness invariant for free
+(including a fresh C1 attestation, whose Phase 1 copy has necessarily
+aged out of `SlotHashes`). The reinitialization-attack surface of
+`init_if_needed` is closed by the expiry gate + full-field rewrite;
+the account layout is unchanged (`reissue_generation` was carved out
+of `_reserved`, 64 → 56 bytes). Failed salvage requires no new state:
+salvage reverts atomically (cert untouched, retry within TTL works),
+the vault's init-once `PoolRegistry`/`SalvageReceipt` permanently
+settle a salvaged pool, and a drained pool fails re-certification at
+Criterion 3 regardless. Explicitly out of scope (§6.4): on-chain
+revocation of a live cert (an anchor invalidated after issuance does
+not retract the already-issued cert) and post-salvage cert rent
+recovery; both are reserved for future revisions. This is a
+**behavioral** change to `evaluate_pool_phase_2` (second call now
+succeeds on an expired cert instead of reverting
+`AccountAlreadyInitialized`); no instruction data or account size
+changed.
+
 ## 8. Documentation / code discrepancy ledger
 
 | # | Document claim | Reality (code) | Resolution |
@@ -539,7 +605,7 @@ instruction data (added `msg: [u8; 168]` + `protocol_config` +
 | 6 | PRE_MAINNET_CHECKLIST ORACLE-001 refers to a `first_swap_slot` parameter | `RecordLaunchPriceParams` carries no slot reference; `recorded_slot` is write-time clock | **Fixed** — checklist row amended. |
 | 7 | `tests/README.md` implies on-chain priority-fee ceiling enforcement tests | Enforcement is SDK-only (D3) | **Fixed** — wording updated. |
 | 8 | `docs/README.md` canonical set references five living files that do not exist (`technical-documentation.md`, `grave-scanner-grave-vault-combined.md`, `legal-documentation.md`, `ghostpools-research.md`, `architecture/*.md`) and `published/` snapshots | Only `whitepaper.md`, `glossary.md`, `error_codes.md`, `PRE_MAINNET_CHECKLIST.md`, `PROTOCOL_SPEC.md` exist | **Tracked** — pre-existing doc rot; not Phase 0 scope to author five documents. This spec is the governing document meanwhile. |
-| 9 | EligibilityCert lifecycle: cert PDA is init-once | An expired cert permanently bricks that pool's salvage path (B4) | **Tracked** — Phase 1.4 engineering blocker. |
+| 9 | EligibilityCert lifecycle: cert PDA is init-once | An expired cert permanently bricks that pool's salvage path (B4) | **Fixed (Phase 1.4)** — expiry-gated in-place reissuance in Phase 2 (D10): `init_if_needed` + `CertStillValid` (6034) gate on a live cert, `reissue_generation` audit counter; two live certs structurally impossible; failed-salvage retry semantics documented in §3. |
 | 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Fixed (Phase 1.1)** — UNCX Raydium V4 adapter implemented and mainnet-verified; residual scope in §6.3/LOCKER-002. |
 | 11 | `evaluate_pool_*` docs/comments: "last swap timestamp supplied by the salvor SDK and cross-checked by the indexer… taken at face value" (ORACLE-002) | Param was a plain `i64` — C1 was forgeable by any caller | **Fixed (Phase 1.2)** — replaced by the D8 attestation flow; adapter `0` sentinel and dead `PoolData.last_swap_unix_ts` field removed; errors 6024–6031 added; checklist ORACLE-002 retired, ORACLE-003 opened for the operational runbook. |
 | 12 | `record_launch_price` doc-comment: "cross-check launch_price_q64x64 against on-chain pool reserves at the supplied first_swap_slot rather than trusting the caller" (ORACLE-001) | Param was a caller-supplied `u128` written init-once with zero checks — fake-high baselines forged C2 collapses and fake-low baselines permanently denied salvage | **Fixed (Phase 1.3)** — replaced by the D9 attestation flow (168-byte oracle-signed message, mint-pair re-check at evaluation); errors 6032/6033 added; `LaunchPrice` gained attested `first_swap_slot`/`first_swap_unix_ts` provenance; checklist ORACLE-001 retired. |

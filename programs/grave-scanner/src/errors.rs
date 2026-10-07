@@ -187,6 +187,16 @@ pub enum GraveScannerError {
     /// mints before C2 can consume the price.
     #[msg("LaunchPriceMintMismatch: launch price recorded for a different token pair.")]
     LaunchPriceMintMismatch = 33,
+
+    // ----- v4.4 cert lifecycle error codes (6034) -----
+    // CERT-001 (Phase 1.4, expiry-gated cert reissuance / spec D10).
+    /// On-chain code 6034. Phase 2 was re-run while the existing
+    /// EligibilityCert for this pool is still live (before its
+    /// `expires_at`). Overwriting a live cert is forbidden — wait for
+    /// the TTL to elapse, then re-run Phase 2 to reissue. This gate is
+    /// what makes two live certs for one pool structurally impossible.
+    #[msg("CertStillValid: eligibility cert is still live; reissue only after expiry.")]
+    CertStillValid = 34,
 }
 
 #[cfg(test)]
@@ -196,7 +206,7 @@ mod tests {
     /// Locks down the on-chain error code numbering against accidental drift.
     ///
     /// Anchor's `#[error_code]` macro adds the default 6000 offset to every
-    /// Rust discriminant. We rely on the discriminants below being 0..=33
+    /// Rust discriminant. We rely on the discriminants below being 0..=34
     /// (with the 12..=14 gap) so the on-chain codes match the documented
     /// range in `docs/error_codes.md`. A future contributor who
     /// switches to explicit `= 6000`-style discriminants would unknowingly
@@ -235,6 +245,7 @@ mod tests {
             (GraveScannerError::AttestationSlotInvalid, 6031),
             (GraveScannerError::InvalidLaunchPrice, 6032),
             (GraveScannerError::LaunchPriceMintMismatch, 6033),
+            (GraveScannerError::CertStillValid, 6034),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

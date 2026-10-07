@@ -62,6 +62,7 @@ future v4.x additions to the pre-anchor error space.
 | 6031 | `AttestationSlotInvalid` | The attestation's `issued_slot` is zero or in the future relative to the current slot. |
 | 6032 | `InvalidLaunchPrice` | The attested launch price is zero — a price-collapse baseline must be strictly positive. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 / D9. |
 | 6033 | `LaunchPriceMintMismatch` | The recorded launch-price baseline belongs to a different token pair than the live pool under evaluation — the recorded `(base_mint, quote_mint)` must equal the pool's parsed mints before C2 can consume the price. |
+| 6034 | `CertStillValid` | Phase 2 was re-run while the pool's `EligibilityCert` is still live (before `expires_at`). A live cert cannot be overwritten — wait for the TTL to elapse, then re-run Phase 2 to reissue in place (spec D10). This gate makes two live certs for one pool structurally impossible. |
 
 ## GraveVault — 7000-7019
 
@@ -114,4 +115,4 @@ rather than re-tabulating the codes.
 
 ---
 
-*Mirrored from `errors.rs` files on 2026-05-16. Last verified at Phase 1.3 (GraveScanner 6000-6033, GraveVault 7000-7019).*
+*Mirrored from `errors.rs` files on 2026-05-16. Last verified at Phase 1.4 (GraveScanner 6000-6034, GraveVault 7000-7019).*

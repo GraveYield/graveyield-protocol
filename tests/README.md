@@ -22,12 +22,14 @@ Test plan (m1+):
   Scanner → Vault handshake on `solana-test-validator`.
 
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`):
-85 total — scanner 76 (criteria 18 incl. the Phase 1.3 zero-baseline and
+90 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
 extreme-price boundary tests, attestation 31: 16 last-swap [Phase 1.2] +
 15 launch-price [Phase 1.3], adapters 25: raydium_v4 layout 4 + locker 21
-[Phase 1.1], errors 1: the on-chain code lock test covering 6000–6033,
-plus anchor's `test_id`) and vault 9 (merkle 7 + errors 1 + `test_id`;
-the merkle tests require the `solana-sha256-hasher` `sha2`
+[Phase 1.1], cert lifecycle 5 [Phase 1.4: inclusive expiry boundary,
+zeroed-fresh reissuability, live-cert gate, layout stability, borsh
+reissue roundtrip], errors 1: the on-chain code lock test covering
+6000–6034, plus anchor's `test_id`) and vault 9 (merkle 7 + errors 1 +
+`test_id`; the merkle tests require the `solana-sha256-hasher` `sha2`
 dev-dependency feature on host builds). Every manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,
