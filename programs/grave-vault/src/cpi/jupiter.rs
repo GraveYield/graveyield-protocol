@@ -8,9 +8,12 @@
 // `vault_authority` as the signer (the vault owns the source memecoin) and
 // returns the delta of the destination base-token account balance.
 //
-// Slippage is enforced by the caller after this returns — compare the
-// returned `output_amount` against `params.min_quote_output_lamports` (or
-// the dust-threshold pre-check that may have skipped the call entirely).
+// Slippage is enforced by the caller: BEFORE this call the handler gates
+// the submitted `min_quote_output_lamports` against the protocol slippage
+// ceiling over the pool-implied conversion (Phase 3, SLIP-001), and AFTER
+// it returns the swap-leg output is compared against the same floor
+// (`SlippageExceeded`) — or the dust-threshold pre-check skipped the call
+// entirely.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};

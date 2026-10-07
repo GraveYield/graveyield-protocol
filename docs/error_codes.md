@@ -92,7 +92,7 @@ source per the sync convention.
 | 7016 | `JupiterSwapFailed` | Jupiter v6 swap CPI returned an error or zero output. |
 | 7017 | `AmmCpiUnimplemented` | AMM CPI adapter is a pre-mainnet stub (CLMM / Orca Whirlpool / PumpSwap). Pool owner is not the Raydium V4 program. See [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
 | 7018 | `InvalidSnapshotData` | Salvor's `lp_total_supply_at_snapshot` does not match the on-chain LP mint supply at salvage time. |
-| 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. USDC/USDT base support is a v1.1 deliverable. *Reserved: v1.0 hardcodes `base_is_coin_side = true`; non-WSOL-base pools currently fail inside the Raydium CPI as `AmmRedemptionFailed` — see [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) D5 / checklist CPI-010.* |
+| 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. Raised by `salvage_pool` when the pool's on-chain AmmInfo mints (coin@400 / pc@432) show neither — or both — sides as WSOL, BEFORE any CPI. Exactly one WSOL side is required in v1.0; both orientations (coin=WSOL, pc=WSOL) are supported and fork-proven (Phase 3, CPI-010 retired). USDC/USDT-style settlement (no WSOL side) remains a v1.1 deliverable. |
 
 ## Drift from the v3.0 .docx snapshot
 

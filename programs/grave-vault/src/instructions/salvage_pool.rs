@@ -10,35 +10,59 @@
 //     5. Pool account matches params.pool_address.
 //     6. Lazy-init lp_holder_pool_vault (system-owned PDA, 0 data).
 //
-//   Execution (m5, NEW):
+//   Execution (m5 -> Phase 3):
 //     7. Lazy-init vault_sol_holding_account (same pattern).
-//     8. Determine base orientation: which of pool_coin_mint /
-//        pool_pc_mint is WSOL? Revert UnsupportedBaseToken otherwise.
-//     9. SPL transfer: salvor_lp_token_account → vault_lp_token_account
-//        (salvor signs). Amount = params.salvor_lp_amount.
-//    10. Validate vault LP balance == salvor_lp_amount (cross-check).
-//    11. Cross-check params.lp_total_supply_at_snapshot against on-chain
-//        lp_mint.supply — reject if off (InvalidSnapshotData).
-//    12. Dispatch to AMM-specific remove_liquidity CPI. Returns
-//        (base_received, memecoin_received). vault_authority PDA-signs.
-//    13. If memecoin_received >= jupiter_dust_threshold:
-//          a. Jupiter v6 swap CPI: memecoin → WSOL into
+//     8. Derive base orientation from the pool's ON-CHAIN AmmInfo mints
+//        (coin_mint@400 / pc_mint@432): exactly one side must be WSOL,
+//        else `UnsupportedBaseToken` (7019) BEFORE any CPI (CPI-010).
+//        The submitted `lp_mint` and `memecoin_mint` are bound to the
+//        pool's own bytes (PreflightFailed 7013 otherwise).
+//     9. LP is burned IN PLACE in the salvor's account by the Raydium V4
+//        withdraw CPI: the salvor signs the salvage transaction and acts
+//        as the withdraw's `user_owner`; proceeds land in vault-owned
+//        token accounts. `vault_authority` PDA-signs nothing on this leg.
+//    10. Validate vault LP burn amount == params.salvor_lp_amount and
+//        cross-check params.lp_total_supply_at_snapshot against the
+//        on-chain lp_mint.supply (InvalidSnapshotData).
+//    11. Dispatch to AMM-specific remove_liquidity CPI. Returns
+//        (base_received, memecoin_received) via pre/post balance
+//        snapshots. Requires base_received > 0.
+//    12. Route-account vetting (Phase 3, N1): every Jupiter route account
+//        is checked against the vault's custody/state accounts (registry,
+//        receipt, LP-holder vault, treasury, SOL holding, config, cert,
+//        salvor) — none may appear — and the vault's WSOL destination
+//        account MUST be present. The route is otherwise opaque:
+//        forwarded verbatim, so no route-plan parsing is possible or
+//        needed.
+//    13. Slippage ceiling (Phase 3, SLIP-001/B6): with the swap leg active,
+//        the submitted floor `min_quote_output_lamports` must be at least
+//        the pool-implied conversion minus the effective cap:
+//        floor >= memecoin_received * wsol_reserve / memecoin_reserve
+//               * (1 - cap/10_000),
+//        where the reserves are the POST-withdraw pool vault balances and
+//        cap = min(config.max_slippage_bps, HARD_MAX_SLIPPAGE_BPS) further
+//        tightened by params.max_slippage_bps_override when provided.
+//        Enforced BEFORE the swap CPI (SlippageExceeded 7007) — a salvor
+//        cannot submit a losing floor at all.
+//    14. If memecoin_received >= jupiter_dust_threshold:
+//          a. Jupiter v6 swap CPI: memecoin -> WSOL into
 //             vault_base_token_account. vault_authority PDA-signs.
-//          b. Assert post-swap vault_base.amount >= min_quote_output_lamports
-//             (SlippageExceeded otherwise).
+//          b. Assert the swap-leg output (post-swap vault WSOL balance
+//             minus base_received) >= min_quote_output_lamports
+//             (SlippageExceeded otherwise) — the D4 Jupiter-leg floor.
 //        Else: skip swap. Memecoin remains in the vault token account; it
 //        is unrecoverable for this salvage but is documented in the
-//        SalvageReceipt.
-//    14. Close vault_base_token_account (now holding the entire WSOL
+//        SalvageReceipt (dust policy: D6 / Phase 4).
+//    15. Close vault_base_token_account (now holding the entire WSOL
 //        recovery): destination = vault_sol_holding_account. Returns
 //        WSOL + rent as native SOL.
-//    15. Compute 40/40/20 split via u128 math; rounding remainder routed
+//    16. Compute 40/40/20 split via u128 math; rounding remainder routed
 //        to protocol. Three system_program::transfer calls, all signed
 //        by vault_authority.
-//    16. Populate PoolRegistry (merkle_root, lp_total_supply_at_snapshot,
+//    17. Populate PoolRegistry (merkle_root, lp_total_supply_at_snapshot,
 //        lp_holder_pool_total_lamports).
-//    17. Populate SalvageReceipt (all four amounts + timestamps).
-//    18. Emit PoolSalvaged + SalvageCompleted.
+//    18. Populate SalvageReceipt (all four amounts + timestamps).
+//    19. Emit PoolSalvaged + SalvageCompleted.
 //
 //   The handler is parametric over `'info` because the CPI helpers take
 //   `RemoveLiquidityInput<'_, 'info>` with the slice and the
@@ -53,6 +77,7 @@ use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount};
 
 use crate::constants::*;
 use crate::cpi::jupiter::{swap as jupiter_swap, JupiterSwapInput};
+use crate::cpi::raydium_v4::ra_idx;
 use crate::cpi::{dispatch_remove_liquidity, RemoveLiquidityInput};
 use crate::errors::GraveVaultError;
 use crate::state::{PoolRegistry, ProtocolConfig, SalvageReceipt};
@@ -94,16 +119,10 @@ pub struct SalvagePoolParams {
     /// verbatim to the Jupiter v6 program.
     pub jupiter_route_data: Vec<u8>,
     /// Optional per-tx slippage override (in bps). If `Some`, the effective
-    /// slippage cap is `min(override, config.max_slippage_bps)`. Defaults
-    /// to the protocol config value.
-    ///
-    /// PRE-MAINNET-TODO(SLIP): this parameter is declared but never read, as are
-    /// config.max_slippage_bps and HARD_MAX_SLIPPAGE_BPS — v1.0 on-chain
-    /// enforcement is exactly the Jupiter-leg floor
-    /// (min_quote_output_lamports) below | reverts: SlippageExceeded
-    /// (Jupiter-leg floor only) | verify: wire the global slippage ceiling or
-    /// remove the dead fields before mainnet; docs must not claim a
-    /// protocol-enforced global ceiling until then (PROTOCOL_SPEC.md D4)
+    /// slippage cap tightens to `min(override, config.max_slippage_bps,
+    /// HARD_MAX_SLIPPAGE_BPS)`. A floor below the pool-implied conversion
+    /// minus this cap reverts `SlippageExceeded` BEFORE the swap CPI
+    /// (Phase 3, SLIP-001).
     pub max_slippage_bps_override: Option<u16>,
     /// Number of `route_accounts` for the Jupiter swap — first N accounts
     /// in `remaining_accounts` after the Raydium V4 portion. The Raydium
@@ -333,25 +352,41 @@ pub fn handler<'info>(
     )?;
 
     // ============================================================
-    // m5: base-token orientation + snapshot validation
+    // m5 -> Phase 3: base-token orientation + snapshot validation
     // ============================================================
 
-    // The salvor passes memecoin_mint as part of the named Accounts struct,
-    // and lp_mint similarly. wsol_mint is pinned to So111...112 by the
-    // `#[account(address = WSOL_MINT)]` constraint, so no further check is
-    // needed there. Pool orientation (which side is base/coin vs pc) is
-    // determined by the Raydium V4 adapter based on `base_is_coin_side`
-    // — for v1.0 we just declare it: WSOL is the base. If a salvor passes
-    // a pool whose neither mint is WSOL, the Raydium V4 withdraw CPI will
-    // fail when its mint constraints don't match, surfacing as
-    // AmmRedemptionFailed.
-    //
-    // PRE-MAINNET-TODO(CPI): parse pool data to detect base_is_coin_side
-    // from on-chain mints rather than trusting the salvor's account order.
-    // For m5 we hardcode `base_is_coin_side = true` (most Raydium SOL/X
-    // pools have SOL as the coin side); a salvor with a pool that has
-    // WSOL as PC will need to invert their submission ordering.
-    let base_is_coin_side = true;
+    // Orientation is DERIVED from the pool's on-chain AmmInfo mints, never
+    // trusted from the submission (CPI-010): coin_mint@400 and pc_mint@432
+    // of the 752-byte AmmInfo — offsets proven by the GraveScanner adapter
+    // and byte-verified against mainnet fixtures. Exactly one side must be
+    // the address-pinned WSOL mint; anything else reverts
+    // UnsupportedBaseToken (7019) BEFORE any CPI. The submitted accounts
+    // are then bound to the pool's own bytes so a mis-declared memecoin or
+    // LP mint cannot desynchronise the vault's token accounts from the
+    // pool the cert names (the SPL token program does NOT check
+    // mint-consistency on Raydium's plain transfers). Non-V4 pools skip
+    // the AmmInfo parse — `dispatch_remove_liquidity` reverts them with
+    // AmmCpiUnimplemented (7017) before these values are consumed.
+    let is_raydium_v4_pool = *ctx.accounts.pool.owner == RAYDIUM_V4_PROGRAM_ID;
+    let (base_is_coin_side, pool_memecoin_mint, pool_lp_mint) = if is_raydium_v4_pool {
+        derive_pool_orientation(&ctx.accounts.pool.to_account_info())?
+    } else {
+        (
+            true,
+            ctx.accounts.memecoin_mint.key(),
+            ctx.accounts.lp_mint.key(),
+        )
+    };
+    require_keys_eq!(
+        ctx.accounts.memecoin_mint.key(),
+        pool_memecoin_mint,
+        GraveVaultError::PreflightFailed
+    );
+    require_keys_eq!(
+        ctx.accounts.lp_mint.key(),
+        pool_lp_mint,
+        GraveVaultError::PreflightFailed
+    );
 
     // Snapshot sanity: lp_total_supply_at_snapshot must match the live
     // mint supply at salvage time. The salvor's off-chain LP holder
@@ -418,6 +453,110 @@ pub fn handler<'info>(
     // ============================================================
 
     if removal.memecoin_received >= cfg.jupiter_dust_threshold_lamports {
+        // ============================================================
+        // Phase 3 (N1): route-account vetting. Only runs when the swap leg is
+        // active; the transaction reverts atomically, so a malicious route
+        // submission cannot leave state behind even though the withdraw has
+        // already executed at this point.
+        // ============================================================
+        //
+        // The route itself is opaque (forwarded verbatim — the vault makes no
+        // assumptions about Jupiter's route-plan encoding), so the defenses are
+        // structural:
+        //   1. No route account may be one of the vault's custody/state
+        //      accounts: the pool registry, the salvage receipt, the LP-holder
+        //      pool vault, the protocol treasury, the transient SOL holding
+        //      account, the protocol config, the cert PDA, the salvor, or the
+        //      salvor's LP account. A verbatim-forwarded route whose account
+        //      list includes one of these has no legitimate use — legitimate
+        //      routes reference the swap venue's accounts, not the vault's
+        //      settlement state.
+        //   2. The vault's WSOL destination account MUST be present. A route
+        //      that omits it cannot credit it; requiring it up front gives a
+        //      deterministic 7013 instead of relying solely on the post-swap
+        //      floor (a hijacked destination would deliver 0 and revert below).
+        {
+            const FORBIDDEN: [&str; 9] = [
+                "pool_registry",
+                "salvage_receipt",
+                "lp_holder_pool_vault",
+                "protocol_treasury",
+                "vault_sol_holding_account",
+                "protocol_config",
+                "eligibility_cert",
+                "salvor",
+                "salvor_lp_token_account",
+            ];
+            for route_acct in jupiter_remaining {
+                for name in FORBIDDEN.iter() {
+                    let forbidden_key = match *name {
+                        "pool_registry" => ctx.accounts.pool_registry.key(),
+                        "salvage_receipt" => ctx.accounts.salvage_receipt.key(),
+                        "lp_holder_pool_vault" => ctx.accounts.lp_holder_pool_vault.key(),
+                        "protocol_treasury" => ctx.accounts.protocol_treasury.key(),
+                        "vault_sol_holding_account" => ctx.accounts.vault_sol_holding_account.key(),
+                        "protocol_config" => ctx.accounts.protocol_config.key(),
+                        "eligibility_cert" => ctx.accounts.eligibility_cert.key(),
+                        "salvor" => ctx.accounts.salvor.key(),
+                        "salvor_lp_token_account" => ctx.accounts.salvor_lp_token_account.key(),
+                        _ => unreachable!(),
+                    };
+                    require_keys_neq!(
+                        *route_acct.key,
+                        forbidden_key,
+                        GraveVaultError::PreflightFailed
+                    );
+                }
+            }
+            require!(
+            jupiter_remaining
+                .iter()
+                .any(|a| a.key.as_ref() == ctx.accounts.vault_base_token_account.key().as_ref()),
+            GraveVaultError::PreflightFailed
+        );
+        }
+
+        // ----------------------------------------------------------
+        // Phase 3 (SLIP-001/B6): protocol slippage ceiling.
+        //
+        // The floor a salvor submits must not be more permissive than the
+        // protocol allows RELATIVE to a price the chain can compute
+        // without trusting anyone: the pool's own post-withdraw reserve
+        // ratio. The withdraw is pro-rata, so the ratio is essentially
+        // the pool's pre-withdraw price; the cap absorbs fees, impact and
+        // the PnL skew. cap = min(config.max_slippage_bps,
+        // HARD_MAX_SLIPPAGE_BPS), tightened by the per-tx override when
+        // provided. A floor below the implied conversion minus the cap
+        // reverts BEFORE the swap CPI — a losing route can never even
+        // execute. The Jupiter-leg floor (below) remains the output
+        // bound; this check only governs how lossy a route the salvor may
+        // SUBMIT (D4, as amended by Phase 3).
+        // ----------------------------------------------------------
+        let effective_cap_bps =
+            effective_slippage_cap_bps(cfg.max_slippage_bps, params.max_slippage_bps_override);
+        let coin_vault_amount = read_token_amount(&raydium_remaining[ra_idx::AMM_COIN_VAULT])?;
+        let pc_vault_amount = read_token_amount(&raydium_remaining[ra_idx::AMM_PC_VAULT])?;
+        let (wsol_reserve, memecoin_reserve) = if base_is_coin_side {
+            (coin_vault_amount, pc_vault_amount)
+        } else {
+            (pc_vault_amount, coin_vault_amount)
+        };
+        require!(memecoin_reserve > 0, GraveVaultError::MathOverflow);
+        let implied_wsol_out = (removal.memecoin_received as u128)
+            .checked_mul(wsol_reserve as u128)
+            .ok_or(error!(GraveVaultError::MathOverflow))?
+            .checked_div(memecoin_reserve as u128)
+            .ok_or(error!(GraveVaultError::MathOverflow))?;
+        let min_floor = implied_wsol_out
+            .checked_mul((BPS_DENOMINATOR as u128).saturating_sub(effective_cap_bps as u128))
+            .ok_or(error!(GraveVaultError::MathOverflow))?
+            .checked_div(BPS_DENOMINATOR as u128)
+            .ok_or(error!(GraveVaultError::MathOverflow))?;
+        require!(
+            (params.min_quote_output_lamports as u128) >= min_floor,
+            GraveVaultError::SlippageExceeded
+        );
+
         let _swap_output = {
             let input = JupiterSwapInput {
                 jupiter_program: &ctx.accounts.jupiter_program.to_account_info(),
@@ -607,6 +746,182 @@ pub fn handler<'info>(
 // =====================================================================
 // Helpers
 // =====================================================================
+
+/// Read a token account's `amount` field by deserialising the raw account
+/// data (same approach as the CPI adapters — avoids an `Account<..>`
+/// wrapper on accounts that arrive via `remaining_accounts`).
+fn read_token_amount(info: &AccountInfo) -> Result<u64> {
+    let data = info.try_borrow_data()?;
+    let acct = TokenAccount::try_deserialize(&mut &data[..])
+        .map_err(|_| error!(GraveVaultError::PreflightFailed))?;
+    Ok(acct.amount)
+}
+
+/// Derive the pool's base orientation and mints from the pool's OWN bytes
+/// (CPI-010): the 752-byte Raydium V4 AmmInfo carries coin_mint@400,
+/// pc_mint@432 and lp_mint@464. Exactly one side must be WSOL — pools
+/// without a WSOL side (USDC/USDT-style, a v1.1 deliverable) revert
+/// `UnsupportedBaseToken` (7019) here, BEFORE any CPI, instead of failing
+/// inside the Raydium withdraw as `AmmRedemptionFailed`.
+///
+/// Returns `(base_is_coin_side, memecoin_mint, lp_mint)` so the caller can
+/// bind the submitted accounts to the pool's own bytes. Only valid for
+/// Raydium V4 pools — the caller gates on `pool.owner` and lets
+/// `dispatch_remove_liquidity` reject other AMMs with
+/// `AmmCpiUnimplemented`.
+fn derive_pool_orientation(pool: &AccountInfo) -> Result<(bool, Pubkey, Pubkey)> {
+    let data = pool.try_borrow_data()?;
+    require!(
+        data.len() == RAYDIUM_V4_AMM_INFO_SIZE,
+        GraveVaultError::PreflightFailed
+    );
+    let read_mint = |off: usize| {
+        Pubkey::new_from_array(
+            data[off..off + 32]
+                .try_into()
+                .expect("32-byte slice at a proven offset"),
+        )
+    };
+    let coin_mint = read_mint(RAYDIUM_V4_OFF_COIN_MINT);
+    let pc_mint = read_mint(RAYDIUM_V4_OFF_PC_MINT);
+    let lp_mint = read_mint(RAYDIUM_V4_OFF_LP_MINT);
+    let base_is_coin_side = if coin_mint == WSOL_MINT && pc_mint != WSOL_MINT {
+        true
+    } else if pc_mint == WSOL_MINT && coin_mint != WSOL_MINT {
+        false
+    } else {
+        return Err(error!(GraveVaultError::UnsupportedBaseToken));
+    };
+    let memecoin_mint = if base_is_coin_side {
+        pc_mint
+    } else {
+        coin_mint
+    };
+    Ok((base_is_coin_side, memecoin_mint, lp_mint))
+}
+
+/// Effective on-chain slippage cap in bps (SLIP-001): the protocol config
+/// value clamped by the Charter hard ceiling, further tightened by the
+/// per-tx override when provided. `0` is a legitimate result — it means
+/// the submitted floor must cover the full pool-implied conversion.
+fn effective_slippage_cap_bps(config_bps: u16, override_bps: Option<u16>) -> u16 {
+    let cap = config_bps.min(HARD_MAX_SLIPPAGE_BPS);
+    match override_bps {
+        Some(o) => cap.min(o),
+        None => cap,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- effective_slippage_cap_bps (SLIP-001 wiring)
+
+    #[test]
+    fn cap_uses_config_value_within_hard_ceiling() {
+        assert_eq!(effective_slippage_cap_bps(300, None), 300);
+        assert_eq!(effective_slippage_cap_bps(50, None), 50);
+    }
+
+    #[test]
+    fn cap_clamps_config_to_hard_ceiling() {
+        // A config above the Charter hard ceiling (1_000 bps) is clamped.
+        assert_eq!(effective_slippage_cap_bps(5_000, None), 1_000);
+        assert_eq!(effective_slippage_cap_bps(u16::MAX, None), 1_000);
+    }
+
+    #[test]
+    fn override_only_tightens() {
+        assert_eq!(effective_slippage_cap_bps(300, Some(100)), 100);
+        // A looser override cannot widen the cap.
+        assert_eq!(effective_slippage_cap_bps(300, Some(900)), 300);
+        // The hard ceiling still binds a loosened config + loose override.
+        assert_eq!(effective_slippage_cap_bps(5_000, Some(2_000)), 1_000);
+        // Zero override = strictest possible cap.
+        assert_eq!(effective_slippage_cap_bps(300, Some(0)), 0);
+    }
+
+    // ---- derive_pool_orientation (CPI-010)
+
+    /// Build a synthetic 752-byte AmmInfo with the given mints at the
+    /// proven offsets.
+    fn amm_info_bytes(coin_mint: &Pubkey, pc_mint: &Pubkey, lp_mint: &Pubkey) -> Vec<u8> {
+        let mut buf = vec![0u8; RAYDIUM_V4_AMM_INFO_SIZE];
+        buf[RAYDIUM_V4_OFF_COIN_MINT..RAYDIUM_V4_OFF_COIN_MINT + 32]
+            .copy_from_slice(coin_mint.as_ref());
+        buf[RAYDIUM_V4_OFF_PC_MINT..RAYDIUM_V4_OFF_PC_MINT + 32].copy_from_slice(pc_mint.as_ref());
+        buf[RAYDIUM_V4_OFF_LP_MINT..RAYDIUM_V4_OFF_LP_MINT + 32].copy_from_slice(lp_mint.as_ref());
+        buf
+    }
+
+    fn to_account(bytes: Vec<u8>) -> AccountInfo<'static> {
+        // Leak the backing storage: unit-test-only helper with 'static
+        // lifetime plumbing.
+        let bytes = Box::leak(bytes.into_boxed_slice());
+        let key = Box::leak(Box::new(Pubkey::new_unique()));
+        let owner = Box::leak(Box::new(RAYDIUM_V4_PROGRAM_ID));
+        AccountInfo {
+            key,
+            lamports: std::rc::Rc::new(std::cell::RefCell::new(
+                Box::leak(Box::new(0u64)) as &mut u64
+            )),
+            data: std::rc::Rc::new(std::cell::RefCell::new(&mut bytes[..])),
+            owner,
+            rent_epoch: 0,
+            is_signer: false,
+            is_writable: false,
+            executable: false,
+        }
+    }
+
+    #[test]
+    fn orientation_coin_wsol_derives_true() {
+        let memecoin = Pubkey::new_unique();
+        let lp = Pubkey::new_unique();
+        let info = to_account(amm_info_bytes(&WSOL_MINT, &memecoin, &lp));
+        let (base_is_coin, parsed_memecoin, parsed_lp) = derive_pool_orientation(&info).unwrap();
+        assert!(base_is_coin);
+        assert_eq!(parsed_memecoin, memecoin);
+        assert_eq!(parsed_lp, lp);
+    }
+
+    #[test]
+    fn orientation_pc_wsol_derives_false() {
+        let memecoin = Pubkey::new_unique();
+        let lp = Pubkey::new_unique();
+        let info = to_account(amm_info_bytes(&memecoin, &WSOL_MINT, &lp));
+        let (base_is_coin, parsed_memecoin, parsed_lp) = derive_pool_orientation(&info).unwrap();
+        assert!(!base_is_coin);
+        assert_eq!(parsed_memecoin, memecoin);
+        assert_eq!(parsed_lp, lp);
+    }
+
+    #[test]
+    fn orientation_without_wsol_side_fails_closed() {
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+        let lp = Pubkey::new_unique();
+        let info = to_account(amm_info_bytes(&a, &b, &lp));
+        let err = derive_pool_orientation(&info).unwrap_err();
+        assert_eq!(err, GraveVaultError::UnsupportedBaseToken.into());
+    }
+
+    #[test]
+    fn orientation_with_wsol_on_both_sides_fails_closed() {
+        let lp = Pubkey::new_unique();
+        let info = to_account(amm_info_bytes(&WSOL_MINT, &WSOL_MINT, &lp));
+        let err = derive_pool_orientation(&info).unwrap_err();
+        assert_eq!(err, GraveVaultError::UnsupportedBaseToken.into());
+    }
+
+    #[test]
+    fn orientation_rejects_wrong_pool_size() {
+        let info = to_account(vec![0u8; 100]);
+        let err = derive_pool_orientation(&info).unwrap_err();
+        assert_eq!(err, GraveVaultError::PreflightFailed.into());
+    }
+}
 
 /// Lazy-init a system-owned, zero-data PDA via `system_program::create_account`.
 /// Skips the CPI when the account already has lamports (already initialised).

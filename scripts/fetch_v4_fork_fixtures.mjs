@@ -169,8 +169,8 @@ const AMM = {
   OPEN_ORDERS: 496, MARKET: 528, MARKET_PROGRAM: 560, TARGET_ORDERS: 592,
 };
 
-async function loadPool(poolAddr) {
-  console.log(`\n=== candidate pool ${poolAddr} ===`);
+async function loadPool(poolAddr, fileSuffix = "") {
+  console.log(`\n=== candidate pool ${poolAddr} (suffix "${fileSuffix}") ===`);
   const pool = await getAccount(poolAddr);
   if (!pool) throw new Error("pool account not found");
   if (pool.owner !== RAYDIUM_V4) throw new Error(`pool owner ${pool.owner} != Raydium V4`);
@@ -286,6 +286,16 @@ async function loadPool(poolAddr) {
 }
 
 // ---------------------------------------------------------------- main
+// PHASE 3 (CPI-010): a second fixture pool with WSOL on the PC side proves
+// the inverted `base_is_coin_side = false` withdraw orientation end-to-end.
+// Its accounts are written with a "2" filename suffix and surfaced under the
+// manifest's `orientation_pool` key. Pool 1 keeps its original filenames so
+// the Phase 2.1 harness is unaffected.
+const ORIENTATION_POOL_CANDIDATES = [
+  "AVs9TA4nWDzfPJE9gGVNJMVhcQy3V9PGazuz33BfG2RA", // RAY/WSOL (pc = WSOL)
+  "HVNwzt7Pxfu76KHCMQPTLuTCLTm6WnQ1esLv4eizseSv", // BONK/WSOL (pc = WSOL)
+];
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
@@ -307,6 +317,19 @@ async function main() {
     targetOrdersA, mCoinVaultA, mPcVaultA, eventQueueA, bidsA, asksA, parsed,
   } = loaded;
 
+  // ---- Phase 3 orientation pool (pc = WSOL). Best-effort: a failure here
+  // is fatal for the Phase 3 harness but must not corrupt the pool-1
+  // fixtures, so it runs AFTER pool 1 files are written.
+  let orientation = null;
+  for (const candidate of ORIENTATION_POOL_CANDIDATES) {
+    try {
+      orientation = await loadPool(candidate, "2");
+      break;
+    } catch (e) {
+      console.log(`  orientation pool REJECT: ${e.message}`);
+    }
+  }
+
   console.log("\n=== fetching program ELFs ===");
   const v4Elf = await getProgramElf(RAYDIUM_V4, "raydium_v4");
   const serumElf = await getProgramElf(parsed.marketProgram, "serum_dex");
@@ -318,6 +341,68 @@ async function main() {
   // on mainnet — the withdraw tx passes it, so it must exist in the VM.
   const vaultSignerA = await getAccount(parsed.vaultSigner);
   if (!vaultSignerA) throw new Error("market vault signer account not found on mainnet");
+
+  // ---- Phase 3 orientation-pool fixtures (suffix "2"). Written AFTER the
+  // pool-1 variables are resolved so a pool-2 failure can't corrupt pool 1.
+  let orientationSection = null;
+  const orientationFiles = {};
+  if (orientation) {
+    const o = orientation;
+    // The vault-signer PDA may never have been funded on mainnet (no
+    // account). The withdraw passes it as an ignored readonly padding
+    // account, so an absent account is faithful: record it as a 0-byte,
+    // 0-lamport system account (empty file).
+    let oVaultSignerA = await getAccount(o.parsed.vaultSigner);
+    if (!oVaultSignerA) {
+      console.log("  orientation pool vault signer not funded on mainnet — recording empty account");
+      oVaultSignerA = { pubkey: o.parsed.vaultSigner, lamports: 0, owner: "11111111111111111111111111111111", data: Buffer.alloc(0) };
+    }
+    const serumElf2 = await getProgramElf(o.parsed.marketProgram, "serum_dex2");
+    orientationFiles["serum_dex2.so"] = serumElf2;
+    const oFiles = {
+      "pool2.bin": o.pool.data, "coin_vault2.bin": o.coinVaultA.data,
+      "pc_vault2.bin": o.pcVaultA.data, "coin_mint2.bin": o.coinMintA.data,
+      "pc_mint2.bin": o.pcMintA.data, "lp_mint2.bin": o.lpMintA.data,
+      "open_orders2.bin": o.openOrdersA.data, "market2.bin": o.marketA.data,
+      "target_orders2.bin": o.targetOrdersA.data,
+      "market_coin_vault2.bin": o.mCoinVaultA.data,
+      "market_pc_vault2.bin": o.mPcVaultA.data,
+      "event_queue2.bin": o.eventQueueA.data, "bids2.bin": o.bidsA.data,
+      "asks2.bin": o.asksA.data, "vault_signer2.bin": oVaultSignerA.data,
+    };
+    Object.assign(orientationFiles, oFiles);
+    orientationSection = {
+      pool_address: o.pool.pubkey,
+      market_program: o.parsed.marketProgram,
+      base_is_coin_side: o.parsed.baseIsCoinSide,
+      accounts: {
+        pool: { pubkey: o.pool.pubkey, lamports: o.pool.lamports, owner: o.pool.owner, file: "pool2.bin" },
+        coin_vault: { pubkey: o.parsed.coinVault, lamports: o.coinVaultA.lamports, owner: o.coinVaultA.owner, file: "coin_vault2.bin" },
+        pc_vault: { pubkey: o.parsed.pcVault, lamports: o.pcVaultA.lamports, owner: o.pcVaultA.owner, file: "pc_vault2.bin" },
+        coin_mint: { pubkey: o.parsed.coinMint, lamports: o.coinMintA.lamports, owner: o.coinMintA.owner, file: "coin_mint2.bin" },
+        pc_mint: { pubkey: o.parsed.pcMint, lamports: o.pcMintA.lamports, owner: o.pcMintA.owner, file: "pc_mint2.bin" },
+        lp_mint: { pubkey: o.parsed.lpMint, lamports: o.lpMintA.lamports, owner: o.lpMintA.owner, file: "lp_mint2.bin" },
+        open_orders: { pubkey: o.parsed.openOrders, lamports: o.openOrdersA.lamports, owner: o.openOrdersA.owner, file: "open_orders2.bin" },
+        market: { pubkey: o.parsed.market, lamports: o.marketA.lamports, owner: o.marketA.owner, file: "market2.bin" },
+        target_orders: { pubkey: o.parsed.targetOrders, lamports: o.targetOrdersA.lamports, owner: o.targetOrdersA.owner, file: "target_orders2.bin" },
+        market_coin_vault: { pubkey: o.parsed.marketCoinVault, lamports: o.mCoinVaultA.lamports, owner: o.mCoinVaultA.owner, file: "market_coin_vault2.bin" },
+        market_pc_vault: { pubkey: o.parsed.marketPcVault, lamports: o.mPcVaultA.lamports, owner: o.mPcVaultA.owner, file: "market_pc_vault2.bin" },
+        event_queue: { pubkey: o.parsed.eventQueue, lamports: o.eventQueueA.lamports, owner: o.eventQueueA.owner, file: "event_queue2.bin" },
+        bids: { pubkey: o.parsed.bids, lamports: o.bidsA.lamports, owner: o.bidsA.owner, file: "bids2.bin" },
+        asks: { pubkey: o.parsed.asks, lamports: o.asksA.lamports, owner: o.asksA.owner, file: "asks2.bin" },
+        vault_signer: { pubkey: o.parsed.vaultSigner, lamports: oVaultSignerA.lamports, owner: oVaultSignerA.owner, file: "vault_signer2.bin" },
+      },
+      parsed: o.parsed,
+      v4_remaining_accounts: [
+        o.parsed.openOrders, o.parsed.targetOrders, o.parsed.coinVault, o.parsed.pcVault,
+        o.parsed.marketProgram, o.parsed.market, o.parsed.marketCoinVault, o.parsed.marketPcVault,
+        o.parsed.vaultSigner, o.parsed.eventQueue, o.parsed.bids, o.parsed.asks,
+      ],
+    };
+    if (o.parsed.baseIsCoinSide !== false) {
+      throw new Error("orientation pool must have WSOL on the PC side (base_is_coin_side=false)");
+    }
+  }
 
   const files = {
     "raydium_v4.so": v4Elf, "serum_dex.so": serumElf, "spl_token.so": tokenElf, "spl_ata.so": ataElf,
@@ -370,9 +455,19 @@ async function main() {
     writeFileSync(join(OUT_DIR, name), data);
     console.log(`  wrote ${name} (${data.length} bytes)`);
   }
+  for (const [name, data] of Object.entries(orientationFiles)) {
+    writeFileSync(join(OUT_DIR, name), data);
+    console.log(`  wrote ${name} (${data.length} bytes)`);
+  }
+  if (orientationSection) manifest.orientation_pool = orientationSection;
   writeFileSync(join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
   console.log(`\nmanifest.json written — ${callCount} RPC calls total`);
   console.log(`POOL USED: ${pool.pubkey} (baseIsCoinSide=${parsed.baseIsCoinSide})`);
+  if (orientationSection) {
+    console.log(`ORIENTATION POOL USED: ${orientationSection.pool_address} (baseIsCoinSide=false)`);
+  } else {
+    console.log("ORIENTATION POOL: none fetched — Phase 3 orientation tests will SKIP");
+  }
 }
 
 main().catch((e) => {

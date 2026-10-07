@@ -1,5 +1,71 @@
 # Changelog
 
+## [Unreleased — Phase 3: the Jupiter conversion pipeline proven end-to-end (CPI-010 / SLIP-001 / route-destination integrity retired)]
+
+### Added
+- **Conversion-leg fork harness** —
+  `programs/grave-vault/tests/jupiter_conversion_fork.rs`: executes the real
+  `salvage_pool` — withdraw leg AND conversion leg — against real mainnet
+  Raydium V4 / OpenBook / SPL-token bytecode with byte-for-byte mainnet state
+  of TWO pools covering BOTH base orientations: SOL/USDC (coin = WSOL) and
+  RAY/WSOL (pc = WSOL). Twelve tests: the full pipeline
+  (LP -> Raydium -> memecoin -> Jupiter -> WSOL -> SOL unwrap -> 40/40/20)
+  for both orientations with exact conservation assertions, plus the
+  adversarial matrix (zero floor vs the slippage ceiling, override
+  tightening, unachievable floor, hijacked route destination, route
+  referencing vault custody accounts, bad route data, failing aggregator,
+  foreign memecoin/LP mint binding, no-WSOL pool).
+- **Test-only Jupiter stand-in** —
+  `programs/grave-vault/tests/jupiter_v6_stub/`: a documented stub deployed
+  at the pinned Jupiter v6 program id inside the in-process VM that executes
+  a REAL Raydium V4 `swapBaseIn` against the same mainnet pool state as the
+  withdraw leg and can fail deterministically. The vault treats Jupiter as
+  an opaque program (route forwarded verbatim, no route-plan parsing), so
+  every defense proven through the stub holds against an ARBITRARY callee.
+  The stub is never deployed anywhere and is excluded from program builds.
+- **Second fixture pool** — `scripts/fetch_v4_fork_fixtures.mjs` now also
+  fetches the RAY/WSOL orientation pool (pc = WSOL) under the manifest's
+  `orientation_pool` key (accounts suffixed `2`, including its OpenBook V1
+  market program ELF). Pool 1 files are unchanged.
+- **`probe_swap_wire.mjs`** — documented V4 `swapBaseIn` wire probe used
+  during Phase 3 discovery.
+
+### Fixed
+- **Base-token orientation was hardcoded (CPI-010, B5).** `salvage_pool`
+  now derives orientation from the pool's own AmmInfo mints (coin@400 /
+  pc@432): exactly one side must be the pinned WSOL mint, `base_is_coin_side`
+  follows, and any other shape reverts `UnsupportedBaseToken` (7019) BEFORE
+  any CPI instead of failing inside the Raydium withdraw as
+  `AmmRedemptionFailed`. The submitted `lp_mint` and `memecoin_mint` are
+  bound to the pool's own bytes (`PreflightFailed` 7013) — the SPL token
+  program does not check mint consistency on Raydium's plain transfers, so
+  this closes a real desynchronisation path. Both orientations are proven
+  end-to-end. Spec D5 rewritten; checklist CPI-010 retired.
+- **The protocol slippage ceiling was dead code (SLIP-001, B6).**
+  `config.max_slippage_bps`, `HARD_MAX_SLIPPAGE_BPS` and
+  `max_slippage_bps_override` are now read: when the conversion leg is
+  active, the submitted floor must be at least the pool-implied conversion
+  (post-withdraw reserve ratio — no oracle, no caller input) minus
+  `min(config, hard ceiling, override)`; enforced BEFORE the swap CPI.
+  A salvor can no longer submit `min_quote_output_lamports = 0`. Spec D4
+  amended; checklist SLIP-001 retired.
+- **Jupiter route integrity (N1 / CPI-011).** Route accounts are vetted
+  before the swap CPI: none may reference a vault custody/state account
+  (registry, receipt, LP-holder vault, treasury, SOL holding, config, cert,
+  salvor, salvor LP account) and the vault's WSOL destination must be
+  present. Combined with the ceiling (floor `0` now impossible) and the
+  existing post-CPI floor re-check, a hijacked or malicious route reverts
+  atomically and delivers nothing. Spec §6.3/§8 row 15 updated.
+- **Five stale comments from the late 2.1 architecture change** (tag 219 /
+  20-account wire references, `vault_authority`-as-`user_owner`,
+  the removed deposit-then-burn step, `vault_lp_token_account`) corrected
+  across `cpi/raydium_v4.rs`, `cpi/mod.rs` and the Phase 2.1 harness header.
+
+### Changed
+- `scripts/build_fork_harness.sh` builds the stand-in crate and runs BOTH
+  fork suites; the workspace adds the test-only crate as a member so
+  `cargo fmt --check` / `clippy -D warnings` cover it.
+
 ## [Unreleased — Phase 2.1: Raydium V4 withdraw proven against mainnet bytecode (CPI-009 retired)]
 
 ### Fixed
