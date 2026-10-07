@@ -48,10 +48,12 @@ distribution is on-chain, and compensation is by formula.
 | 6 | Multi-epoch confirmation | ≥ 2 consecutive Solana epochs |
 
 Criteria 3–6 are evaluated against on-chain state read inside the
-evaluation instructions. Criteria 1 and 2 currently consume
-caller-supplied inputs (last-swap timestamp, launch price) pending the
-ORACLE-002 / ORACLE-001 blockers — see the evidence-status table in
-[`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5. Criterion 6 is the
+evaluation instructions. Criterion 1 consumes an indexer-signed Ed25519
+attestation verified in-transaction against the protocol activity oracle
+(`ProtocolConfig.activity_oracle`) — see the evidence-status table in
+[`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 and decision D8. Criterion 2
+currently consumes a caller-supplied launch price pending the
+ORACLE-001 blocker. Criterion 6 is the
 v4.0 addition: a Phase 1 `EligibilityAnchor` PDA records the first epoch
 in which all five other criteria pass; a Phase 2 `EligibilityCert` PDA can
 only be issued ≥ 2 epochs later, after re-verification. This forecloses a

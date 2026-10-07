@@ -19,11 +19,10 @@
 // via `remaining_accounts` (any order — looked up by Pubkey). Reserve and
 // LP-supply values are read from those SPL accounts.
 //
-// Raydium V4's AmmInfo does NOT store a last-swap-timestamp field. The
-// adapter returns 0 as a sentinel; the criteria evaluator currently
-// takes `last_swap_unix_ts` from the instruction param (tagged
-// ORACLE-002 in docs/PRE_MAINNET_CHECKLIST.md until indexer-signed
-// attestation lands).
+// Raydium V4's AmmInfo does NOT store a last-swap-timestamp field, so
+// Criterion 1 inactivity evidence cannot come from pool bytes at all: it
+// is carried by the indexer-signed Ed25519 attestation verified in
+// `crate::attestation` (ORACLE-002, Phase 1.2 — spec §5 / decision D8).
 
 use anchor_lang::prelude::*;
 
@@ -191,7 +190,6 @@ pub fn parse(
     );
 
     Ok(PoolData {
-        last_swap_unix_ts: 0,
         base_reserve: coin_amount,
         quote_reserve: pc_amount,
         lp_supply,

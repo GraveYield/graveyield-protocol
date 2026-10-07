@@ -14,6 +14,8 @@ terminology lint enforced by CI (`scripts/terminology-lint.sh`).
 | **EligibilityCert** | On-chain PDA written by Phase 2 of `evaluate_pool` after multi-epoch confirmation. TTL = `ProtocolConfig.cert_ttl_seconds` (default 1 hour; governance-configurable, floored at 10 minutes). Consumed by `salvage_pool`. |
 | **SalvageReceipt** | On-chain PDA issued at the end of a successful `salvage_pool` recording the 40/40/20 distribution. |
 | **`salvage_pool`** | The GraveVault instruction that executes a salvage. |
+| **activity oracle** | The governance-controlled public key (`ProtocolConfig.activity_oracle`) whose Ed25519 signatures authorize Criterion 1 last-swap attestations. Initialised to the protocol authority; rotatable via `update_protocol_config`. Derivation honesty and service availability are operator-enforced (spec §6.3 / D8). |
+| **last-swap attestation** | The 112-byte signed message (`amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`) verified in-transaction via the `ed25519_program` precompile; the sole accepted C1 inactivity evidence. |
 | **`SalvageCompleted`** | The Anchor event emitted on the final state transition of `salvage_pool`. |
 | **`PoolSalvaged`** | The Anchor event mirroring the pool-level outcome of a successful salvage. |
 

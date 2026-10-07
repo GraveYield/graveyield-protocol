@@ -12,6 +12,7 @@
 use anchor_lang::prelude::*;
 
 use crate::adapters::{self, PoolData};
+use crate::attestation::{self, ATTESTATION_MSG_LEN};
 use crate::constants::{ELIGIBILITY_ANCHOR_SEED, ELIGIBILITY_CERT_SEED, LAUNCH_PRICE_SEED};
 use crate::criteria::{self, CriteriaInputs, CriteriaThresholds, Phase};
 use crate::errors::GraveScannerError;
@@ -21,9 +22,12 @@ use crate::state::{EligibilityAnchor, EligibilityCert, LaunchPrice, ProtocolConf
 pub struct EvaluatePoolPhase2Params {
     pub amm_program_id: Pubkey,
     pub pool_address: Pubkey,
-    /// Last on-chain swap timestamp; see Phase 1 docs for the
-    /// PRE-MAINNET-TODO(ORACLE) note on cryptographic verification.
-    pub last_swap_unix_ts: i64,
+    /// Indexer-signed Criterion 1 attestation — same canonical 112-byte
+    /// format as Phase 1 (see `evaluate_pool_phase1.rs` / spec §5 D8).
+    /// Must be issued fresh for Phase 2: the multi-epoch confirmation gap
+    /// guarantees the Phase 1 attestation's slot has aged out of
+    /// SlotHashes, so only a newly signed attestation can pass.
+    pub msg: [u8; ATTESTATION_MSG_LEN],
 }
 
 #[derive(Accounts)]
@@ -70,6 +74,17 @@ pub struct EvaluatePoolPhase2<'info> {
     /// lp_mint accounts are passed via `remaining_accounts`.
     pub pool: UncheckedAccount<'info>,
 
+    /// CHECK: instructions sysvar, address-constrained. Used to locate
+    /// the `ed25519_program` verify instruction and this instruction's
+    /// own data for attestation offset validation (ORACLE-002).
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
+
+    /// CHECK: slot hashes sysvar, address-constrained. Anchors the
+    /// attestation's `issued_slot` to a real recent slot (freshness).
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::id())]
+    pub slot_hashes: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub writer: Signer<'info>,
 
@@ -87,6 +102,23 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
         !anchor_account.invalidated,
         GraveScannerError::AnchorInvalidated
     );
+
+    // Criterion 1 evidence: fresh indexer-signed attestation (ORACLE-002,
+    // Phase 1.2 / spec D8). The Phase 1 attestation cannot be replayed
+    // here — its issued_slot has aged out of SlotHashes during the
+    // multi-epoch confirmation gap.
+    let attested_last_swap_ts = attestation::verify_last_swap_attestation(
+        &ctx.accounts.instruction_sysvar,
+        &ctx.accounts.slot_hashes,
+        attestation::AttestationRef {
+            msg: &params.msg,
+            amm_program_id: &params.amm_program_id,
+            pool_address: &params.pool_address,
+            oracle: &cfg.activity_oracle,
+        },
+        clock.unix_timestamp,
+        clock.slot,
+    )?;
 
     let pool_data: PoolData = adapters::extract_pool_data(
         &ctx.accounts.pool.to_account_info(),
@@ -107,7 +139,7 @@ pub fn handler(ctx: Context<EvaluatePoolPhase2>, params: EvaluatePoolPhase2Param
     )?;
 
     let inputs = CriteriaInputs {
-        last_swap_unix_ts: params.last_swap_unix_ts,
+        last_swap_unix_ts: attested_last_swap_ts,
         current_unix_ts: clock.unix_timestamp,
         launch_price_q64x64: ctx.accounts.launch_price.launch_price_q64x64,
         current_price_q64x64: pool_data.current_price_q64x64()?,

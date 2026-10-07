@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // GraveScanner ProtocolConfig — multisig-controlled, 72h-timelocked.
+// (On-chain timelock wiring is a documented deferral — spec D2; the 72h
+// buffer is enforced by the Squads governance flow, not by this program.)
 
 use anchor_lang::prelude::*;
 
@@ -45,6 +47,13 @@ pub struct ProtocolConfig {
     /// or governance instructions. Per spec: GraveVault's
     /// `claim_lp_proceeds` remains live independently of this flag.
     pub paused: bool,
+
+    /// Public key whose Ed25519 signatures authorize Criterion 1
+    /// last-swap attestations (ORACLE-002, Phase 1.2 / spec D8). Set to
+    /// the initial authority at `initialize` — the operator multisig runs
+    /// the activity indexer until a dedicated oracle key is rotated in
+    /// via `update_protocol_config`.
+    pub activity_oracle: Pubkey,
 
     /// Bump for ['protocol_config'] PDA.
     pub bump: u8,
