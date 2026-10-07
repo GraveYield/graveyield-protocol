@@ -69,6 +69,35 @@ nothing; bad route data / failing aggregator revert atomically (7016);
 orientation derived from pool bytes (no-WSOL pools revert 7019 pre-CPI;
 foreign memecoin/LP mints revert 7013).
 
+## Settlement-economics fork harness (Phase 4, D6/D7)
+
+`programs/grave-vault/tests/settlement_economics_fork.rs` runs the REAL
+`salvage_pool`, the new `sweep_dust`, `claim_lp_proceeds`, and
+`emergency_pause` against the same real mainnet bytecode / pool 1 fixtures.
+Seven tests prove the settlement economics end-to-end:
+
+- D6 dust policy: the dust-skip salvage records `memecoin_mint` +
+  `dust_memecoin_lamports` on the receipt and settles EXACTLY the
+  withdraw-side WSOL; `sweep_dust` then moves the exact amount to the
+  protocol treasury's ATA, closes the vault ATA (exact rent delta to the
+  caller), stamps the receipt, and never touches the LP bucket; the
+  one-shot matrix (second sweep; fully-converted pool 7020); a hijacked
+  sweep destination fails with zero state movement and the legitimate
+  sweep still succeeds (atomicity).
+- D7 invariant: exact conservation with the default 40/40/20 AND a custom
+  asymmetric config (lp=4001 / salvor=4000 / protocol=1999) — the floor
+  roundings accrue to the protocol share by construction.
+- Claims economics: a real 3-holder Merkle tree (60/30/10) drains the LP
+  bucket to the lamport (`floor(lp_share × balance / supply)` per holder,
+  cumulative cap, rounding remainder stays in the vault), double claims
+  fail, and claims stay LIVE during emergency pause (Charter).
+
+The harness forges exactly five things: the EligibilityCert PDA, the
+salvor's LP balance, the salvor's/holders'/sweeper's lamports, the Jupiter
+stand-in, and the off-chain LP-holder snapshot (the Merkle tree an honest
+snapshotter would produce — the snapshotter itself is a Phase 5
+deliverable; the on-chain verifier is the code under test).
+
 Setup and run:
 
 ```bash
@@ -85,13 +114,14 @@ node scripts/fetch_v4_fork_fixtures.mjs     # from the repo root
 # 3) run the fork suites
 cargo test -p grave-vault --test raydium_v4_fork
 cargo test -p grave-vault --test jupiter_conversion_fork
+cargo test -p grave-vault --test settlement_economics_fork
 ```
 
 Without fixtures the fork tests SKIP with a message so CI stays green; the
 host unit tests below never need fixtures or a network.
 
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`):
-90 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
+104 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
 extreme-price boundary tests, attestation 31: 16 last-swap [Phase 1.2] +
 15 launch-price [Phase 1.3], adapters 25: raydium_v4 layout 4 + locker 21
 [Phase 1.1], cert lifecycle 5 [Phase 1.4: inclusive expiry boundary,
@@ -101,7 +131,9 @@ reissue roundtrip], errors 1: the on-chain code lock test covering
 `test_id`; the merkle tests require the `solana-sha256-hasher` `sha2`
 dev-dependency feature on host builds). Phase 3 adds 8 vault host tests
 (slippage-cap derivation 3 + orientation derivation 5 — see
-`salvage_pool.rs` `mod tests`). Every manipulated-baseline
+`salvage_pool.rs` `mod tests`). Phase 4 adds 5 more (D7 split rounding 4
++ receipt layout stability 1 — `salvage_pool.rs` / `salvage_receipt.rs`
+`mod tests`), bringing vault to 22. Every manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,
 zero/future issued slot, truncated instruction data — is covered.

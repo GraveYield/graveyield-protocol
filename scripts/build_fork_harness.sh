@@ -2,6 +2,7 @@
 # scripts/build_fork_harness.sh — build + fetch + run BOTH fork harnesses:
 #   Phase 2.1 (withdraw CPI): programs/grave-vault/tests/raydium_v4_fork.rs
 #   Phase 3  (conversion pipeline): programs/grave-vault/tests/jupiter_conversion_fork.rs
+#   Phase 4  (settlement economics): programs/grave-vault/tests/settlement_economics_fork.rs
 #
 # Requires: rustup (1.91.1 per rust-toolchain.toml), the Solana CLI 3.0.10
 # (cargo-build-sbf) with platform-tools >= v1.54, node (for the fixture
@@ -24,6 +25,7 @@ cp target/deploy/jupiter_v6_stub.so programs/grave-vault/tests/fixtures/jupiter_
 echo "==> [4/5] fetching mainnet fixtures (both pools + program ELFs)"
 node scripts/fetch_v4_fork_fixtures.mjs
 
-echo "==> [5/5] running both fork suites"
+echo "==> [5/5] running all three fork suites"
 cargo test -p grave-vault --test raydium_v4_fork -- --nocapture
 cargo test -p grave-vault --test jupiter_conversion_fork -- --nocapture
+cargo test -p grave-vault --test settlement_economics_fork -- --nocapture

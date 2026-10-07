@@ -1,5 +1,61 @@
 # Changelog
 
+## [Unreleased — Phase 4: settlement economics proven (D6 dust policy retired + D7 invariant proven)]
+
+### Added
+- **`sweep_dust` instruction (D6, DUST-001 retired)** — the complete dust
+  policy: after any salvage, the memecoin retained in the vault memecoin
+  ATA (below-threshold dust OR swap-leg route residual) is recoverable by a
+  PERMISSIONLESS one-shot instruction. It transfers the ATA's entire
+  balance to the protocol treasury's ATA for the same mint (destination
+  pinned by ATA derivation — a caller cannot redirect value), closes the
+  vault ATA (rent reclaimed by the caller — the standard sweep incentive),
+  stamps `SalvageReceipt.dust_swept_at_ts`, and emits `DustSwept`. Guards:
+  mint bound to the receipt (`PreflightFailed` 7013), empty ATA
+  (`DustNothingToSweep` 7020), already-swept (`DustAlreadySwept` 7021).
+  `lp_holder_pool_vault` is untouched — the sweep moves memecoin tokens,
+  never LP-holder SOL proceeds (Charter).
+- **`SalvageReceipt` dust fields (breaking, pre-mainnet)** — three fields
+  appended after `issued_at_ts` (all existing byte offsets stable, pinned
+  by a new layout unit test): `memecoin_mint` (fully identifies the
+  salvage and binds the sweep), `dust_memecoin_lamports` (what the vault
+  RETAINED — below-threshold dust or route residual — outside the 40/40/20
+  settlement, per D6 "retained, unconverted"), `dust_swept_at_ts` (0 until
+  swept).
+- **Settlement-economics fork harness** —
+  `programs/grave-vault/tests/settlement_economics_fork.rs`: seven tests
+  against real mainnet bytecode and pool state proving the Phase 4
+  acceptance bar: (1) the dust-skip path records the retained amount and
+  settles EXACTLY the withdraw-side WSOL; (2) `sweep_dust` moves the exact
+  dust to the treasury ATA, closes the vault ATA with the exact rent
+  delta, stamps the receipt, and never touches the LP bucket; (3) the
+  one-shot matrix (second sweep reverts; fully-converted pool reverts
+  7020); (4) a hijacked sweep destination fails with ZERO state movement
+  and the legitimate sweep still succeeds afterwards (atomicity); (5) D7
+  end-to-end with a custom asymmetric config (lp=4001 / salvor=4000 /
+  protocol=1999): floors bite, the remainder accrues to the protocol share
+  by construction, and conservation is EXACT; (6) claims-side economics
+  with a real 3-holder Merkle tree (60/30/10): every holder claims exactly
+  `floor(lp_share × balance / supply)`, cumulative claims never exceed the
+  bucket, the claim-side rounding remainder stays in the vault, double
+  claims fail, and claims stay LIVE during emergency pause (Charter).
+- **`split_proceeds` helper + host unit tests** — the D7 settlement split
+  extracted from the handler and pinned for the rounding edges the real
+  fixtures cannot reach (totals 1 / 9_999 / 10_001, asymmetric shares,
+  u64::MAX with extreme share configs): floors are `floor(total × bps /
+  10_000)`, the protocol share is the remainder, and conservation holds
+  for every input.
+
+### Changed
+- `salvage_pool` records `memecoin_mint` + the vault memecoin ATA's final
+  balance as `dust_memecoin_lamports` on the receipt (covers the skip path
+  AND swap-leg residual); the `PRE-MAINNET-TODO(DUST)` marker is retired.
+- `scripts/build_fork_harness.sh` and `tests/README.md` include the Phase 4
+  suite; error codes extended to 7021 (`DustNothingToSweep`,
+  `DustAlreadySwept`) with the code-lock test extended accordingly.
+- Spec rev 1.7.0 (D6 implemented; D7 fork-proven; §6.1 rows; §6.4 bullet
+  retired); `PRE_MAINNET_CHECKLIST.md` DUST-001 moved to Retired.
+
 ## [Unreleased — Phase 3: the Jupiter conversion pipeline proven end-to-end (CPI-010 / SLIP-001 / route-destination integrity retired)]
 
 ### Added

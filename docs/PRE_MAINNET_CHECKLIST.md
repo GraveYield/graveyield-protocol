@@ -90,7 +90,7 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 
 | ID | File | Status | Description |
 | --- | --- | --- | --- |
-| DUST-001 | `programs/grave-vault/src/instructions/salvage_pool.rs` | 🟡 | Memecoin output below `jupiter_dust_threshold_lamports` is logged and skipped; tokens remain in the vault memecoin ATA with no closure, sweep, or recovery path, and `SalvageReceipt` carries no field for the retained amount (spec D6). Define the dust policy (Phase 4) before mainnet. |
+| DUST-001 | `programs/grave-vault/src/instructions/sweep_dust.rs` | ✅ | **Retired (Phase 4).** The complete D6 dust policy is live: `salvage_pool` records the retained memecoin (`dust_memecoin_lamports`) and its mint on the `SalvageReceipt` — covering both the below-threshold skip path and any swap-leg route residual — and the new permissionless one-shot `sweep_dust` instruction recovers it to the protocol treasury's ATA (destination pinned by derivation), closes the vault memecoin ATA (rent reclaimed by the caller), stamps `dust_swept_at_ts`, and emits `DustSwept`. Guards: foreign mint 7013, empty ATA 7020, second sweep 7021. `lp_holder_pool_vault` untouched (Charter). Proven end-to-end by `tests/settlement_economics_fork.rs` (record / exact sweep / one-shot matrix / hijack atomicity). |
 
 ### GOV
 
@@ -122,6 +122,7 @@ after the PR lands so the row can be tagged to its exact post-merge SHA.
 | CPI-010 | `programs/grave-vault/src/instructions/salvage_pool.rs` | Phase 3 (`programs/grave-vault/tests/jupiter_conversion_fork.rs`): base orientation derived from the pool's on-chain mints, `UnsupportedBaseToken` (7019) raised before any CPI, submitted mints bound to the pool bytes, both WSOL orientations proven against real mainnet pool state (SOL/USDC coin=WSOL; RAY/WSOL pc=WSOL). | `<filled by post-merge fix-up commit>` |
 | CPI-011 | `programs/grave-vault/src/cpi/jupiter.rs`, `programs/grave-vault/src/instructions/salvage_pool.rs` | Phase 3 (referenced by spec rev 1.5.0 §6.3 before this row existed — the route-destination integrity gap, N1): route-account vetting (no vault custody/state account may appear in a route) + the vault's WSOL destination must be present among route accounts + the slippage ceiling forbids `floor = 0`; the delivered amount is re-checked post-CPI. Proven by the hijack / protected-account / zero-floor fork tests. | `<filled by post-merge fix-up commit>` |
 | SLIP-001 | `programs/grave-vault/src/instructions/salvage_pool.rs` | Phase 3: protocol slippage ceiling wired (`config.max_slippage_bps` + `HARD_MAX_SLIPPAGE_BPS` + tighten-only `max_slippage_bps_override` all read); the submitted floor must cover the pool-implied conversion minus the cap BEFORE the swap CPI. Spec D4 amended. | `<filled by post-merge fix-up commit>` |
+| DUST-001 | `programs/grave-vault/src/instructions/sweep_dust.rs` | Phase 4 (D6 dust policy): retained memecoin recorded on the receipt (`memecoin_mint` + `dust_memecoin_lamports`), permissionless one-shot `sweep_dust` recovers it to the protocol treasury's ATA and closes the vault ATA; proven by `tests/settlement_economics_fork.rs`. | `<filled by post-merge fix-up commit>` |
 
 ## Audit handoff
 
