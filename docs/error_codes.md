@@ -39,7 +39,7 @@ future v4.x additions to the pre-anchor error space.
 | 6005 | `InvalidClock` | Clock sysvar unavailable or returned invalid data. |
 | 6006 | `InvariantViolation` | `ProtocolConfig` update violates a locked invariant. |
 | 6007 | `AmmAdapterUnimplemented` | AMM adapter registered but parser is a pre-mainnet stub. Live list in [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
-| 6008 | `LockerAdapterUnimplemented` | Locker adapter registered but not implemented. Returning `Err` rather than zero prevents silent certification of pools whose LP is locked. |
+| 6008 | `LockerAdapterUnimplemented` | Locker adapter registered but not implemented. Retired as a live call site by the Phase 1.1 UNCX Raydium V4 adapter (LOCKER-001); retained as a stable code-space slot. |
 | 6009 | `PoolDataParseError` | Pool account data did not match the expected layout. |
 | 6010 | `ProtocolPaused` | GraveScanner is paused; `evaluate_pool_*` reverts. No effect on rent reclaim or the GraveVault claim path. |
 | 6011 | `CriteriaBitmapMismatch` | Phase 2 produced a bitmap that disagrees with the originating `EligibilityAnchor`. |
@@ -48,6 +48,10 @@ future v4.x additions to the pre-anchor error space.
 | 6017 | `AnchorInvalidated` | `EligibilityAnchor` was invalidated by multisig. |
 | 6018 | `AnchorNotStale` | `sweep_stale_anchor` called before the staleness window elapsed. |
 | 6019 | `CertTtlBelowMinimum` | `update_protocol_config` rejected a `cert_ttl_seconds` value below `MIN_CERT_TTL_SECONDS` (600s = 10 min). |
+| 6020 | `LockerMarkerAccountRequired` | The UNCX per-pool lock marker PDA (`["global_lp_tracker", amm_id]`) was not supplied in `remaining_accounts`; Criterion 5 cannot be evaluated soundly without it. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5. |
+| 6021 | `LockerLockEvidenceRequired` | The UNCX marker exists on chain (pool was locked at least once) but no TokenLock evidence was supplied; completeness of evidence is mandatory in this state. |
+| 6022 | `InvalidLockerAccount` | A supplied locker-program account failed validation: ownership, discriminator, size, or PDA re-derivation from its own `lock_global_id`. |
+| 6023 | `LockerAccountMismatch` | A supplied TokenLock is bound to a different `(amm_id, lp_mint)` pair than the pool under evaluation. |
 
 ## GraveVault — 7000-7019
 

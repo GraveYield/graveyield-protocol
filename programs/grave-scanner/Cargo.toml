@@ -28,3 +28,6 @@ anchor-debug = []
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl  = { workspace = true }
+
+[dev-dependencies]
+solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
