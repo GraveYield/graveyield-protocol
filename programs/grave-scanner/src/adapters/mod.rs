@@ -35,15 +35,14 @@ pub mod raydium_v4;
 
 /// AMM-agnostic snapshot of a pool's state at the moment of evaluation.
 /// Produced by `extract_pool_data` and fed into the `criteria` module.
+///
+/// C1 inactivity evidence deliberately lives OUTSIDE this struct: no AMM
+/// layout GraveScanner supports stores a last-swap timestamp, so the
+/// value is taken from the indexer-signed Ed25519 attestation verified in
+/// `attestation.rs` (ORACLE-002, spec §5 / D8) — never from pool bytes or
+/// instruction params.
 #[derive(Clone, Copy, Debug)]
 pub struct PoolData {
-    /// Unix timestamp of the last on-chain swap. Used for Criterion 1.
-    /// AMM-specific: Raydium V4 does not store a last-swap timestamp on
-    /// the pool account; in that case the adapter returns 0 and the
-    /// handler reads `last_swap_unix_ts` from instruction params instead
-    /// (gated by the ORACLE-002 PRE-MAINNET-TODO until indexer-signed
-    /// attestation lands).
-    pub last_swap_unix_ts: i64,
     /// Base-side reserves (the memecoin / measured token).
     pub base_reserve: u64,
     /// Quote-side reserves (typically lamports of SOL or base units of USDC).

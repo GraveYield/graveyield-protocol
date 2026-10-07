@@ -9,9 +9,14 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.1.0 — Phase 1.1: C5 evidence implemented (UNCX
-> Raydium AMM V4 locker adapter, LOCKER-001 retired; §4 C5, §5, §6, §8
-> row 10 updated). All other sections unchanged from the Phase 0 freeze.
+> **Revisions:** rev 1.2.0 — Phase 1.2: C1 evidence implemented
+> (indexer-signed Ed25519 last-swap attestation, ORACLE-002 retired;
+> new `activity_oracle` config field; §4 C1, §5, §6.1/6.3, §7 D8, §8
+> row 11, §9 updated; breaking change to the `evaluate_pool_*`
+> instruction data). rev 1.1.0 — Phase 1.1: C5 evidence implemented
+> (UNCX Raydium AMM V4 locker adapter, LOCKER-001 retired; §4 C5, §5,
+> §6, §8 row 10 updated). All other sections unchanged from the Phase 0
+> freeze.
 
 ## 0. Purpose
 
@@ -153,6 +158,17 @@ Default: 90 days (`7_776_000`s). Equality passes. `current_unix_ts` is
 `Clock::unix_timestamp`; a clock earlier than the last swap reverts
 `InvalidClock`.
 
+*Evidence (Phase 1.2, decision D8):* `last_swap_unix_ts` is carried by a
+**112-byte Ed25519-signed attestation** issued by the protocol activity
+oracle (`ProtocolConfig.activity_oracle`) and verified on chain inside
+the evaluation instruction via the `ed25519_program` precompile —
+see §5. A caller-supplied integer is no longer an accepted input.
+Related reverts: `AttestationMissing` (6024),
+`InvalidAttestationOffsets` (6025), `AttestationOracleMismatch` (6026),
+`AttestationBindingMismatch` (6027), `AttestationTimestampInvalid`
+(6028), `AttestationStale` (6029), `AttestationSlotHashMismatch`
+(6030), `AttestationSlotInvalid` (6031).
+
 **C2 — Price collapse from launch.**
 Requires a recorded launch price (`launch_price_q64x64 > 0`, else
 `LaunchPriceNotFound`). Drop is
@@ -197,7 +213,7 @@ must satisfy before mainnet.
 
 | # | Input | Source today | Status |
 |---|---|---|---|
-| C1 | `last_swap_unix_ts` | **Caller-supplied instruction parameter** (`evaluate_pool_phase1.rs:28`, `phase2.rs:26`). The Raydium V4 adapter returns `0` as a sentinel (`AmmInfo` stores no last-swap field). | **Trusted input — blocker ORACLE-002.** |
+| C1 | `last_swap_unix_ts` | **Indexer-signed Ed25519 attestation** (Phase 1.2): 112-byte message `amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`, signed by `ProtocolConfig.activity_oracle`, verified in-transaction through the `ed25519_program` precompile; `issued_slot` must resolve in `SlotHashes` with a byte-exact hash match. | **On-chain cryptographic (ORACLE-002 resolved).** Residual trust (documented, §6.3): the oracle's honesty about the derivation and the indexer's availability. |
 | C2 | `launch_price_q64x64` | `LaunchPrice` PDA; value is **caller-supplied** at `record_launch_price`, init-once, never cross-checked. | **Trusted input — blocker ORACLE-001.** |
 | C2 | `current_price_q64x64` | Derived on-chain: `(quote_reserve << 64) / base_reserve` from the pool's vault balances, after adapter validation (vault ownership = SPL Token program; vault mint == pool-declared mint). | Authoritative (spot price; manipulation analysis below). |
 | C3 | `current_tvl_lamports` | Quote-side vault balance, read on-chain from the SPL token account located by the pool's own `pc_vault` pointer. | Authoritative. |
@@ -221,12 +237,23 @@ path; the residual risk is griefing, accepted for v1.0.
 
 **Frozen requirements for the trusted inputs:**
 
-- **C1 (ORACLE-002):** last-swap evidence must be derived inside the
-  evaluation instruction from on-chain state verifiable at that moment
-  (e.g. Raydium V4 / OpenBook activity cursors), or from a PDA-sealed
-  attestation whose writer is protocol-derived — never from a signer-
-  supplied integer. The adapter sentinel `0` must never be silently
-  combined with a caller parameter.
+- **C1 (ORACLE-002, resolved in Phase 1.2):** the frozen requirement
+  "never a signer-supplied integer" is implemented as an Ed25519
+  attestation whose signing key is protocol-registered
+  (`ProtocolConfig.activity_oracle`, rotatable via
+  `update_protocol_config`, initialised to the protocol authority).
+  The on-chain check binds the signature to exactly the 112-byte
+  message embedded in the instruction data (canonical offsets in
+  `grave-scanner/src/attestation.rs`), to the `(amm_program_id,
+  pool_address)` pair, to a non-future timestamp, and to a slot still
+  present in `SlotHashes` (replay window ≈ 512 slots ≈ 3.4 min). The
+  derivation itself (Raydium V4 transaction history via RPC,
+  `sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and the oracle's
+  operational availability remain SDK/operator-enforced (§6.3).
+  *Breaking change:* `evaluate_pool_phase_1` / `_2` instruction data
+  replaced the `last_swap_unix_ts: i64` parameter with
+  `msg: [u8; 112]` and gained `instruction_sysvar` + `slot_hashes`
+  accounts.
 - **C2 (ORACLE-001):** the launch price must be verifiable against pool
   reserves at a reference slot. `record_launch_price` gains no silent
   authority: no writer class (including multisig) may set the baseline
@@ -286,6 +313,7 @@ violate it).
 | Claims survive pause | `claim_lp_proceeds` does not read the pause flag. |
 | Pause halts new activity | Scanner pause gates `evaluate_pool_*`; vault pause gates `salvage_pool`; neither gates governance or rent-reclaim paths. |
 | Cert TTL cannot be configured below 10 minutes | `MIN_CERT_TTL_SECONDS` floor in `initialize` and `update_protocol_config`. |
+| C1 inactivity evidence is oracle-signed | 112-byte Ed25519 attestation verified in-transaction via the `ed25519_program` precompile: signature bound to exactly the embedded message, oracle key = `ProtocolConfig.activity_oracle`, pool/AMM binding, non-future timestamp, `issued_slot` re-anchored in `SlotHashes` (errors 6024–6031). A caller-supplied timestamp is no longer an accepted input. |
 | Locker evidence is sound (UNCX v4) | Every supplied TokenLock is ownership-, discriminator-, size-, PDA-re-derivation- and binding-checked before its amount is summed; marker gate forbids silent omission (errors 6020–6023). |
 
 ### 6.2 Governance enforced (multisig process, not program code)
@@ -306,6 +334,7 @@ violate it).
 | Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | On-chain, only the swap-leg floor is enforced. A route whose internal destination is not the vault WSOL ATA, and a floor of `0`, are **not** rejected by v1.0 code — tracked as SLIP-001/CPI-011 in the checklist (D4). |
 | Honest snapshot and Merkle tree construction | Off-chain snapshotter (Phase 5) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. |
 | Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
+| Activity-oracle honesty and availability (C1) | Off-chain indexer derives the last-swap time from Raydium V4 transaction history (`sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and signs attestations with `activity_oracle` | On-chain verification is cryptographic but cannot re-derive swap history itself (Raydium V4 `AmmInfo` stores no last-swap field; `SlotHashes` spans ≈ 512 slots). A buggy or colluding oracle could attest a wrong timestamp; the oracle key is governance-held and rotatable. Oracle downtime blocks new evaluations (availability, not integrity). ORACLE-003 in the checklist tracks the operational runbook. |
 | Transaction construction quality | SDK transaction builders (Phase 8) | Account ordering, compute limits, retries (locker introspection costs one PDA re-derivation per supplied TokenLock). |
 
 ### 6.4 Explicitly NOT guaranteed in v1.0
@@ -389,6 +418,30 @@ construction. This matches the Phase 4 invariant form: recovered SOL =
 LP allocation + salvor allocation + protocol allocation + explicitly
 accounted remainder (here: inside `protocol_share`).
 
+**D8 — Inactivity-evidence oracle model (Phase 1.2).** C1's last-swap
+timestamp is carried by a **112-byte Ed25519 attestation** signed by a
+governance-controlled activity oracle and verified on chain through the
+`ed25519_program` precompile inside the evaluation instruction.
+Rationale: Raydium V4's `AmmInfo` stores no last-swap field, and
+on-chain state cannot prove the *absence* of swaps over a 90-day window
+(`SlotHashes` covers ≈ 512 slots), so a pure on-chain derivation is
+impossible; the alternatives (caller-supplied integers, or a program-
+observed activity log with no writer incentive structure) are strictly
+weaker. The message layout is `amm_program_id ‖ pool_address ‖
+last_swap_unix_ts ‖ issued_slot ‖ slot_hash` (fixed offsets, mirrored
+byte-for-byte by the SDK); the on-chain check requires the precompile
+signature to cover exactly those 112 bytes as embedded in the
+instruction data, binds them to the instruction params, rejects
+zero/future timestamps and zero/future slots, and re-anchors
+`issued_slot` against `SlotHashes` so a replayed attestation fails
+closed once the slot ages out. The oracle key
+(`ProtocolConfig.activity_oracle`) is initialised to the protocol
+authority and rotatable by `update_protocol_config`. What remains
+operator-enforced is documented in §6.3 (oracle honesty + availability).
+This is a **breaking change** to the `evaluate_pool_phase_1` /
+`evaluate_pool_phase_2` instruction data (`last_swap_unix_ts: i64` →
+`msg: [u8; 112]` + two sysvar accounts), accepted pre-mainnet.
+
 ## 8. Documentation / code discrepancy ledger
 
 | # | Document claim | Reality (code) | Resolution |
@@ -403,6 +456,7 @@ accounted remainder (here: inside `protocol_share`).
 | 8 | `docs/README.md` canonical set references five living files that do not exist (`technical-documentation.md`, `grave-scanner-grave-vault-combined.md`, `legal-documentation.md`, `ghostpools-research.md`, `architecture/*.md`) and `published/` snapshots | Only `whitepaper.md`, `glossary.md`, `error_codes.md`, `PRE_MAINNET_CHECKLIST.md`, `PROTOCOL_SPEC.md` exist | **Tracked** — pre-existing doc rot; not Phase 0 scope to author five documents. This spec is the governing document meanwhile. |
 | 9 | EligibilityCert lifecycle: cert PDA is init-once | An expired cert permanently bricks that pool's salvage path (B4) | **Tracked** — Phase 1.4 engineering blocker. |
 | 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Fixed (Phase 1.1)** — UNCX Raydium V4 adapter implemented and mainnet-verified; residual scope in §6.3/LOCKER-002. |
+| 11 | `evaluate_pool_*` docs/comments: "last swap timestamp supplied by the salvor SDK and cross-checked by the indexer… taken at face value" (ORACLE-002) | Param was a plain `i64` — C1 was forgeable by any caller | **Fixed (Phase 1.2)** — replaced by the D8 attestation flow; adapter `0` sentinel and dead `PoolData.last_swap_unix_ts` field removed; errors 6024–6031 added; checklist ORACLE-002 retired, ORACLE-003 opened for the operational runbook. |
 
 ## 9. Exit condition — the three answers
 
@@ -411,10 +465,11 @@ accounted remainder (here: inside `protocol_share`).
   with identical bitmaps.
 - **Who proves it?** Whoever submits the transactions — but every input
   must ultimately trace to on-chain state verifiable inside the
-  instruction (§5). Today C1 still has a trusted input (ORACLE-002,
-  Phase 1.2 blocker); C5 is implemented for the UNCX Raydium V4 locker
-  with its completeness boundary documented in §6.3. No certification
-  is trustworthy until ORACLE-002 retires.
+  instruction (§5). C1 is now carried by a governance-oracle-signed
+  attestation verified in-transaction (D8, Phase 1.2); C5 is
+  implemented for the UNCX Raydium V4 locker with its completeness
+  boundary documented in §6.3. The remaining trusted input is C2's
+  launch-price baseline (ORACLE-001, Phase 1.3 blocker).
 - **What does the protocol guarantee?** Exactly the §6 matrix — no more,
   no less. Anything not listed there is not guaranteed, and §6.4 lists
   the sharpest edges explicitly.

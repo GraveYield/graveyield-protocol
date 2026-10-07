@@ -22,6 +22,9 @@ pub struct UpdateProtocolConfigParams {
     /// EligibilityCert TTL in seconds. Floor: `MIN_CERT_TTL_SECONDS` (600).
     /// Any value below the floor reverts with `CertTtlBelowMinimum`.
     pub cert_ttl_seconds: Option<i64>,
+    /// Rotate the Criterion 1 activity oracle (public key whose Ed25519
+    /// signatures authorize last-swap attestations). Multisig-only.
+    pub activity_oracle: Option<Pubkey>,
 }
 
 #[derive(Accounts)]
@@ -67,6 +70,9 @@ pub fn handler(
             GraveScannerError::CertTtlBelowMinimum
         );
         cfg.cert_ttl_seconds = v;
+    }
+    if let Some(v) = params.activity_oracle {
+        cfg.activity_oracle = v;
     }
 
     Ok(())

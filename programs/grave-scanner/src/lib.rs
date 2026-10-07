@@ -32,6 +32,7 @@
 use anchor_lang::prelude::*;
 
 pub mod adapters;
+pub mod attestation;
 pub mod constants;
 pub mod criteria;
 pub mod errors;
@@ -66,6 +67,8 @@ pub mod grave_scanner {
 
     /// Phase 1 — evaluate all six derelict criteria and write an
     /// `EligibilityAnchor` PDA. Sets `first_eligible_epoch = current_epoch`.
+    /// C1 inactivity evidence is an indexer-signed Ed25519 attestation
+    /// (ORACLE-002, spec §5 / D8) — caller-supplied timestamps revert.
     pub fn evaluate_pool_phase_1(
         ctx: Context<EvaluatePoolPhase1>,
         params: EvaluatePoolPhase1Params,
@@ -76,7 +79,8 @@ pub mod grave_scanner {
     /// Phase 2 — re-verify all six criteria after the multi-epoch confirmation
     /// gap (≥2 consecutive Solana epochs, ~4-6 days). On success, writes an
     /// `EligibilityCert` PDA with TTL = 1h. GraveVault consumes the cert to
-    /// authorise `salvage_pool`.
+    /// authorise `salvage_pool`. Requires a fresh indexer-signed C1
+    /// attestation — the Phase 1 attestation is long stale by design.
     pub fn evaluate_pool_phase_2(
         ctx: Context<EvaluatePoolPhase2>,
         params: EvaluatePoolPhase2Params,

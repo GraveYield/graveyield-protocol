@@ -52,6 +52,14 @@ future v4.x additions to the pre-anchor error space.
 | 6021 | `LockerLockEvidenceRequired` | The UNCX marker exists on chain (pool was locked at least once) but no TokenLock evidence was supplied; completeness of evidence is mandatory in this state. |
 | 6022 | `InvalidLockerAccount` | A supplied locker-program account failed validation: ownership, discriminator, size, or PDA re-derivation from its own `lock_global_id`. |
 | 6023 | `LockerAccountMismatch` | A supplied TokenLock is bound to a different `(amm_id, lp_mint)` pair than the pool under evaluation. |
+| 6024 | `AttestationMissing` | No `ed25519_program` verify instruction immediately precedes the scanner instruction (or the sysvar read failed) — no oracle signature was evaluated in this transaction. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5 / D8. |
+| 6025 | `InvalidAttestationOffsets` | The precompile's `Ed25519SignatureOffsets` are malformed or do not bind the signature to exactly the 112-byte attestation embedded in the instruction data (wrong signature count, out-of-bounds offsets, wrong instruction index, non-canonical message offset). |
+| 6026 | `AttestationOracleMismatch` | The public key covered by the runtime-verified signature is not the configured `ProtocolConfig.activity_oracle`. |
+| 6027 | `AttestationBindingMismatch` | The attestation message binds a different `(amm_program_id, pool_address)` pair than the instruction params. |
+| 6028 | `AttestationTimestampInvalid` | The attested last-swap timestamp is the zero sentinel or lies in the future relative to the current `Clock`. |
+| 6029 | `AttestationStale` | The attestation's `issued_slot` no longer resolves in the `SlotHashes` sysvar — replay outside the ~512-slot freshness window. |
+| 6030 | `AttestationSlotHashMismatch` | The attested slot hash does not match the chain's `SlotHashes` entry for `issued_slot`. |
+| 6031 | `AttestationSlotInvalid` | The attestation's `issued_slot` is zero or in the future relative to the current slot. |
 
 ## GraveVault — 7000-7019
 

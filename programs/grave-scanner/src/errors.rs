@@ -123,6 +123,55 @@ pub enum GraveScannerError {
     /// `(amm_id, lp_mint)` pair than the pool under evaluation.
     #[msg("LockerAccountMismatch: TokenLock bound to a different pool or LP mint.")]
     LockerAccountMismatch = 23,
+
+    // ----- v4.2 last-swap attestation error codes (6024..=6031) -----
+    // ORACLE-002 (Phase 1.2, indexer-signed inactivity evidence).
+    /// On-chain code 6024. No `ed25519_program` verify instruction was
+    /// found immediately before the scanner instruction, so no oracle
+    /// signature was evaluated in this transaction.
+    #[msg("AttestationMissing: no ed25519 verify instruction precedes this instruction.")]
+    AttestationMissing = 24,
+
+    /// On-chain code 6025. The precompile's Ed25519SignatureOffsets are
+    /// malformed or do not bind the signature to exactly the 112-byte
+    /// attestation embedded in this instruction's data (wrong count,
+    /// out-of-bounds, wrong instruction index, or non-canonical message
+    /// offset).
+    #[msg("InvalidAttestationOffsets: ed25519 offsets do not bind the signature to the embedded attestation.")]
+    InvalidAttestationOffsets = 25,
+
+    /// On-chain code 6026. The public key covered by the runtime-verified
+    /// signature is not the configured `activity_oracle`.
+    #[msg(
+        "AttestationOracleMismatch: signature public key is not the configured activity oracle."
+    )]
+    AttestationOracleMismatch = 26,
+
+    /// On-chain code 6027. The attestation message binds a different
+    /// `(amm_program_id, pool_address)` pair than the instruction params.
+    #[msg("AttestationBindingMismatch: attestation bound to a different AMM program or pool.")]
+    AttestationBindingMismatch = 27,
+
+    /// On-chain code 6028. The attested last-swap timestamp is the zero
+    /// sentinel or lies in the future relative to the current Clock.
+    #[msg("AttestationTimestampInvalid: attested timestamp is zero or in the future.")]
+    AttestationTimestampInvalid = 28,
+
+    /// On-chain code 6029. The attestation's `issued_slot` no longer
+    /// resolves in the SlotHashes sysvar — the attestation is stale
+    /// (replayed outside the ~512-slot freshness window).
+    #[msg("AttestationStale: issued_slot aged out of the SlotHashes window.")]
+    AttestationStale = 29,
+
+    /// On-chain code 6030. The `issued_slot` resolves in SlotHashes but
+    /// the attested hash does not match the chain's hash for that slot.
+    #[msg("AttestationSlotHashMismatch: attested slot hash does not match SlotHashes.")]
+    AttestationSlotHashMismatch = 30,
+
+    /// On-chain code 6031. The attestation's `issued_slot` is zero or in
+    /// the future relative to the current slot.
+    #[msg("AttestationSlotInvalid: attestation issued_slot is zero or in the future.")]
+    AttestationSlotInvalid = 31,
 }
 
 #[cfg(test)]
@@ -161,6 +210,14 @@ mod tests {
             (GraveScannerError::LockerLockEvidenceRequired, 6021),
             (GraveScannerError::InvalidLockerAccount, 6022),
             (GraveScannerError::LockerAccountMismatch, 6023),
+            (GraveScannerError::AttestationMissing, 6024),
+            (GraveScannerError::InvalidAttestationOffsets, 6025),
+            (GraveScannerError::AttestationOracleMismatch, 6026),
+            (GraveScannerError::AttestationBindingMismatch, 6027),
+            (GraveScannerError::AttestationTimestampInvalid, 6028),
+            (GraveScannerError::AttestationStale, 6029),
+            (GraveScannerError::AttestationSlotHashMismatch, 6030),
+            (GraveScannerError::AttestationSlotInvalid, 6031),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

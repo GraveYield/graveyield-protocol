@@ -1,5 +1,55 @@
 # Changelog
 
+## [Unreleased — Phase 1.2: authoritative last-swap evidence (ORACLE-002)]
+
+### Added
+- **`programs/grave-scanner/src/attestation.rs`** — on-chain verification of
+  indexer-signed Criterion 1 evidence (spec `PROTOCOL_SPEC.md` §5, decision
+  D8). A 112-byte message `amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖
+  issued_slot ‖ slot_hash` is signed by the protocol activity oracle and
+  verified inside `evaluate_pool_phase_1` / `evaluate_pool_phase_2` through the
+  `ed25519_program` precompile: the handler validates the precompile's
+  `Ed25519SignatureOffsets` (single signature, canonical offsets binding the
+  signature to exactly the attestation embedded in the instruction data), the
+  oracle public key, the pool/AMM binding, timestamp sanity (no zero/future),
+  and re-anchors `issued_slot` against the `SlotHashes` sysvar so a replayed
+  attestation fails closed once the slot ages out (~512 slots). 15 host unit
+  tests cover the stale-pool, recently-active-pool, and every manipulated-
+  timestamp vector.
+- **`ProtocolConfig.activity_oracle`** — new governance-controlled field; the
+  public key whose Ed25519 signatures authorize C1 attestations. Initialised
+  to the protocol authority at `initialize`; rotatable via
+  `update_protocol_config` (new `activity_oracle: Option<Pubkey>` param).
+- **Scanner errors 6024–6031** — `AttestationMissing`,
+  `InvalidAttestationOffsets`, `AttestationOracleMismatch`,
+  `AttestationBindingMismatch`, `AttestationTimestampInvalid`,
+  `AttestationStale`, `AttestationSlotHashMismatch`, `AttestationSlotInvalid`.
+- **`sdk/src/lastSwapAttestation.ts`** — canonical attestation message
+  builder/parser (byte-for-byte mirror of the on-chain layout), Ed25519
+  verify-instruction builder for transaction assembly, and operator/indexer
+  tooling: `deriveLastSwapV4` (RPC transaction-history derivation) and
+  `fetchSlotHash` (SlotHashes anchoring).
+
+### Changed
+- **BREAKING (pre-mainnet):** `evaluate_pool_phase_1` / `evaluate_pool_phase_2`
+  instruction data replaced the caller-supplied `last_swap_unix_ts: i64`
+  parameter with `msg: [u8; 112]` (the signed attestation), and both handlers
+  gained `instruction_sysvar` + `slot_hashes` sysvar accounts. A caller-
+  supplied timestamp is no longer an accepted input anywhere.
+- **`PoolData`** — the dead `last_swap_unix_ts` field and the Raydium V4
+  adapter's `0` sentinel were removed; C1 evidence now has exactly one source
+  (the attestation).
+- **Docs** — `PROTOCOL_SPEC.md` rev 1.2.0 (§4 C1, §5, §6.1/6.3, §7 D8, §8 row
+  11, §9); whitepaper C1/C2 evidence wording; glossary (`activity oracle`,
+  `last-swap attestation`); `error_codes.md` 6024–6031;
+  `PRE_MAINNET_CHECKLIST.md` ORACLE-002 retired, ORACLE-003 opened (oracle
+  operational runbook); `tests/README.md` updated.
+
+### Sync convention
+- `cargo test -p grave-scanner`: 56/56 pass (41 pre-existing + 15 new);
+  `cargo clippy -D warnings` clean; `cargo fmt` clean; workspace typecheck
+  (sdk + indexer) clean.
+
 ## [Unreleased — m6: claim_lp_proceeds Merkle verification]
 
 ### Added

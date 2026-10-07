@@ -10,6 +10,7 @@
 use anchor_lang::prelude::*;
 
 use crate::adapters::{self, PoolData};
+use crate::attestation::{self, ATTESTATION_MSG_LEN};
 use crate::constants::{ELIGIBILITY_ANCHOR_SEED, LAUNCH_PRICE_SEED};
 use crate::criteria::{self, CriteriaInputs, CriteriaThresholds, Phase};
 use crate::errors::GraveScannerError;
@@ -19,13 +20,16 @@ use crate::state::{EligibilityAnchor, LaunchPrice, ProtocolConfig};
 pub struct EvaluatePoolPhase1Params {
     pub amm_program_id: Pubkey,
     pub pool_address: Pubkey,
-    /// Last on-chain swap timestamp supplied by the salvor SDK and
-    /// cross-checked by the indexer. Pre-mainnet, this is taken at face
-    /// value; the production handler verifies via an adapter-provided
-    /// last-swap proof or a record_pool_activity attestation.
+    /// Indexer-signed Criterion 1 attestation (112 bytes, canonical
+    /// layout in `attestation.rs` / spec §5, decision D8):
+    /// `amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`.
     ///
-    /// PRE-MAINNET-TODO(ORACLE): cryptographic proof of last swap timestamp | reverts: PoolDataParseError on mismatch | verify: against AMM transaction history or signed attestation
-    pub last_swap_unix_ts: i64,
+    /// The transaction MUST carry an `ed25519_program` verify instruction
+    /// immediately before this one whose signature covers exactly these
+    /// bytes with `ProtocolConfig.activity_oracle` as the public key. The
+    /// issued slot must still resolve in SlotHashes — stale attestations
+    /// are rejected. Caller-supplied timestamps are no longer accepted.
+    pub msg: [u8; ATTESTATION_MSG_LEN],
 }
 
 #[derive(Accounts)]
@@ -63,6 +67,17 @@ pub struct EvaluatePoolPhase1<'info> {
     /// lp_mint accounts are passed via `remaining_accounts`.
     pub pool: UncheckedAccount<'info>,
 
+    /// CHECK: instructions sysvar, address-constrained. Used to locate
+    /// the `ed25519_program` verify instruction and this instruction's
+    /// own data for attestation offset validation (ORACLE-002).
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    pub instruction_sysvar: UncheckedAccount<'info>,
+
+    /// CHECK: slot hashes sysvar, address-constrained. Anchors the
+    /// attestation's `issued_slot` to a real recent slot (freshness).
+    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::id())]
+    pub slot_hashes: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub writer: Signer<'info>,
 
@@ -74,6 +89,24 @@ pub fn handler(ctx: Context<EvaluatePoolPhase1>, params: EvaluatePoolPhase1Param
     require!(!cfg.paused, GraveScannerError::ProtocolPaused);
 
     let clock = Clock::get().map_err(|_| GraveScannerError::InvalidClock)?;
+
+    // Criterion 1 evidence: indexer-signed Ed25519 attestation (ORACLE-002,
+    // Phase 1.2 / spec D8). Verifies the runtime-checked precompile
+    // signature binds exactly the embedded 112-byte message to the
+    // configured activity oracle, then validates the message fields
+    // (pool binding, timestamp sanity, slot freshness via SlotHashes).
+    let attested_last_swap_ts = attestation::verify_last_swap_attestation(
+        &ctx.accounts.instruction_sysvar,
+        &ctx.accounts.slot_hashes,
+        attestation::AttestationRef {
+            msg: &params.msg,
+            amm_program_id: &params.amm_program_id,
+            pool_address: &params.pool_address,
+            oracle: &cfg.activity_oracle,
+        },
+        clock.unix_timestamp,
+        clock.slot,
+    )?;
 
     // Extract AMM-side pool snapshot. Per the m4 convention, the adapter
     // reads reserves/lp_supply from the pool's vault and lp_mint accounts
@@ -101,7 +134,7 @@ pub fn handler(ctx: Context<EvaluatePoolPhase1>, params: EvaluatePoolPhase1Param
     )?;
 
     let inputs = CriteriaInputs {
-        last_swap_unix_ts: params.last_swap_unix_ts,
+        last_swap_unix_ts: attested_last_swap_ts,
         current_unix_ts: clock.unix_timestamp,
         launch_price_q64x64: ctx.accounts.launch_price.launch_price_q64x64,
         current_price_q64x64: pool_data.current_price_q64x64()?,
