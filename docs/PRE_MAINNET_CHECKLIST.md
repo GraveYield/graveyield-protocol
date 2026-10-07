@@ -43,7 +43,7 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 
 | ID | File | Status | Description |
 | --- | --- | --- | --- |
-| LOCKER-001 | `programs/grave-scanner/src/adapters/locker.rs` | 🟥 | UNCX / PinkSale / Team Finance locker program IDs + account layout introspection. Reverts with `LockerAdapterUnimplemented` until wired. Verify: public docs and on-chain artifacts; cross-check against `adapters/locker_release_*.rs` (GraveVault) once those land. |
+| LOCKER-001 | `programs/grave-scanner/src/adapters/locker.rs` | ✅ | **Retired (Phase 1.1).** UNCX Raydium AMM V4 locker introspection implemented: per-pool marker PDA `["global_lp_tracker", amm_id]` gates the check (absent = provably never locked), TokenLock PDAs `["uncx_locker", id]` are strictly validated on-chain (ownership, discriminator, size, PDA re-derivation, `(amm_id, lp_mint)` binding) and `current_locked_amount` summed. Verified against live mainnet state (125 locks / 74 pools; per-mint custody reconciliation 74/74). Evidence-completeness for pools with lock history is SDK/operator-enforced (see spec §6). |
 
 ### ORACLE
 
@@ -65,6 +65,12 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | CPI-008 | `programs/grave-vault/src/cpi/pump_swap.rs` | 🟧 | PumpSwap `remove_liquidity` CPI for GraveVault. v1.1 milestone. Reverts with `AmmCpiUnimplemented`. |
 | CPI-009 | `programs/grave-vault/src/cpi/raydium_v4.rs` | 🟥 | Verify Raydium V4 withdraw account ordering against a live mainnet pool (e.g. `9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2`) via `solana-program-test` fork test before mainnet. The `amm_authority` constant check catches an obviously-wrong layout but not subtle swaps. |
 | CPI-010 | `programs/grave-vault/src/instructions/salvage_pool.rs` | 🟥 | Base-token orientation is hardcoded `base_is_coin_side = true` (marker present at the orientation comment). v1.0 is frozen WSOL-base-only (spec D5): `wsol_mint` is address-pinned, but a pool with WSOL on the PC side, or no WSOL side at all, is not rejected in pre-flight — it fails inside the Raydium CPI as `AmmRedemptionFailed`. Derive orientation from on-chain mints and raise `UnsupportedBaseToken` explicitly. |
+
+### LOCKER (additional lockers)
+
+| ID | File | Status | Description |
+| --- | --- | --- | --- |
+| LOCKER-002 | `programs/grave-scanner/src/adapters/locker.rs` | ⬜ | v1.0 introspects only the UNCX Raydium V4 locker (LOCKER-001). LP locked in PinkSale, Team Finance, Streamflow, or any other locker is invisible to on-chain C5 — such pools are treated as unlocked. Mitigations: the SDK must cross-check all known lockers off-chain before submitting a certification (operator-enforced); additional locker adapters are added as separate verified modules (roadmap Phase 15). |
 
 ### KEYS
 

@@ -86,12 +86,19 @@ pub fn handler(ctx: Context<EvaluatePoolPhase1>, params: EvaluatePoolPhase1Param
         ctx.remaining_accounts,
     )?;
 
-    // Locker introspection. Honest-stub adapter pattern: reverts with
-    // `LockerAdapterUnimplemented` until UNCX/PinkSale/TeamFinance
-    // adapters land. Receives the true LP mint (post-m4) so the locker
-    // check is semantically correct once implemented.
-    let lp_locked_amount =
-        adapters::locker::locked_lp_amount(&pool_data.lp_mint, ctx.remaining_accounts)?;
+    // Locker introspection. v1.0 supports the UNCX Raydium V4 locker
+    // (LOCKER-001, Phase 1.1): the per-pool marker PDA gates the check —
+    // absent on chain = no lock ever created (proven zero); present =
+    // TokenLock evidence must be supplied and is strictly validated
+    // (ownership + discriminator + PDA re-derivation + (pool, mint)
+    // binding). Receives the pool address for the marker derivation and
+    // the binding checks, and the true LP mint (post-m4).
+
+    let lp_locked_amount = adapters::locker::locked_lp_amount(
+        &pool_data.lp_mint,
+        &params.pool_address,
+        ctx.remaining_accounts,
+    )?;
 
     let inputs = CriteriaInputs {
         last_swap_unix_ts: params.last_swap_unix_ts,

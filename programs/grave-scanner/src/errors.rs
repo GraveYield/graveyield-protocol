@@ -50,8 +50,9 @@ pub enum GraveScannerError {
     AmmAdapterUnimplemented = 7,
 
     /// On-chain code 6008. Locker adapter registered but not implemented.
-    /// Returning Err rather than zero prevents silent certification of
-    /// pools whose LP tokens are locked in UNCX/PinkSale/Team Finance.
+    /// Retired as a live call site by the Phase 1.1 UNCX Raydium V4
+    /// adapter (LOCKER-001); retained as a stable code-space slot for
+    /// future locker-family additions that ship without a parser.
     #[msg("LockerAdapterUnimplemented: locker adapter is a pre-mainnet stub.")]
     LockerAdapterUnimplemented = 8,
 
@@ -96,6 +97,32 @@ pub enum GraveScannerError {
     /// floor (600s = 10 min). Raising the floor requires a program upgrade.
     #[msg("CertTtlBelowMinimum: cert_ttl_seconds below MIN_CERT_TTL_SECONDS floor.")]
     CertTtlBelowMinimum = 19,
+
+    // ----- v4.1 locker-adapter error codes (6020..=6023) -----
+    // LOCKER-001 (Phase 1.1, UNCX Raydium V4 locker adapter).
+    /// On-chain code 6020. The UNCX per-pool lock marker PDA
+    /// `["global_lp_tracker", amm_id]` was not supplied in
+    /// `remaining_accounts`. The SDK must derive and attach it — without
+    /// it there is no sound way to evaluate Criterion 5.
+    #[msg("LockerMarkerAccountRequired: UNCX lock marker PDA missing from remaining_accounts.")]
+    LockerMarkerAccountRequired = 20,
+
+    /// On-chain code 6021. The marker exists on chain (the pool was
+    /// locked at least once) but no TokenLock evidence was supplied.
+    /// Completeness of the supplied evidence is mandatory in this case.
+    #[msg("LockerLockEvidenceRequired: UNCX marker exists but no TokenLock evidence supplied.")]
+    LockerLockEvidenceRequired = 21,
+
+    /// On-chain code 6022. A supplied locker-program account failed
+    /// validation: ownership, discriminator, size, or PDA re-derivation
+    /// from its own `lock_global_id`.
+    #[msg("InvalidLockerAccount: locker account failed validation (disc/size/PDA/ownership).")]
+    InvalidLockerAccount = 22,
+
+    /// On-chain code 6023. A supplied TokenLock is bound to a different
+    /// `(amm_id, lp_mint)` pair than the pool under evaluation.
+    #[msg("LockerAccountMismatch: TokenLock bound to a different pool or LP mint.")]
+    LockerAccountMismatch = 23,
 }
 
 #[cfg(test)]
@@ -130,6 +157,10 @@ mod tests {
             (GraveScannerError::AnchorInvalidated, 6017),
             (GraveScannerError::AnchorNotStale, 6018),
             (GraveScannerError::CertTtlBelowMinimum, 6019),
+            (GraveScannerError::LockerMarkerAccountRequired, 6020),
+            (GraveScannerError::LockerLockEvidenceRequired, 6021),
+            (GraveScannerError::InvalidLockerAccount, 6022),
+            (GraveScannerError::LockerAccountMismatch, 6023),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

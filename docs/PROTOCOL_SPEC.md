@@ -8,6 +8,10 @@
 > **Baseline:** `main @ 4b8e0b1`. Scope: Solana, Raydium V4 only.
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
+>
+> **Revisions:** rev 1.1.0 — Phase 1.1: C5 evidence implemented (UNCX
+> Raydium AMM V4 locker adapter, LOCKER-001 retired; §4 C5, §5, §6, §8
+> row 10 updated). All other sections unchanged from the Phase 0 freeze.
 
 ## 0. Purpose
 
@@ -173,8 +177,9 @@ LP mint's SPL supply field.
 **C5 — LP not locked.**
 `lp_locked_amount == 0` — exactly zero. One locked smallest unit fails
 the pool. Locked LP cannot be deposited and burned by the salvor, so any
-lock makes settlement impossible. Evidence status: the locker adapter is
-the one unimplemented input (B1) — see §5.
+lock makes settlement impossible. Evidence status: implemented in Phase
+1.1 for the UNCX Raydium V4 locker (see §5); other lockers are out of
+v1.0 scope (LOCKER-002).
 
 **C6 — Multi-epoch confirmation.**
 Phase 1 stamps `first_eligible_epoch = current_epoch` into the anchor.
@@ -197,7 +202,7 @@ must satisfy before mainnet.
 | C2 | `current_price_q64x64` | Derived on-chain: `(quote_reserve << 64) / base_reserve` from the pool's vault balances, after adapter validation (vault ownership = SPL Token program; vault mint == pool-declared mint). | Authoritative (spot price; manipulation analysis below). |
 | C3 | `current_tvl_lamports` | Quote-side vault balance, read on-chain from the SPL token account located by the pool's own `pc_vault` pointer. | Authoritative. |
 | C4 | `lp_supply` | LP mint SPL supply, read on-chain from the account located by the pool's own `lp_mint` pointer. | Authoritative. |
-| C5 | `lp_locked_amount` | Locker adapter — **reverts `LockerAdapterUnimplemented`** (no pool can pass Phase 1 today). | **Unimplemented — blocker LOCKER-001.** |
+| C5 | `lp_locked_amount` | UNCX Raydium V4 locker adapter (Phase 1.1): per-pool marker PDA `\["global_lp_tracker", amm_id\]` + strictly validated `TokenLock` PDAs; live amount = Σ `current_locked_amount`. | **On-chain sound; completeness SDK/operator-enforced — see frozen requirement below.** |
 | C6 | epochs + anchor | `Clock::epoch` + `EligibilityAnchor` PDA state. | Authoritative. |
 
 **Adapter trust boundary (frozen).** The pool account must equal
@@ -227,10 +232,31 @@ path; the residual risk is griefing, accepted for v1.0.
   authority: no writer class (including multisig) may set the baseline
   without an on-chain check. Note: `RecordLaunchPriceParams` carries no
   slot reference today; `recorded_slot` is the write-time `Clock::slot`.
-- **C5 (LOCKER-001):** locker introspection must be PDA-derivable from
-  the LP mint, or read exclusively from accounts owned by the verified
-  locker program. An opt-out-able `remaining_accounts` slice that
-  silently returns zero locked LP is forbidden.
+- **C5 (LOCKER-001, resolved in Phase 1.1):** v1.0 introspects exactly
+  one locker — UNCX Raydium AMM V4
+  (`GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo`, official source
+  `uncx-network/raydium-amm-lp-locker`). Design:
+  * *Marker gate (deterministic, on-chain):* the caller must always
+    supply the per-pool marker PDA `["global_lp_tracker", amm_id]`,
+    created init-if-needed on the pool's first lock and never deleted.
+    Marker absent on chain ⇒ no lock was ever created ⇒ locked amount 0
+    is **proven**, not assumed. Omitting the marker reverts 6020.
+  * *TokenLock evidence:* lock PDAs are `["uncx_locker", id]`
+    (sequential global ids — not mint-derivable), so the id set comes
+    from off-chain enumeration (discriminator filter + `memcmp` on
+    `lp_mint`). Every supplied TokenLock is validated on-chain —
+    ownership, discriminator, 146-byte layout, PDA re-derivation from
+    its own `lock_global_id`, `(amm_id, lp_mint)` binding — and its
+    live `current_locked_amount` summed. A marker present on chain with
+    no TokenLock evidence reverts 6021; any validation failure reverts
+    6022/6023. The silently opt-out-able pattern forbidden by this
+    section cannot occur: omission is never accepted as zero when a
+    lock ever existed.
+  * *Residual trust (documented):* completeness of the enumerated
+    TokenLock set, and coverage of lockers other than UNCX
+    (LOCKER-002), are SDK/operator-enforced (§6.3). Verified against
+    live mainnet: 125 locks / 74 pools, per-mint custody reconciliation
+    74/74.
 
 ## 6. What the protocol guarantees — enforcement matrix
 
@@ -260,6 +286,7 @@ violate it).
 | Claims survive pause | `claim_lp_proceeds` does not read the pause flag. |
 | Pause halts new activity | Scanner pause gates `evaluate_pool_*`; vault pause gates `salvage_pool`; neither gates governance or rent-reclaim paths. |
 | Cert TTL cannot be configured below 10 minutes | `MIN_CERT_TTL_SECONDS` floor in `initialize` and `update_protocol_config`. |
+| Locker evidence is sound (UNCX v4) | Every supplied TokenLock is ownership-, discriminator-, size-, PDA-re-derivation- and binding-checked before its amount is summed; marker gate forbids silent omission (errors 6020–6023). |
 
 ### 6.2 Governance enforced (multisig process, not program code)
 
@@ -278,7 +305,8 @@ violate it).
 | Priority-fee ceiling | SDK `shouldRejectFee` + operational max `min(margin-ratio × expected profit, ceiling)` (default margin 25%) | A callee program cannot enforce a compute-unit price; the fee is paid by the transaction payer before program execution. `ProtocolConfig.max_priority_fee_ceiling_lamports` (default 1 SOL lamports/CU) is **advisory** config consumed by SDKs (D3). |
 | Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | On-chain, only the swap-leg floor is enforced. A route whose internal destination is not the vault WSOL ATA, and a floor of `0`, are **not** rejected by v1.0 code — tracked as SLIP-001/CPI-011 in the checklist (D4). |
 | Honest snapshot and Merkle tree construction | Off-chain snapshotter (Phase 5) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. |
-| Transaction construction quality | SDK transaction builders (Phase 8) | Account ordering, compute limits, retries. |
+| Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
+| Transaction construction quality | SDK transaction builders (Phase 8) | Account ordering, compute limits, retries (locker introspection costs one PDA re-derivation per supplied TokenLock). |
 
 ### 6.4 Explicitly NOT guaranteed in v1.0
 
@@ -291,6 +319,9 @@ violate it).
 - No protection against a front-run salvage race between competing
   salvors beyond first-transaction-wins (single `PoolRegistry` slot).
 - No non-WSOL quote/base support (see D5).
+- No locker introspection beyond the UNCX Raydium V4 locker — LP locked
+  in PinkSale / Team Finance / Streamflow / others is invisible to
+  on-chain C5 in v1.0 (LOCKER-002; mitigated SDK-side).
 
 ## 7. Resolved decisions (Phase 0 settlements)
 
@@ -371,7 +402,7 @@ accounted remainder (here: inside `protocol_share`).
 | 7 | `tests/README.md` implies on-chain priority-fee ceiling enforcement tests | Enforcement is SDK-only (D3) | **Fixed** — wording updated. |
 | 8 | `docs/README.md` canonical set references five living files that do not exist (`technical-documentation.md`, `grave-scanner-grave-vault-combined.md`, `legal-documentation.md`, `ghostpools-research.md`, `architecture/*.md`) and `published/` snapshots | Only `whitepaper.md`, `glossary.md`, `error_codes.md`, `PRE_MAINNET_CHECKLIST.md`, `PROTOCOL_SPEC.md` exist | **Tracked** — pre-existing doc rot; not Phase 0 scope to author five documents. This spec is the governing document meanwhile. |
 | 9 | EligibilityCert lifecycle: cert PDA is init-once | An expired cert permanently bricks that pool's salvage path (B4) | **Tracked** — Phase 1.4 engineering blocker. |
-| 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Tracked** — Phase 1.1 engineering blocker. |
+| 10 | Locker check semantics ("LP not locked") | Adapter unimplemented; no pool passes Phase 1 (B1) | **Fixed (Phase 1.1)** — UNCX Raydium V4 adapter implemented and mainnet-verified; residual scope in §6.3/LOCKER-002. |
 
 ## 9. Exit condition — the three answers
 
@@ -380,9 +411,10 @@ accounted remainder (here: inside `protocol_share`).
   with identical bitmaps.
 - **Who proves it?** Whoever submits the transactions — but every input
   must ultimately trace to on-chain state verifiable inside the
-  instruction (§5). Today C1 and C5 still have trusted/unimplemented
-  inputs (ORACLE-002, LOCKER-001); those are Phase 1 blockers, and no
-  certification is trustworthy until they retire.
+  instruction (§5). Today C1 still has a trusted input (ORACLE-002,
+  Phase 1.2 blocker); C5 is implemented for the UNCX Raydium V4 locker
+  with its completeness boundary documented in §6.3. No certification
+  is trustworthy until ORACLE-002 retires.
 - **What does the protocol guarantee?** Exactly the §6 matrix — no more,
   no less. Anything not listed there is not guaranteed, and §6.4 lists
   the sharpest edges explicitly.
