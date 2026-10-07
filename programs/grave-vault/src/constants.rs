@@ -110,11 +110,19 @@ pub const JUPITER_V6_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3t
 // =====================================================================
 
 /// Instruction discriminator for Raydium V4 `Withdraw`. Per Raydium V4
-/// `instruction.rs`, the tag is u8 = 4. Instruction data layout:
-///   [tag: u8 = 4] [amount: u64 LE] = 9 bytes total.
+/// `instruction.rs`, the tag is u8 = 4; data layout is
+/// `[tag: u8 = 4][amount: u64 LE]` = 9 bytes — the optional
+/// `min_coin_amount` / `min_pc_amount` slippage pair is omitted (absent =
+/// `None`); the vault enforces its own post-CPI bounds instead. This exact
+/// encoding is proven against the deployed mainnet V4 bytecode by the
+/// fork harness (real burn + real reserve transfers executed).
 pub const RAYDIUM_V4_INSTRUCTION_TAG_WITHDRAW: u8 = 4;
 
 /// Number of `remaining_accounts` salvor must supply for the Raydium V4
 /// withdraw CPI (pool internals + OpenBook market accounts that aren't in
-/// the named `Accounts` struct). See `cpi/raydium_v4.rs` for the layout.
-pub const RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED: usize = 11;
+/// the named `Accounts` struct; the two padding slots are supplied by the
+/// vault itself). Verified against the real mainnet V4
+/// bytecode by the `solana-program-test` fork harness —
+/// `programs/grave-vault/tests/raydium_v4_fork.rs` (CPI-009, Phase 2.1).
+/// See `cpi/raydium_v4.rs` for the layout.
+pub const RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED: usize = 13;

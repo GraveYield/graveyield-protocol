@@ -22,6 +22,10 @@ use crate::errors::GraveVaultError;
 
 /// Input to the Jupiter v6 swap CPI.
 pub struct JupiterSwapInput<'a, 'info> {
+    /// The Jupiter v6 program account. Included in the CPI's account list —
+    /// the runtime requires the callee program to be among the caller's
+    /// accounts.
+    pub jupiter_program: &'a AccountInfo<'info>,
     pub vault_authority: &'a AccountInfo<'info>,
     /// The vault's destination token account for the swap output. We snapshot
     /// its balance pre/post to compute the actual output amount (independent
@@ -50,6 +54,11 @@ pub fn swap<'a, 'info>(input: JupiterSwapInput<'a, 'info>) -> Result<JupiterSwap
     require!(
         !input.route_data.is_empty(),
         GraveVaultError::JupiterSwapFailed
+    );
+    require_keys_eq!(
+        *input.jupiter_program.key,
+        JUPITER_V6_PROGRAM_ID,
+        GraveVaultError::PreflightFailed
     );
 
     // Snapshot destination token account balance.
@@ -87,9 +96,11 @@ pub fn swap<'a, 'info>(input: JupiterSwapInput<'a, 'info>) -> Result<JupiterSwap
     };
 
     // Build account list for invoke_signed — must include every account
-    // referenced by the instruction's metas. The salvor provided them in
-    // `route_accounts`.
-    let mut account_infos: Vec<AccountInfo<'info>> = Vec::with_capacity(input.route_accounts.len());
+    // referenced by the instruction's metas, plus the callee program itself
+    // (the runtime resolves the CPI's program_id against the caller's list).
+    let mut account_infos: Vec<AccountInfo<'info>> =
+        Vec::with_capacity(input.route_accounts.len() + 1);
+    account_infos.push(input.jupiter_program.clone());
     for acct in input.route_accounts.iter() {
         account_infos.push((*acct).clone());
     }

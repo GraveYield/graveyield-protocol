@@ -32,15 +32,24 @@ pub struct RemoveLiquidityOutput {
     pub memecoin_received: u64,
 }
 
-/// Inputs for AMM `remove_liquidity` CPI. The vault holds the LP tokens at
-/// call time (salvor pre-transferred salvor_lp_amount before the CPI). The
-/// CPI burns those LP and credits base + memecoin to vault token accounts;
-/// `vault_authority` PDA-signs as the LP token account's owner via
-/// `invoke_signed`.
+/// Inputs for AMM `remove_liquidity` CPI. The LP tokens stay in the
+/// SALVOR's token account: the AMM burns them there (the salvor is the
+/// withdraw signer, granted by their signature on the outer salvage
+/// transaction) and the base + memecoin proceeds are credited to the
+/// VAULT's token accounts. Burning the salvor's LP directly is atomic with
+/// the rest of the salvage (one transaction) and means the vault never
+/// takes custody of LP.
 pub struct RemoveLiquidityInput<'a, 'info> {
     pub pool: &'a AccountInfo<'info>,
-    pub vault_authority: &'a AccountInfo<'info>,
-    pub vault_lp_token_account: &'a AccountInfo<'info>,
+    /// The AMM program account (`pool.owner`). Included in the CPI's account
+    /// list — the runtime requires the callee program to be among the
+    /// caller's accounts.
+    pub amm_program: &'a AccountInfo<'info>,
+    /// The salvor's LP token account — the burn source. Owned (and signed
+    /// for) by the salvor, NOT the vault.
+    pub user_lp_token_account: &'a AccountInfo<'info>,
+    /// The salvor — the withdraw signer (`user_owner` in Raydium terms).
+    pub user_owner: &'a AccountInfo<'info>,
     pub vault_base_token_account: &'a AccountInfo<'info>,
     pub vault_memecoin_token_account: &'a AccountInfo<'info>,
     pub lp_mint: &'a AccountInfo<'info>,

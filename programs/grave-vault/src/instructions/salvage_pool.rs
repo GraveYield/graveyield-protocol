@@ -49,7 +49,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program::{self, CreateAccount};
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount};
 
 use crate::constants::*;
 use crate::cpi::jupiter::{swap as jupiter_swap, JupiterSwapInput};
@@ -108,7 +108,7 @@ pub struct SalvagePoolParams {
     /// Number of `route_accounts` for the Jupiter swap — first N accounts
     /// in `remaining_accounts` after the Raydium V4 portion. The Raydium
     /// V4 portion is the first `RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED`
-    /// (= 11); Jupiter accounts follow. Total = 11 + this value.
+    /// (= 13); Jupiter accounts follow. Total = 13 + this value.
     pub jupiter_route_accounts_len: u8,
 }
 
@@ -172,7 +172,23 @@ pub struct SalvagePool<'info> {
 
     /// CHECK: AMM-specific pool account. Validated against `params.pool_address`.
     /// CPI dispatch by `pool.owner.key()` (Raydium V4 vs honest-stub adapters).
+    /// MUST be writable: the Raydium V4 withdraw CPI mutates the AmmInfo
+    /// (`lp_amount` decrement + `recent_epoch` refresh) — a readonly outer
+    /// account would make the CPI fail with PrivilegeEscalationAttempt.
+    #[account(mut)]
     pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: The AMM program account (`pool.owner`). Threaded into the
+    /// remove-liquidity CPI's account list: the runtime requires the callee
+    /// program to be among the caller's accounts, otherwise the CPI fails
+    /// with `MissingAccount`. Validated executable + equal to `pool.owner`
+    /// in the handler.
+    pub amm_program: UncheckedAccount<'info>,
+
+    /// CHECK: Jupiter v6 program, address-pinned. Threaded into the swap
+    /// CPI's account list (same runtime rule as `amm_program`).
+    #[account(address = JUPITER_V6_PROGRAM_ID)]
+    pub jupiter_program: UncheckedAccount<'info>,
 
     // -------------------- m5 additions --------------------
     /// CHECK: Singleton vault authority PDA. Signs the inner Raydium V4
@@ -203,18 +219,6 @@ pub struct SalvagePool<'info> {
     )]
     pub salvor_lp_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// Vault's LP token account. Receives the salvor's LP transfer, then
-    /// the Raydium V4 withdraw burns the full balance. `init_if_needed`
-    /// on TokenAccount is permitted in Anchor 0.32 (the restriction is
-    /// SystemAccount-only).
-    #[account(
-        init_if_needed,
-        payer = salvor,
-        associated_token::mint = lp_mint,
-        associated_token::authority = vault_authority,
-    )]
-    pub vault_lp_token_account: Box<Account<'info, TokenAccount>>,
-
     /// Vault's WSOL token account. Receives the WSOL portion of Raydium V4
     /// withdraw + the Jupiter swap output. Closed at end of handler to
     /// unwrap to native SOL.
@@ -237,7 +241,10 @@ pub struct SalvagePool<'info> {
     pub vault_memecoin_token_account: Box<Account<'info, TokenAccount>>,
 
     /// LP token mint. Anchor validates the vault_lp_token_account's mint
-    /// against this. Salvor passes the pool's actual LP mint.
+    /// against this. Salvor passes the pool's actual LP mint. MUST be
+    /// writable: the Raydium V4 withdraw burns LP (mint supply decreases)
+    /// inside the CPI.
+    #[account(mut)]
     pub lp_mint: Box<Account<'info, Mint>>,
 
     /// Memecoin (non-base) mint. Salvor passes the pool's non-WSOL mint.
@@ -289,6 +296,18 @@ pub fn handler<'info>(
     require_keys_eq!(
         ctx.accounts.pool.key(),
         params.pool_address,
+        GraveVaultError::PreflightFailed
+    );
+    // The AMM program account must be the pool's owner and executable: the
+    // remove-liquidity CPI invokes it, and the runtime requires the callee
+    // program to be among the caller's accounts (MissingAccount otherwise).
+    require!(
+        ctx.accounts.amm_program.executable,
+        GraveVaultError::PreflightFailed
+    );
+    require_keys_eq!(
+        *ctx.accounts.amm_program.key,
+        *ctx.accounts.pool.owner,
         GraveVaultError::PreflightFailed
     );
 
@@ -344,7 +363,11 @@ pub fn handler<'info>(
     );
 
     // ============================================================
-    // m5: salvor → vault LP transfer (atomic deposit before burn)
+    // m5 → Phase 2.1: the LP is burned IN PLACE in the salvor's account by
+    // the withdraw CPI (the salvor signs the salvage transaction and is the
+    // withdraw's `user_owner`). The earlier deposit-into-the-vault step was
+    // removed: it added a needless custody hop and a PDA withdrawer that
+    // the deployed Raydium V4 program rejects.
     // ============================================================
 
     require!(
@@ -352,30 +375,11 @@ pub fn handler<'info>(
         GraveVaultError::PreflightFailed
     );
 
-    {
-        let transfer_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.salvor_lp_token_account.to_account_info(),
-                to: ctx.accounts.vault_lp_token_account.to_account_info(),
-                authority: ctx.accounts.salvor.to_account_info(),
-            },
-        );
-        token::transfer(transfer_ctx, params.salvor_lp_amount)?;
-    }
-
-    // Refresh vault_lp_token_account state post-transfer.
-    ctx.accounts.vault_lp_token_account.reload()?;
-    require!(
-        ctx.accounts.vault_lp_token_account.amount >= params.salvor_lp_amount,
-        GraveVaultError::PreflightFailed
-    );
-
     // ============================================================
     // m5: AMM remove_liquidity dispatch (Raydium V4 real; others stub)
     // ============================================================
 
-    // Split remaining_accounts: first 11 are Raydium V4 internals; the
+    // Split remaining_accounts: first 13 are Raydium V4 internals; the
     // rest (count = params.jupiter_route_accounts_len) are Jupiter route
     // accounts. Anchor's `Context` carries remaining_accounts as `&[]`
     // bound to ctx's outer lifetime.
@@ -391,8 +395,9 @@ pub fn handler<'info>(
     let removal = {
         let input = RemoveLiquidityInput {
             pool: &ctx.accounts.pool.to_account_info(),
-            vault_authority: &ctx.accounts.vault_authority.to_account_info(),
-            vault_lp_token_account: &ctx.accounts.vault_lp_token_account.to_account_info(),
+            amm_program: &ctx.accounts.amm_program.to_account_info(),
+            user_lp_token_account: &ctx.accounts.salvor_lp_token_account.to_account_info(),
+            user_owner: &ctx.accounts.salvor.to_account_info(),
             vault_base_token_account: &ctx.accounts.vault_base_token_account.to_account_info(),
             vault_memecoin_token_account: &ctx
                 .accounts
@@ -415,6 +420,7 @@ pub fn handler<'info>(
     if removal.memecoin_received >= cfg.jupiter_dust_threshold_lamports {
         let _swap_output = {
             let input = JupiterSwapInput {
+                jupiter_program: &ctx.accounts.jupiter_program.to_account_info(),
                 vault_authority: &ctx.accounts.vault_authority.to_account_info(),
                 destination_token_account: &ctx.accounts.vault_base_token_account.to_account_info(),
                 route_accounts: jupiter_remaining,

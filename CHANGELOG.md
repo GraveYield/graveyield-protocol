@@ -1,5 +1,60 @@
 # Changelog
 
+## [Unreleased — Phase 2.1: Raydium V4 withdraw proven against mainnet bytecode (CPI-009 retired)]
+
+### Fixed
+- **The Raydium V4 withdraw CPI could never have succeeded.** The
+  `solana-program-test` fork harness (built in this phase) executes the real
+  `salvage_pool` instruction against the real mainnet Raydium V4 /
+  OpenBook / SPL-token bytecode with byte-for-byte mainnet pool state, and
+  caught three latent defects plus one architectural mismatch:
+  1. **Wrong account count.** The deployed V4 withdraw requires the
+     22-account form (two padding slots at positions 8/9 — live traffic
+     fills them with the pool account — plus event queue, bids and asks at
+     the tail); the vault sent 18, which every deployed-binary path rejects.
+  2. **Read-only accounts the withdraw mutates.** `pool` (AmmInfo
+     `lp_amount`/`recent_epoch`) and `lp_mint` (burn) must be writable in
+     the outer instruction, otherwise the CPI fails with
+     `PrivilegeEscalationAttempt`.
+  3. **Missing callee program account.** The runtime requires the CPI's
+     callee program to be among the caller's accounts; `salvage_pool` now
+     takes `amm_program` (validated executable and equal to `pool.owner`)
+     and `jupiter_program` (address-pinned to Jupiter v6) and threads both
+     into their CPI account lists.
+  4. **PDA withdrawer rejected by the deployed program.** Burning LP as the
+     `vault_authority` PDA (an off-curve, account-less `user_owner`) is
+     rejected by the deployed V4 bytecode; live withdraw traffic always has
+     a real wallet as `user_owner`. The architecture changed accordingly:
+     the withdraw burns `salvor_lp_amount` **in place** in the salvor's LP
+     account (the salvor signs the salvage transaction and is the withdraw
+     signer) and the proceeds land in vault-owned accounts. The vault LP
+     ATA, the deposit-then-burn transfer and the withdraw's PDA signer
+     seeds are removed. Atomicity is unchanged (single transaction), and
+     the vault never takes custody of LP.
+
+### Added
+- **Fork harness** — `programs/grave-vault/tests/raydium_v4_fork.rs`
+  (10 tests): happy path with exact LP-burn / supply / reserve-delta /
+  40-40-20 / receipt assertions, plus the adversarial matrix (forged
+  target orders, scrambled open-orders/target-orders, swapped coin/pc
+  vaults, wrong `amm_program`, unbound pool, insufficient LP, zero LP,
+  extra remaining accounts, expired cert). Fixtures are fetched by
+  `scripts/fetch_v4_fork_fixtures.mjs` (gitignored; tests skip without
+  them) and `scripts/build_fork_harness.sh` wraps build + fetch + run.
+- **Withdraw failure semantics** — pre-flight failures surface vault error
+  codes (7002/7013); failures inside the V4 CPI surface the deployed AMM's
+  raw error codes (e.g. 4 `InvalidCoinVault`, 25
+  `InvalidTargetAccountOwner`, 40 `InsufficientFunds`) because the runtime
+  propagates the inner custom code; documented in the harness.
+
+### Changed
+- `salvage_pool` account surface (breaking, pre-mainnet): `amm_program` and
+  `jupiter_program` named accounts added; `vault_lp_token_account` removed;
+  `RAYDIUM_V4_WITHDRAW_REMAINING_ACCOUNTS_REQUIRED` is 13 (authority, open
+  orders, target orders, both AMM vaults, market program, market, both
+  market vaults, market vault signer, event queue, bids, asks). The two
+  padding slots are filled internally with the pool account.
+
 ## [Unreleased — Phase 1.4: eligibility certificate lifecycle (B4)]
 
 ### Added
