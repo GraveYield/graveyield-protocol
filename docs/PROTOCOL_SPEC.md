@@ -9,7 +9,31 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.9.0 — Phase 5.2: the Merkle tree builder, proof
+> **Revisions:** rev 1.10.0 — Phase 6: the first COMPLETE lifecycle
+> integration test ships (`programs/grave-vault/tests/
+> full_lifecycle_fork.rs`: candidate pool → GraveScanner certify →
+> salvage → snapshot → claims — one test, every state transition asserted,
+> on the real mainnet bytecode), and running it CORRECTED the C1/C2
+> attestation precompile contract: the `ed25519_program` verify
+> instruction that precedes `evaluate_pool_phase_1` / `_2` and
+> `record_launch_price` must use the runtime's own wire format — 1-byte
+> signature count (`data[0]`, exactly 1), 1 ignored padding byte, the
+> 7-field `Ed25519SignatureOffsets` struct at byte 2 (signature_offset,
+> signature_instruction_index, public_key_offset,
+> public_key_instruction_index, message_data_offset, message_data_size,
+> message_instruction_index — all u16 LE), then the covered public key
+> (32 B) and the signature (64 B) at the pinned canonical placements 16 /
+> 48 — with `message_data_size` pinning the attestation span (112 B at
+> offset 72 for C1; 168 B at offset 152 for C2). The previously shipped
+> 14-byte header (signature count as the 5th u16, no message-size field,
+> sig at 14 / pk at 78) is not a format any Solana runtime accepts: the
+> precompile reads the count from `data[0]`, so such instructions die in
+> precompile verification before the scanner ever executes. The on-chain
+> checks are unchanged in intent and now pin every field of the runtime
+> layout fail-closed; the SDK's attestation builders
+> (`sdk/src/lastSwapAttestation.ts`, `sdk/src/launchPriceAttestation.ts`)
+> were corrected to the same layout. No error codes, instruction data, or
+> account layouts change. rev 1.9.0 — Phase 5.2: the Merkle tree builder, proof
 > generator, and sealed snapshot artifact ship (`snapshotter/`, modules
 > `tree` / `artifact`), completing the off-chain claims machinery.
 > Tree convention pinned as D12: leaves are the D11 entries hashed as
@@ -380,8 +404,9 @@ path; the residual risk is griefing, accepted for v1.0.
   (`ProtocolConfig.activity_oracle`, rotatable via
   `update_protocol_config`, initialised to the protocol authority).
   The on-chain check binds the signature to exactly the 112-byte
-  message embedded in the instruction data (canonical offsets in
-  `grave-scanner/src/attestation.rs`), to the `(amm_program_id,
+  message embedded in the instruction data (canonical offsets — the
+  runtime `ed25519_program` wire format, byte-locked in the module
+  header of `grave-scanner/src/attestation.rs`), to the `(amm_program_id,
   pool_address)` pair, to a non-future timestamp, and to a slot still
   present in `SlotHashes` (replay window ≈ 512 slots ≈ 3.4 min). The
   derivation itself (Raydium V4 transaction history via RPC,
@@ -399,7 +424,8 @@ path; the residual risk is griefing, accepted for v1.0.
   deliberately separate from the hotter `activity_oracle` key). The
   on-chain check binds the signature to exactly the 168-byte message
   embedded at the end of the `record_launch_price` instruction data
-  (canonical offsets in `grave-scanner/src/attestation.rs`), to the
+  (canonical offsets — the runtime `ed25519_program` wire format — in
+  `grave-scanner/src/attestation.rs`), to the
   `(amm_program_id, pool_address, base_mint, quote_mint,
   launch_price_q64x64)` echo, to a strictly positive price, and to sane
   first-swap timestamp/slot and issuance-slot values. There is no

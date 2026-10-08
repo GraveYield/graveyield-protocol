@@ -42,11 +42,38 @@
 //   [ 72..184)  params.msg (the 112-byte attestation — the exact bytes
 //               covered by the precompile signature)
 //
-// Precompile instruction data layout (110 bytes):
+// Precompile instruction data layout (the runtime wire format, 112 bytes
+// canonical): a 1-byte signature count + 1 ignored padding byte, then the
+// 14-byte `Ed25519SignatureOffsets` struct (7 × u16 LE) at byte 2, then
+// the covered public key (32B) and the Ed25519 signature (64B). The
+// canonical field placement (pubkey first, signature second) mirrors
+// `solana_ed25519_program::new_ed25519_instruction_with_signature`:
 //
-//   [  0.. 14)  Ed25519SignatureOffsets header
-//   [ 14.. 78)  Ed25519 signature (64B)
-//   [ 78..110)  oracle public key (32B)
+//   [  0]        num_signatures       (u8 — exactly 1)
+//   [  1]        ignored by the runtime (canonical builder writes 0)
+//   [  2..  4)   signature_offset                (48)
+//   [  4..  6)   signature_instruction_index     (0xFFFF = this instruction)
+//   [  6..  8)   public_key_offset               (16)
+//   [  8.. 10)   public_key_instruction_index    (0xFFFF = this instruction)
+//   [ 10.. 12)   message_data_offset             (72 or 152 — see below)
+//   [ 12.. 14)   message_data_size               (112 or 168)
+//   [ 14.. 16)   message_instruction_index       (the scanner instruction)
+//   [ 16.. 48)   oracle public key (32B)
+//   [ 48..112)   Ed25519 signature (64B)
+//
+// The message offsets point INTO the scanner instruction's data, so the
+// runtime-verified signature covers exactly the attestation bytes the
+// handler carries in `params.msg`.
+//
+// Phase 6 correction (rev 1.10.0): the offset contract originally
+// mirrored a plausible-but-wrong 14-byte header (sig at 14, pk at 78,
+// signature count as the 5th u16, no message-size field) that no Solana
+// runtime accepts — the precompile reads the count from data[0], so such
+// an instruction dies in precompile verification before the scanner
+// ever runs. The contract below is byte-identical to the actual runtime
+// implementation (`agave_precompiles::ed25519::verify`), and the Phase 6
+// end-to-end fork suite executes the attestation path against real VM
+// precompile verification.
 //
 // =====================================================================
 // Launch-price attestation (ORACLE-001, Phase 1.3 / spec D9)
@@ -117,8 +144,12 @@ pub const ED25519_PROGRAM_ID: Pubkey = pubkey!("Ed25519SigVerify1111111111111111
 /// Length of the canonical attestation message.
 pub const ATTESTATION_MSG_LEN: usize = 112;
 
-/// Ed25519SignatureOffsets header length (7 u16 fields).
-pub const ED25519_HEADER_LEN: usize = 14;
+/// Precompile instruction header: 1-byte signature count + 1 ignored
+/// padding byte + the 14-byte `Ed25519SignatureOffsets` struct (7 u16
+/// fields, starting at byte 2). Byte-identical to the runtime's own
+/// `SIGNATURE_OFFSETS_START` (2) + `SIGNATURE_OFFSETS_SERIALIZED_SIZE`
+/// (14) layout in `solana-ed25519-program`.
+pub const ED25519_HEADER_LEN: usize = 16;
 /// Ed25519 signature length.
 pub const ED25519_SIG_LEN: usize = 64;
 /// Ed25519 public key length.
@@ -135,10 +166,14 @@ pub const IX_DATA_MSG_OFFSET: usize = 8 + 32 + 32;
 /// Minimum scanner instruction data length (disc + amm + pool + msg).
 pub const IX_DATA_MIN_LEN: usize = IX_DATA_MSG_OFFSET + ATTESTATION_MSG_LEN;
 
-// Offsets into the PRECOMPILE instruction data (canonical 110-byte form).
-pub const PRECOMPILE_SIG_OFFSET: usize = ED25519_HEADER_LEN;
-pub const PRECOMPILE_PK_OFFSET: usize = ED25519_HEADER_LEN + ED25519_SIG_LEN;
-pub const PRECOMPILE_MIN_LEN: usize = ED25519_HEADER_LEN + ED25519_SIG_LEN + ED25519_PK_LEN;
+// Offsets into the PRECOMPILE instruction data (canonical 112-byte form).
+// Canonical placement is pubkey-first (byte 16), signature second (byte
+// 48) — mirroring the runtime's own instruction builder. Every offset is
+// PINNED by the on-chain check below: a precompile instruction that
+// places sig/pk/message anywhere else is rejected fail-closed.
+pub const PRECOMPILE_PK_OFFSET: usize = ED25519_HEADER_LEN;
+pub const PRECOMPILE_SIG_OFFSET: usize = ED25519_HEADER_LEN + ED25519_PK_LEN;
+pub const PRECOMPILE_MIN_LEN: usize = ED25519_HEADER_LEN + ED25519_PK_LEN + ED25519_SIG_LEN;
 
 // =====================================================================
 // Launch-price attestation constants (spec D9). Mirrored byte-for-byte
@@ -185,6 +220,7 @@ pub fn verify_ed25519_offsets(
         scanner_ix_data,
         oracle,
         IX_DATA_MSG_OFFSET,
+        ATTESTATION_MSG_LEN,
         IX_DATA_MIN_LEN,
     )
 }
@@ -193,24 +229,35 @@ pub fn verify_ed25519_offsets(
 /// precedes the scanner instruction, for an attestation embedded at an
 /// arbitrary (attestation-specific) message offset.
 ///
+/// The instruction data must be in the RUNTIME wire format (see the
+/// module header): a 1-byte signature count, 1 ignored padding byte,
+/// then the 7-field `Ed25519SignatureOffsets` struct at byte 2, then the
+/// covered public key and the signature.
+///
 /// Checks that the runtime-verified signature:
-///   * uses exactly one signature,
-///   * keeps sig + pubkey inside the precompile instruction data,
+///   * is exactly one signature (`data[0] == 1`),
+///   * keeps sig + pubkey inside the precompile instruction data at the
+///     PINNED canonical placements (`PRECOMPILE_SIG_OFFSET` /
+///     `PRECOMPILE_PK_OFFSET`),
 ///   * covers the configured oracle public key,
-///   * signs EXACTLY the attestation message starting at `msg_offset`
-///     inside the scanner instruction data (whose total length must be
-///     at least `min_scanner_data_len`).
+///   * signs EXACTLY `msg_len` bytes starting at `msg_offset` inside the
+///     scanner instruction data (whose total length must be at least
+///     `min_scanner_data_len`) — `message_data_offset` /
+///     `message_data_size` / `message_instruction_index` are all pinned,
+///     so the bytes in `params.msg` are provably what the oracle signed.
 ///
 /// The runtime guarantees the signature itself is valid by the time this
 /// runs (the precompile executed earlier in the same transaction and
 /// aborts the transaction on failure) — this function only validates the
 /// offsets that determine WHAT was signed.
+#[allow(clippy::too_many_arguments)] // pinned wire-format contract
 pub fn verify_ed25519_offsets_at(
     precompile_ix: &anchor_lang::solana_program::instruction::Instruction,
     scanner_ix_index: u16,
     scanner_ix_data: &[u8],
     oracle: &Pubkey,
     msg_offset: usize,
+    msg_len: usize,
     min_scanner_data_len: usize,
 ) -> Result<()> {
     require_keys_eq!(
@@ -221,42 +268,38 @@ pub fn verify_ed25519_offsets_at(
 
     let d = precompile_ix.data.as_slice();
     require!(
-        d.len() >= ED25519_HEADER_LEN,
+        d.len() >= PRECOMPILE_MIN_LEN,
         GraveScannerError::InvalidAttestationOffsets
     );
 
-    let sig_offset = u16::from_le_bytes([d[0], d[1]]) as usize;
-    let sig_ix_index = u16::from_le_bytes([d[2], d[3]]);
-    let msg_addr_offset = u16::from_le_bytes([d[4], d[5]]) as usize;
-    let msg_ix_index = u16::from_le_bytes([d[6], d[7]]);
-    let num_signatures = u16::from_le_bytes([d[8], d[9]]);
-    let pk_offset = u16::from_le_bytes([d[10], d[11]]) as usize;
-    let pk_ix_index = u16::from_le_bytes([d[12], d[13]]);
+    // Runtime layout: data[0] = signature count (u8), data[1] = ignored
+    // (the runtime does not check it either), offsets struct at byte 2.
+    let num_signatures = u16::from(d[0]);
+    let sig_offset = u16::from_le_bytes([d[2], d[3]]) as usize;
+    let sig_ix_index = u16::from_le_bytes([d[4], d[5]]);
+    let pk_offset = u16::from_le_bytes([d[6], d[7]]) as usize;
+    let pk_ix_index = u16::from_le_bytes([d[8], d[9]]);
+    let msg_data_offset = u16::from_le_bytes([d[10], d[11]]) as usize;
+    let msg_data_size = u16::from_le_bytes([d[12], d[13]]) as usize;
+    let msg_ix_index = u16::from_le_bytes([d[14], d[15]]);
 
-    // Exactly one signature, sig + pubkey carried inside the precompile
-    // instruction data, well-formed and in-bounds. Fail closed on every
-    // other shape.
+    // Exactly one signature; sig + pubkey carried inside the precompile
+    // instruction data at the pinned canonical placements, in-bounds.
     require!(
         num_signatures == 1,
         GraveScannerError::InvalidAttestationOffsets
     );
     require!(
-        sig_ix_index == CUR_INSTRUCTION_INDEX,
-        GraveScannerError::InvalidAttestationOffsets
-    );
-    require!(
-        sig_offset >= ED25519_HEADER_LEN
+        sig_ix_index == CUR_INSTRUCTION_INDEX
+            && sig_offset == PRECOMPILE_SIG_OFFSET
             && sig_offset
                 .checked_add(ED25519_SIG_LEN)
                 .is_some_and(|end| end <= d.len()),
         GraveScannerError::InvalidAttestationOffsets
     );
     require!(
-        pk_ix_index == CUR_INSTRUCTION_INDEX,
-        GraveScannerError::InvalidAttestationOffsets
-    );
-    require!(
-        pk_offset >= ED25519_HEADER_LEN
+        pk_ix_index == CUR_INSTRUCTION_INDEX
+            && pk_offset == PRECOMPILE_PK_OFFSET
             && pk_offset
                 .checked_add(ED25519_PK_LEN)
                 .is_some_and(|end| end <= d.len()),
@@ -271,14 +314,14 @@ pub fn verify_ed25519_offsets_at(
 
     // The signed message MUST be exactly the attestation embedded in the
     // scanner instruction data: message index = scanner instruction,
-    // message offset = the caller-pinned start of params.msg. Anything
+    // message offset/size = the caller-pinned attestation span. Anything
     // else means the bytes in `params.msg` are not what the oracle signed.
     require!(
         msg_ix_index == scanner_ix_index,
         GraveScannerError::InvalidAttestationOffsets
     );
     require!(
-        msg_addr_offset == msg_offset,
+        msg_data_offset == msg_offset && msg_data_size == msg_len,
         GraveScannerError::InvalidAttestationOffsets
     );
     require!(
@@ -576,6 +619,7 @@ pub fn verify_launch_price_attestation(
         &scanner_ix.data,
         att.oracle,
         LAUNCH_PRICE_MSG_OFFSET,
+        LAUNCH_PRICE_MSG_LEN,
         LAUNCH_PRICE_IX_MIN_LEN,
     )?;
 
@@ -587,18 +631,24 @@ mod tests {
     use super::*;
     use anchor_lang::solana_program::instruction::Instruction;
 
-    /// Canonical 110-byte precompile instruction data: header + sig + pk.
+    /// Canonical 112-byte runtime-format precompile instruction data:
+    /// header + pk + sig. Byte-identical to what
+    /// `solana_ed25519_program::new_ed25519_instruction_with_signature`
+    /// emits for a signature over a message carried in another
+    /// instruction.
     fn build_precompile_data(sig: &[u8; 64], pk: &[u8; 32], msg_ix_index: u16) -> Vec<u8> {
         let mut d = Vec::with_capacity(PRECOMPILE_MIN_LEN);
+        d.push(1u8); // num signatures
+        d.push(0u8); // ignored padding byte
         d.extend_from_slice(&(PRECOMPILE_SIG_OFFSET as u16).to_le_bytes());
         d.extend_from_slice(&CUR_INSTRUCTION_INDEX.to_le_bytes()); // sig ix
-        d.extend_from_slice(&(IX_DATA_MSG_OFFSET as u16).to_le_bytes());
-        d.extend_from_slice(&msg_ix_index.to_le_bytes()); // msg ix
-        d.extend_from_slice(&1u16.to_le_bytes()); // num signatures
         d.extend_from_slice(&(PRECOMPILE_PK_OFFSET as u16).to_le_bytes());
         d.extend_from_slice(&CUR_INSTRUCTION_INDEX.to_le_bytes()); // pk ix
-        d.extend_from_slice(sig);
+        d.extend_from_slice(&(IX_DATA_MSG_OFFSET as u16).to_le_bytes());
+        d.extend_from_slice(&(ATTESTATION_MSG_LEN as u16).to_le_bytes()); // msg size
+        d.extend_from_slice(&msg_ix_index.to_le_bytes()); // msg ix
         d.extend_from_slice(pk);
+        d.extend_from_slice(sig);
         d
     }
 
@@ -716,7 +766,7 @@ mod tests {
         // msg_offset moved off the canonical 72 — the runtime would sign
         // different bytes than the ones carried in params.msg.
         let mut bad_header = build_precompile_data(&[7u8; 64], oracle.as_array(), 1);
-        bad_header[4..6].copy_from_slice(&40u16.to_le_bytes()); // msg_offset
+        bad_header[10..12].copy_from_slice(&40u16.to_le_bytes()); // msg_data_offset
         let ix = Instruction {
             program_id: ED25519_PROGRAM_ID,
             accounts: vec![],
@@ -841,7 +891,7 @@ mod tests {
         let msg = build_msg(&amm, &pool, 1_700_000_000, 30_000_000, &[0u8; 32]);
         let scanner_data = build_scanner_data(&amm, &pool, &msg);
         let mut d = build_precompile_data(&[7u8; 64], oracle.as_array(), 1);
-        d[8..10].copy_from_slice(&2u16.to_le_bytes()); // num_signatures = 2
+        d[0] = 2; // num_signatures = 2
         let ix = Instruction {
             program_id: ED25519_PROGRAM_ID,
             accounts: vec![],
@@ -906,10 +956,10 @@ mod tests {
         assert_eq!(ATTESTATION_MSG_LEN, 112);
         assert_eq!(IX_DATA_MSG_OFFSET, 72);
         assert_eq!(IX_DATA_MIN_LEN, 184);
-        assert_eq!(PRECOMPILE_SIG_OFFSET, 14);
-        assert_eq!(PRECOMPILE_PK_OFFSET, 78);
-        assert_eq!(PRECOMPILE_MIN_LEN, 110);
-        assert_eq!(ED25519_HEADER_LEN, 14);
+        assert_eq!(PRECOMPILE_SIG_OFFSET, 48);
+        assert_eq!(PRECOMPILE_PK_OFFSET, 16);
+        assert_eq!(PRECOMPILE_MIN_LEN, 112);
+        assert_eq!(ED25519_HEADER_LEN, 16);
         assert_eq!(CUR_INSTRUCTION_INDEX, 0xFFFF);
     }
 }
@@ -946,8 +996,8 @@ mod launch_price_tests {
         d
     }
 
-    /// Canonical 110-byte precompile instruction data with a
-    /// caller-pinned message offset.
+    /// Canonical 112-byte runtime-format precompile instruction data with
+    /// a caller-pinned message offset.
     #[allow(clippy::too_many_arguments)] // test fixture builder
     fn build_precompile_data_at(
         sig: &[u8; 64],
@@ -956,15 +1006,17 @@ mod launch_price_tests {
         msg_off: u16,
     ) -> Vec<u8> {
         let mut d = Vec::with_capacity(PRECOMPILE_MIN_LEN);
+        d.push(1u8); // num signatures
+        d.push(0u8); // ignored padding byte
         d.extend_from_slice(&(PRECOMPILE_SIG_OFFSET as u16).to_le_bytes());
         d.extend_from_slice(&CUR_INSTRUCTION_INDEX.to_le_bytes()); // sig ix
-        d.extend_from_slice(&msg_off.to_le_bytes()); // msg offset
-        d.extend_from_slice(&msg_ix_index.to_le_bytes()); // msg ix
-        d.extend_from_slice(&1u16.to_le_bytes()); // num signatures
         d.extend_from_slice(&(PRECOMPILE_PK_OFFSET as u16).to_le_bytes());
         d.extend_from_slice(&CUR_INSTRUCTION_INDEX.to_le_bytes()); // pk ix
-        d.extend_from_slice(sig);
+        d.extend_from_slice(&msg_off.to_le_bytes()); // msg offset
+        d.extend_from_slice(&(LAUNCH_PRICE_MSG_LEN as u16).to_le_bytes()); // msg size
+        d.extend_from_slice(&msg_ix_index.to_le_bytes()); // msg ix
         d.extend_from_slice(pk);
+        d.extend_from_slice(sig);
         d
     }
 
@@ -1088,6 +1140,7 @@ mod launch_price_tests {
             &scanner_data,
             &oracle,
             LAUNCH_PRICE_MSG_OFFSET,
+            LAUNCH_PRICE_MSG_LEN,
             LAUNCH_PRICE_IX_MIN_LEN,
         )
         .unwrap();
@@ -1119,6 +1172,7 @@ mod launch_price_tests {
                 &scanner_data,
                 &oracle,
                 LAUNCH_PRICE_MSG_OFFSET,
+                LAUNCH_PRICE_MSG_LEN,
                 LAUNCH_PRICE_IX_MIN_LEN
             )
             .unwrap_err(),
@@ -1141,6 +1195,7 @@ mod launch_price_tests {
                 &scanner_data,
                 &oracle,
                 LAUNCH_PRICE_MSG_OFFSET,
+                LAUNCH_PRICE_MSG_LEN,
                 LAUNCH_PRICE_IX_MIN_LEN
             )
             .unwrap_err(),
@@ -1171,6 +1226,7 @@ mod launch_price_tests {
                 &scanner_data,
                 &oracle,
                 LAUNCH_PRICE_MSG_OFFSET,
+                LAUNCH_PRICE_MSG_LEN,
                 LAUNCH_PRICE_IX_MIN_LEN
             )
             .unwrap_err(),
@@ -1193,6 +1249,7 @@ mod launch_price_tests {
                 &scanner_data,
                 &oracle,
                 LAUNCH_PRICE_MSG_OFFSET,
+                LAUNCH_PRICE_MSG_LEN,
                 LAUNCH_PRICE_IX_MIN_LEN
             )
             .unwrap_err(),

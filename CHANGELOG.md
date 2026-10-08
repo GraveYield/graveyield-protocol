@@ -1,5 +1,73 @@
 # Changelog
 
+## [Unreleased — Phase 6: the first complete lifecycle integration test; the C1/C2 precompile wire contract corrected (spec rev 1.10.0)]
+
+### Added
+- **`programs/grave-vault/tests/full_lifecycle_fork.rs`** — the Phase 6
+  end-to-end harness and the roadmap's "first complete integration test":
+  ONE test executes the ENTIRE GraveYield lifecycle against the real
+  mainnet Raydium V4 / OpenBook / SPL-token bytecode (canonical pool 1
+  fixtures) and asserts every state transition:
+  candidate pool → GraveScanner `initialize` (governance thresholds,
+  oracle keys) → `record_launch_price` (C2, oracle-signed 168-byte Ed25519
+  attestation) → `evaluate_pool_phase_1` (C1, indexer-signed 112-byte
+  attestation; all six criteria evaluated over the real pool bytes) →
+  `EligibilityAnchor` (bitmap 0x3F) → multi-epoch waiting period (VM warp
+  past `MIN_EPOCH_CONFIRMATION`) → `evaluate_pool_phase_2` (FRESH C1
+  attestation, bitmap equality, epoch gap) → `EligibilityCert` →
+  LP-holder snapshot (the real snapshotter over the live VM ledger, the
+  `Σ == supply` completeness gate running for real) → `SnapshotMerkleTree`
+  → sealed `SnapshotArtifact` → JSON publication → `salvage_pool` (real
+  withdraw CPI + Jupiter stand-in conversion + 40/40/20 settlement; the
+  artifact root + supply sealed into `PoolRegistry`) →
+  `claim_lp_proceeds` ×5 with the artifact's ready-to-submit proofs →
+  SOL in every historical holder's wallet → the closing identity chain
+  (`Σ ClaimRecords == registry cumulative == Σ floors recomputed from the
+  artifact alone`; the vault keeps exactly rent + (bucket − claimed)).
+- Fork-suite total 34 → 35. Host totals unchanged (156: scanner 81 /
+  vault 22 / snapshotter 53).
+
+### Fixed
+- **The C1/C2 attestation precompile wire contract (mainnet-blocking; only
+  an end-to-end test could catch it).** The scanner's offset checker — and
+  the SDK's attestation builders — assumed a 14-byte `ed25519_program`
+  header (signature count as the 5th u16, no message-size field, sig at
+  14, pk at 78). The runtime's actual format (`agave_precompiles::ed25519
+  ::verify`) reads the signature count from `data[0]` and parses the
+  7-field offsets struct at byte 2 with a `message_data_size` field: an
+  instruction in the previously shipped shape dies in precompile
+  verification before the scanner executes, and a runtime-valid
+  instruction was rejected by the scanner (`InvalidAttestationOffsets`) —
+  the attestation path could never succeed end-to-end. The Phase 1.2/1.3
+  suites passed because both sides of their unit tests shared the same
+  wrong shape; `full_lifecycle_fork.rs` executes the real precompile, so
+  the contract is now proven against the actual runtime. The fix pins
+  every field fail-closed (count == 1, sig/pk at the canonical placements
+  48/16, message offset/size/index exactly the attestation span, covered
+  key == the configured oracle). Intent, error codes, instruction data,
+  and account layouts are unchanged; the 112/168-byte messages are
+  unchanged.
+- `programs/grave-scanner/src/attestation.rs`: offset contract + module
+  header + the 31 attestation unit tests rewritten to the runtime wire
+  format (the tamper vectors retarget the real byte positions; the
+  constants lock test pins sig 48 / pk 16 / header 16 / min 112).
+- `sdk/src/lastSwapAttestation.ts`: `buildEd25519VerifyInstruction` emits
+  the runtime layout (112-byte data, pk@16, sig@48, `message_data_size` =
+  the canonical message length) and validates the (offset, size) pair
+  against the two canonical attestation spans (72, 112) and (152, 168);
+  constants updated (`ED25519_HEADER_LEN` 16, `PRECOMPILE_PK_OFFSET` 16,
+  `PRECOMPILE_SIG_OFFSET` 48, `PRECOMPILE_MIN_LEN` 112).
+- `sdk/src/launchPriceAttestation.ts`: the C2 wrapper passes a 168-byte
+  placeholder so the precompile's `message_data_size` is 168.
+
+### Changed
+- `scripts/build_fork_harness.sh`: builds and copies `grave_scanner.so`
+  and runs all FIVE fork suites (Phase 2.1 / 3 / 4 / 5.3 / 6).
+- `tests/README.md`: Phase 6 section (the full-lifecycle harness, the
+  retired cert stand-in, scanner-build setup) and the fork-suite counts.
+- `docs/PROTOCOL_SPEC.md`: rev 1.10.0 (the corrected precompile wire
+  contract, normative in §5).
+
 ## [Unreleased — Phase 5.3: the claim path proven on the real snapshotter (wallet → proof → claim → SOL)]
 
 ### Added

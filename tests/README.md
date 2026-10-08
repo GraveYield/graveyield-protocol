@@ -174,7 +174,8 @@ the D11 sink exclusion exists for — plus the five claimant wallets; the
 UNCX locker evidence is honestly empty because no locker state exists in
 the VM). The snapshot itself is taken from live VM reads through the
 same source seam an RPC serves, so the snapshotter's `Σ balances ==
-supply` completeness gate runs for real.
+supply` completeness gate runs for real. (Phase 6 retires the first of
+these stand-ins — see below.)
 
 Setup and run:
 
@@ -194,10 +195,60 @@ cargo test -p grave-vault --test raydium_v4_fork
 cargo test -p grave-vault --test jupiter_conversion_fork
 cargo test -p grave-vault --test settlement_economics_fork
 cargo test -p grave-vault --test lp_claim_fork
+cargo test -p grave-vault --test full_lifecycle_fork
 ```
 
 Without fixtures the fork tests SKIP with a message so CI stays green; the
 host unit tests below never need fixtures or a network.
+
+## Full-lifecycle fork harness (Phase 6 — the first complete integration test)
+
+`programs/grave-vault/tests/full_lifecycle_fork.rs` closes Phase 6: ONE test
+executes the ENTIRE GraveYield lifecycle against the same real mainnet
+bytecode / pool 1 fixtures, and asserts every state transition:
+
+    candidate pool (real AmmInfo) → GraveScanner initialize →
+    record_launch_price (C2, oracle-signed 168B attestation) →
+    evaluate_pool_phase_1 (C1, indexer-signed 112B attestation; six
+    criteria over the real pool bytes) → EligibilityAnchor →
+    multi-epoch warp (≥ MIN_EPOCH_CONFIRMATION) →
+    evaluate_pool_phase_2 (fresh C1 attestation, bitmap equality) →
+    EligibilityCert → snapshot (real snapshotter over the live ledger) →
+    tree → sealed artifact → JSON publication → salvage_pool (real
+    withdraw CPI + Jupiter stand-in conversion + 40/40/20; artifact root
+    sealed) → claim_lp_proceeds ×5 → SOL in every wallet → closing
+    identity chain
+
+The Phase 2.1–5.3 suites' forged-EligibilityCert stand-in is RETIRED here:
+the cert that authorizes salvage is issued by the real `grave-scanner`
+program running as BPF in the same VM, and both attestation legs execute
+through the runtime's actual `ed25519_program` precompile verification (a
+bad signature aborts the transaction before the scanner ever runs).
+Running this suite is what surfaced (and the same commit fixes) the
+scanner's precompile wire-contract bug — the previously shipped 14-byte
+offset header is not a format any Solana runtime accepts; see
+`grave-scanner/src/attestation.rs` and spec rev 1.10.0. The SDK's
+attestation builders were corrected to the same runtime layout in the same
+commit.
+
+The remaining harness stand-ins are the same as Phase 5.3's minus the cert:
+the seeded claim-side ledger shape, the claimants' lamports, and the
+Jupiter stand-in. The withdraw-leg economics are measured on a disposable
+VM that runs the SAME full scanner path with the conversion leg disabled
+(the Phase 5.3 measurement pattern, upgraded to the honest boot). The
+scanner's governance thresholds are configured explicitly in the test
+(they are governance parameters) and the evidence authorities are test
+keypairs, exactly as in production the indexer/oracle keys are registered
+at initialize.
+
+Setup and run: identical to the other fork suites, plus the scanner build:
+
+```bash
+# or run scripts/build_fork_harness.sh for all steps
+cd programs/grave-scanner && cargo build-sbf
+cp target/deploy/grave_scanner.so ../grave-vault/tests/fixtures/   # (repo-root target)
+cargo test -p grave-vault --test full_lifecycle_fork
+```
 
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`
 / `-p grave-snapshotter`): 156 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
@@ -219,7 +270,10 @@ in the same crate (16 lib + 7 integration — the Merkle tree/proof
 builder and the sealed artifact), bringing the host total to 156.
 Phase 5.3 adds no host tests; it adds the `lp_claim_fork` fork suite
 (5 tests — the claims lifecycle on the real snapshotter path), taking
-the fork-suite total from 29 to 34. Every
+the fork-suite total from 29 to 34. Phase 6 adds no host tests either
+(the attestation constants lock-test values are updated in place); it
+adds the `full_lifecycle_fork` fork suite (1 test — the complete
+lifecycle), taking the fork-suite total to 35. Every
 manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,

@@ -44,14 +44,24 @@ export const IX_DATA_MSG_OFFSET = 72;
 /** Minimum GraveScanner instruction data length (disc + amm + pool + msg). */
 export const IX_DATA_MIN_LEN = 184;
 
-/** Ed25519SignatureOffsets header length. */
-export const ED25519_HEADER_LEN = 14;
+/**
+ * Precompile instruction header: 1-byte signature count + 1 ignored
+ * padding byte + the 14-byte `Ed25519SignatureOffsets` struct (7 × u16
+ * LE, starting at byte 2). Byte-identical to the runtime's own
+ * `SIGNATURE_OFFSETS_START` + `SIGNATURE_OFFSETS_SERIALIZED_SIZE`
+ * layout in `solana-ed25519-program`.
+ */
+export const ED25519_HEADER_LEN = 16;
+
+/** Public key offset inside the precompile instruction data (canonical,
+ * pubkey-first placement, mirroring the runtime's own builder). */
+export const PRECOMPILE_PK_OFFSET = 16;
 
 /** Signature offset inside the precompile instruction data. */
-export const PRECOMPILE_SIG_OFFSET = 14;
+export const PRECOMPILE_SIG_OFFSET = 48;
 
-/** Public key offset inside the precompile instruction data. */
-export const PRECOMPILE_PK_OFFSET = 78;
+/** Canonical precompile instruction data length (header + pk + sig). */
+export const PRECOMPILE_MIN_LEN = 112;
 
 /** 0xFFFF = "the instruction currently being executed" (the precompile). */
 export const CUR_INSTRUCTION_INDEX = 0xffff;
@@ -102,24 +112,38 @@ export function parseAttestationMessage(bytes: Uint8Array): LastSwapAttestation 
  * Build the `ed25519_program` verify instruction that must immediately
  * precede the GraveScanner instruction in the same transaction.
  *
- * Layout (110 bytes): Ed25519SignatureOffsets header (14B) + signature
- * (64B) + oracle public key (32B). The message offsets point at
- * `messageAddressOffset` inside the GraveScanner instruction at
- * `scannerInstructionIndex`, so the runtime-verified signature covers
- * exactly the attestation bytes embedded in the scanner instruction.
+ * Layout (112 bytes, the runtime wire format consumed by
+ * `agave_precompiles::ed25519::verify` — mirrored byte-for-byte by
+ * `grave-scanner/src/attestation.rs`): 1-byte signature count + 1
+ * ignored padding byte, the 7-field `Ed25519SignatureOffsets` struct at
+ * byte 2 (sig_offset, sig_ix, pk_offset, pk_ix, message_data_offset,
+ * message_data_size, message_instruction_index — all u16 LE), then the
+ * covered public key (32B) and the signature (64B). The message offsets
+ * point at `messageAddressOffset` inside the GraveScanner instruction
+ * at `scannerInstructionIndex`, so the runtime-verified signature
+ * covers exactly the attestation bytes embedded in the scanner
+ * instruction.
  *
  * The default offset targets the C1 last-swap attestation
- * (`IX_DATA_MSG_OFFSET` = 72). The C2 launch-price attestation embeds its
- * 168-byte message at offset 152 and passes
+ * (`IX_DATA_MSG_OFFSET` = 72, 112-byte message). The C2 launch-price
+ * attestation embeds its 168-byte message at offset 152 and passes
  * `messageAddressOffset: LAUNCH_PRICE_MSG_OFFSET` instead (see
- * `launchPriceAttestation.ts`) — the precompile wire format is identical.
+ * `launchPriceAttestation.ts`).
+ *
+ * Phase 6 correction (spec rev 1.10.0): the precompile wire format is
+ * the runtime's OWN layout — the previously documented 14-byte header
+ * (sig at 14, pk at 78, count as the 5th u16, no message-size field)
+ * is not a format any Solana runtime accepts: the precompile reads the
+ * signature count from data[0], so such instructions die in precompile
+ * verification before the scanner executes.
  */
 export function buildEd25519VerifyInstruction(opts: {
   /** 64-byte Ed25519 signature over the attestation message. */
   signature: Uint8Array;
   /** The activity oracle public key that produced the signature. */
   oraclePublicKey: PublicKey;
-  /** The attestation message (for length validation). */
+  /** The attestation message (canonical length for its offset; its
+   *  length becomes the precompile's `message_data_size`). */
   message: Uint8Array;
   /** Index of the GraveScanner instruction within the transaction. */
   scannerInstructionIndex: number;
@@ -130,9 +154,6 @@ export function buildEd25519VerifyInstruction(opts: {
   if (opts.signature.length !== 64) {
     throw new Error("signature must be exactly 64 bytes");
   }
-  if (opts.message.length !== ATTESTATION_MSG_LEN) {
-    throw new Error(`message must be ${ATTESTATION_MSG_LEN} bytes`);
-  }
   if (opts.scannerInstructionIndex < 0 || opts.scannerInstructionIndex > 0xfffe) {
     throw new Error("scannerInstructionIndex out of range");
   }
@@ -140,17 +161,31 @@ export function buildEd25519VerifyInstruction(opts: {
   if (messageAddressOffset < 0 || messageAddressOffset > 0xffff) {
     throw new Error("messageAddressOffset out of range");
   }
-  const data = Buffer.alloc(PRECOMPILE_PK_OFFSET + 32);
+  // The (offset, size) pair must be one of the two canonical attestation
+  // spans: C1 (72, 112) or C2 (152, 168 — see launchPriceAttestation.ts).
+  // Anything else would sign bytes the scanner will not read as `params.msg`.
+  const canonicalSpan =
+    (messageAddressOffset === IX_DATA_MSG_OFFSET &&
+      opts.message.length === ATTESTATION_MSG_LEN) ||
+    (messageAddressOffset === 152 && opts.message.length === 168);
+  if (!canonicalSpan) {
+    throw new Error(
+      "message length must match the canonical span for messageAddressOffset",
+    );
+  }
+  const data = Buffer.alloc(PRECOMPILE_MIN_LEN);
+  data[0] = 1; // num_signatures
+  data[1] = 0; // ignored padding byte (runtime does not check it)
   const w = (off: number, v: number) => data.writeUInt16LE(v, off);
-  w(0, PRECOMPILE_SIG_OFFSET); // signature_offset
-  w(2, CUR_INSTRUCTION_INDEX); // signature_instruction_index
-  w(4, messageAddressOffset); // message_address_offset
-  w(6, opts.scannerInstructionIndex); // message_instruction_index
-  w(8, 1); // num_signatures
-  w(10, PRECOMPILE_PK_OFFSET); // public_key_offset
-  w(12, CUR_INSTRUCTION_INDEX); // public_key_instruction_index
-  Buffer.from(opts.signature).copy(data, PRECOMPILE_SIG_OFFSET);
+  w(2, PRECOMPILE_SIG_OFFSET); // signature_offset
+  w(4, CUR_INSTRUCTION_INDEX); // signature_instruction_index
+  w(6, PRECOMPILE_PK_OFFSET); // public_key_offset
+  w(8, CUR_INSTRUCTION_INDEX); // public_key_instruction_index
+  w(10, messageAddressOffset); // message_data_offset
+  w(12, opts.message.length); // message_data_size
+  w(14, opts.scannerInstructionIndex); // message_instruction_index
   Buffer.from(opts.oraclePublicKey.toBytes()).copy(data, PRECOMPILE_PK_OFFSET);
+  Buffer.from(opts.signature).copy(data, PRECOMPILE_SIG_OFFSET);
   return new TransactionInstruction({
     programId: ED25519_PROGRAM_ID,
     keys: [],
