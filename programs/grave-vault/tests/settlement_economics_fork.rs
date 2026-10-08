@@ -38,7 +38,9 @@
 //   4. the Jupiter stand-in program itself (same contract as Phase 3),
 //   5. the off-chain LP-holder snapshot (the Merkle tree + root an honest
 //      snapshotter would produce — the on-chain verifier is the code under
-//      test; the snapshotter itself is a Phase 5 deliverable).
+//      test; the snapshotter shipped in Phases 5.1–5.2 and as of Phase 5.3
+//      drives the claim path itself, `lp_claim_fork.rs`; this suite's
+//      hand-built tree remains the claims-economics regression lock).
 //
 // Fixtures via `scripts/fetch_v4_fork_fixtures.mjs` (gitignored; tests SKIP
 // without them). `grave_vault.so` and `jupiter_v6_stub.so` must be in

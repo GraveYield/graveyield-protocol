@@ -56,3 +56,9 @@ solana-program-test = "2.3"
 solana-sdk = "2.3"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
+# Phase 5.3 claims fork harness (tests/lp_claim_fork.rs): the claim path
+# must run on the REAL off-chain producer — the snapshot, Merkle tree, and
+# sealed artifact come from grave-snapshotter, not a hand-built tree (the
+# Phase 4 suite's documented stand-in). Dev-only edge, and the snapshotter
+# only dev-depends back on grave-vault, so no build cycle exists.
+grave-snapshotter = { path = "../../snapshotter" }

@@ -1971,6 +1971,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "grave-scanner",
+ "grave-snapshotter",
  "serde_json",
  "solana-program-test",
  "solana-sdk",
