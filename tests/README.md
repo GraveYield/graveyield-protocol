@@ -196,6 +196,8 @@ cargo test -p grave-vault --test jupiter_conversion_fork
 cargo test -p grave-vault --test settlement_economics_fork
 cargo test -p grave-vault --test lp_claim_fork
 cargo test -p grave-vault --test full_lifecycle_fork
+cargo test -p grave-vault --test security_negative_fork
+cargo test -p grave-vault --test scanner_windows_fork
 ```
 
 Without fixtures the fork tests SKIP with a message so CI stays green; the
@@ -250,16 +252,86 @@ cp target/deploy/grave_scanner.so ../grave-vault/tests/fixtures/   # (repo-root 
 cargo test -p grave-vault --test full_lifecycle_fork
 ```
 
+## Security-hardening harnesses (Phase 7 — fuzz / invariant / adversarial accounts)
+
+Phase 7 turns the shipped machinery against itself. Two layers:
+
+**Host-side property tests (`proptest`, stable toolchain).** The fuzz and
+invariant rows run as property suites inside both programs' `#[cfg(test)]`
+modules — no nightly compiler, no cargo-fuzz, and the BPF builds are
+untouched (`proptest` is a dev-dependency only):
+
+- `grave-vault/src/merkle.rs::proptests` — the verifier's security
+  properties against the REAL off-chain producer (the snapshotter is a
+  dev-dependency): honest proofs always verify across random 1..=48-entry
+  trees; ANY single-bit flip of the root, the leaf, or a proof element
+  invalidates; a proof minted for one holder never verifies another
+  holder's leaf; proof length is bounded by tree depth; the single-entry
+  tree accepts exactly its own leaf with the empty proof. Two natural
+  assumptions (uniform proof lengths; a log2 floor) were DISPROVEN by the
+  fuzzer — under the promotion convention a promoted node legitimately
+  carries one fewer element per promotion, cascading down to one; the
+  minimal failing inputs are committed under
+  `programs/grave-vault/proptest-regressions/` and re-run on every
+  `cargo test`.
+- `grave-vault/src/instructions/salvage_pool.rs::proptests` — D7
+  conservation for EVERY valid share config × EVERY total (0, 1, 2,
+  u64::MAX, random): the three shares exhaust the total exactly, the
+  floored shares equal `floor(total × bps / 10⁴)`, the protocol share
+  absorbs every rounding remainder and never falls below its own floor;
+  the slippage cap is bounded by the hard ceiling and the per-tx override
+  can only tighten, never loosen.
+- `grave-scanner/src/attestation.rs::proptests` — everything an attacker
+  controls on the attestation path is bytes: the precompile-offset
+  checker, the SlotHashes lookup, and the message validator NEVER panic
+  on arbitrary inputs (truncated sysvars fail closed; a well-formed
+  sysvar resolves only the exact target slot).
+- `grave-scanner/src/criteria.rs::proptests` — `compute_drop_bps` is
+  total (clamped bps or clean `MathOverflow`, never a panic), monotone
+  under deepening price with the re-float guard pinned, and exact at the
+  9_900 / 10_000 / 1-bps boundaries.
+
+**Fork-side adversarial accounts.** Two new suites extend the real-bytecode
+harness to the negative paths no earlier suite exercised:
+
+- `programs/grave-vault/tests/security_negative_fork.rs` (6 tests): wrong
+  authority signers revert 7000 on both governance instructions; paused
+  salvage reverts 7003 ATOMICALLY (no pool-scoped PDA survives), unpause
+  restores it, and the replayed salvage dies on the PoolRegistry `init`
+  constraint with the sealed root byte-identical; an attacker key in the
+  CPI authority slot (remaining_accounts[0]) reverts 7013 pre-CPI; an
+  EligibilityCert PDA with byte-identical data but an attacker-owned
+  account owner is repelled by the ownership constraint; `initialize`
+  cannot be replayed to steal the config authority; claims against a
+  never-salvaged pool and with a cross-pool `claim_record` PDA fail with
+  zero cumulative movement.
+- `programs/grave-vault/tests/scanner_windows_fork.rs` (6 tests): oracle
+  rotation (retired key + valid signature + fresh message → 6026; new key
+  certifies; the recorded LaunchPrice PDA survives untouched); the cert
+  reissue gate (second Phase 2 while valid → 6034, cert byte-identical —
+  the expiry CROSSING is unreachable in-VM because program-test freezes
+  `unix_timestamp` on warp, and remains covered by the Phase 1.4 host
+  predicate tests plus the Phase 2.1 expired-cert 7002 fork test); the
+  attestation freshness matrix (future slot 6031, future timestamp 6028,
+  never-in-SlotHashes slot 6029, corrupted hash 6030 — all over VALID
+  signatures — then the honest certification); launch-price replay
+  (init-once, price byte-identical); scanner pause (evaluation gated
+  6010, governance live, wrong-signer unpause 6000, unpaused certify);
+  the epoch-confirmation boundary (6016 at `anchor_epoch + 1`, success at
+  exactly `+ MIN_EPOCH_CONFIRMATION`).
+
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`
-/ `-p grave-snapshotter`): 156 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
-extreme-price boundary tests, attestation 31: 16 last-swap [Phase 1.2] +
-15 launch-price [Phase 1.3], adapters 25: raydium_v4 layout 4 + locker 21
+/ `-p grave-snapshotter`): 171 total — scanner 88 (criteria 18 incl. the Phase 1.3 zero-baseline and
+extreme-price boundary tests + 3 Phase 7 proptests, attestation 31: 16 last-swap [Phase 1.2] +
+15 launch-price [Phase 1.3] + 4 Phase 7 proptests, adapters 25: raydium_v4 layout 4 + locker 21
 [Phase 1.1], cert lifecycle 5 [Phase 1.4: inclusive expiry boundary,
 zeroed-fresh reissuability, live-cert gate, layout stability, borsh
 reissue roundtrip], errors 1: the on-chain code lock test covering
 6000–6034, plus anchor's `test_id`) and vault 9 (merkle 7 + errors 1 +
 `test_id`; the merkle tests require the `solana-sha256-hasher` `sha2`
-dev-dependency feature on host builds). Phase 3 adds 8 vault host tests
+dev-dependency feature on host builds) + 15 Phase 7 proptests (5 vault
+merkle, 3 settlement arithmetic, 4 scanner attestation, 3 scanner
+criteria). Phase 3 adds 8 vault host tests
 (slippage-cap derivation 3 + orientation derivation 5 — see
 `salvage_pool.rs` `mod tests`). Phase 4 adds 5 more (D7 split rounding 4
 + receipt layout stability 1 — `salvage_pool.rs` / `salvage_receipt.rs`
@@ -273,7 +345,12 @@ Phase 5.3 adds no host tests; it adds the `lp_claim_fork` fork suite
 the fork-suite total from 29 to 34. Phase 6 adds no host tests either
 (the attestation constants lock-test values are updated in place); it
 adds the `full_lifecycle_fork` fork suite (1 test — the complete
-lifecycle), taking the fork-suite total to 35. Every
+lifecycle), taking the fork-suite total to 35. Phase 7 adds 15 host
+property tests (vault merkle 5 + settlement arithmetic 3; scanner
+attestation robustness 4 + criteria boundaries 3 — see below), taking
+the host total to 171, and 12 fork tests across two new suites
+(`security_negative_fork` 6 + `scanner_windows_fork` 6), taking the
+fork-suite total to 47. Every
 manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,

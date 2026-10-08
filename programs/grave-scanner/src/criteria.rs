@@ -419,3 +419,76 @@ mod tests {
         assert_eq!(bps, 0);
     }
 }
+
+// =====================================================================
+// Phase 7 property tests (proptest, host-only): the price-collapse
+// arithmetic's boundary behavior — total inputs must produce a clamped
+// bps value or a clean MathOverflow, never a panic, and the criterion's
+// monotonicity must hold so a re-float can never masquerade as a
+// collapse (and vice versa).
+// =====================================================================
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        // ------------------------------------------------------------
+        // Totality: for ANY (launch, current) u128 pair the function
+        // either returns a value in [0, 10_000] or fails with
+        // MathOverflow (delta × 10⁴ overflowing u128 at the very top
+        // of the range) — never panics, never returns out-of-range bps.
+        // ------------------------------------------------------------
+        #[test]
+        fn drop_bps_total_and_clamped(launch in prop::num::u128::ANY, current in prop::num::u128::ANY) {
+            match compute_drop_bps(launch, current) {
+                Ok(bps) => prop_assert!(bps <= 10_000),
+                Err(e) => prop_assert_eq!(e, GraveScannerError::MathOverflow.into()),
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Re-float guard: current ≥ launch ⇒ drop = 0 (a pool that
+        // recovered above its launch price is NOT derelict by C3), and
+        // for current < launch the drop is monotone non-increasing as
+        // current rises — no local dips can fake a fresher price.
+        // Inputs are generated as price fractions of launch, so the
+        // deeper-price relation holds structurally (the prop_assume
+        // only filters floor-quantization collisions).
+        // ------------------------------------------------------------
+        #[test]
+        fn drop_bps_monotone_and_refloat_guard(
+            launch in 10_000u128..=u128::MAX / 10_000,
+            frac_a in 0u128..10_000,
+            frac_step in 1u128..=10_000,
+        ) {
+            // current_a = launch·frac_a/10⁴ is strictly deeper below
+            // launch than current_b = launch·(frac_a+step)/10⁴.
+            let frac_b = (frac_a + frac_step).min(10_000);
+            let current_a = launch * frac_a / 10_000;
+            let current_b = launch * frac_b / 10_000;
+            prop_assume!(current_a < current_b && current_b <= launch);
+            let bps_a = compute_drop_bps(launch, current_a).unwrap();
+            let bps_b = compute_drop_bps(launch, current_b).unwrap();
+            prop_assert!(bps_a >= bps_b, "deeper price must not report a smaller drop");
+            prop_assert!(compute_drop_bps(launch, launch).unwrap() == 0);
+            prop_assert!(compute_drop_bps(launch, launch + 1).unwrap() == 0);
+        }
+
+        // ------------------------------------------------------------
+        // Exact boundaries: a 99% collapse reads exactly 9_900 bps (the
+        // default C3 threshold, on launch values where the fraction is
+        // exact), a 100% collapse reads 10_000, the smallest
+        // representable drop rounds to 1 bps, and the zero launch price
+        // short-circuits to 0.
+        // ------------------------------------------------------------
+        #[test]
+        fn drop_bps_exact_boundaries(q in 1u128..=u128::MAX / 10_000 / 100) {
+            let launch = 100 * q;
+            prop_assert_eq!(compute_drop_bps(launch, launch / 100).unwrap(), 9_900);
+            prop_assert_eq!(compute_drop_bps(launch, 0).unwrap(), 10_000);
+            prop_assert_eq!(compute_drop_bps(10_000, 9_999).unwrap(), 1);
+            prop_assert_eq!(compute_drop_bps(0, 0).unwrap(), 0);
+        }
+    }
+}

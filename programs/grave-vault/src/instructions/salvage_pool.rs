@@ -1089,3 +1089,90 @@ pub struct SalvageCompleted {
     pub salvor: Pubkey,
     pub total_proceeds_lamports: u64,
 }
+
+// =====================================================================
+// Phase 7 property tests (proptest, host-only): the settlement
+// arithmetic's security invariants under random and boundary inputs.
+// =====================================================================
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// A valid share config: protocol ≤ PROTOCOL_SHARE_BPS_CEILING, the
+    /// three shares sum to BPS_DENOMINATOR (generated without underflow:
+    /// lp is drawn from the range left after protocol, salvor takes the
+    /// remainder).
+    fn share_strategy() -> impl Strategy<Value = (u16, u16, u16)> {
+        (0u16..=PROTOCOL_SHARE_BPS_CEILING, 0u16..10_000)
+            .prop_filter("lp must fit under 10_000 - protocol", |(protocol, lp)| {
+                *lp <= 10_000 - *protocol
+            })
+            .prop_map(|(protocol, lp)| {
+                let salvor = 10_000 - protocol - lp;
+                (protocol, salvor, lp)
+            })
+    }
+
+    proptest! {
+        // ------------------------------------------------------------
+        // D7 conservation: for EVERY valid config and EVERY total —
+        // including 0, 1, and u64::MAX — the three shares exhaust the
+        // total exactly, the floored shares equal floor(total·bps/10⁴),
+        // and the protocol share absorbs every rounding remainder.
+        // ------------------------------------------------------------
+        #[test]
+        fn d7_conservation_exhausts_total_exactly(
+            (protocol_bps, salvor_bps, lp_bps) in share_strategy(),
+            total in prop::num::u64::ANY,
+        ) {
+            let (salvor, lp, protocol) =
+                split_proceeds(total, salvor_bps, lp_bps).expect("valid config cannot overflow");
+            prop_assert_eq!(salvor as u128 + lp as u128 + protocol as u128, total as u128);
+            prop_assert_eq!(salvor, ((total as u128 * salvor_bps as u128) / 10_000) as u64);
+            prop_assert_eq!(lp, ((total as u128 * lp_bps as u128) / 10_000) as u64);
+            prop_assert!(protocol >= ((total as u128 * protocol_bps as u128) / 10_000) as u64,
+                "protocol share must never receive less than its own floor");
+        }
+
+        // ------------------------------------------------------------
+        // Boundary totals: total = 0 pays nothing to anyone; total = 1
+        // routes the indivisible lamport to the protocol share (both
+        // floors round to zero); u64::MAX cannot overflow the u128
+        // intermediates and still conserves.
+        // ------------------------------------------------------------
+        #[test]
+        fn boundary_totals_conserve(
+            (_, salvor_bps, lp_bps) in share_strategy(),
+        ) {
+            for total in [0u64, 1, 2, u64::MAX] {
+                let (salvor, lp, protocol) =
+                    split_proceeds(total, salvor_bps, lp_bps).expect("valid config cannot overflow");
+                prop_assert_eq!(salvor as u128 + lp as u128 + protocol as u128, total as u128);
+                if total <= 1 {
+                    prop_assert_eq!(salvor, 0);
+                    prop_assert_eq!(lp, 0);
+                    prop_assert_eq!(protocol, total);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Slippage cap: the effective cap is bounded by the hard ceiling
+        // and by every component that participates; the per-tx override
+        // can only TIGHTEN, never loosen.
+        // ------------------------------------------------------------
+        #[test]
+        fn slippage_cap_bounded_and_override_only_tightens(
+            config_bps in prop::num::u16::ANY,
+            override_bps in prop::num::u16::ANY,
+        ) {
+            let cap = effective_slippage_cap_bps(config_bps, Some(override_bps));
+            prop_assert!(cap <= HARD_MAX_SLIPPAGE_BPS);
+            prop_assert!(cap <= config_bps.min(HARD_MAX_SLIPPAGE_BPS));
+            prop_assert_eq!(cap, effective_slippage_cap_bps(config_bps, None).min(override_bps));
+            prop_assert_eq!(effective_slippage_cap_bps(config_bps, None),
+                            config_bps.min(HARD_MAX_SLIPPAGE_BPS));
+        }
+    }
+}

@@ -40,6 +40,10 @@ grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
 solana-sha256-hasher = "3"
 
 [dev-dependencies]
+# Phase 7 security hardening: property-based fuzz/invariant tests for the
+# Merkle verifier and the settlement arithmetic (runs on the pinned stable
+# toolchain — no nightly/cargo-fuzz required).
+proptest = "1"
 # Host-test builds execute `hashv` off the solana target, where
 # solana-sha256-hasher 3.x requires the `sha2` software implementation
 # (the on-chain BPF build uses the runtime syscall instead). Without

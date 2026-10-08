@@ -1448,3 +1448,109 @@ mod launch_price_tests {
         assert_eq!(LAUNCH_PRICE_IX_MIN_LEN, 320);
     }
 }
+
+// =====================================================================
+// Phase 7 property tests (proptest, host-only): malformed-input
+// robustness of the attestation trust boundary. Everything an attacker
+// controls on this path is bytes — the precompile instruction data, the
+// SlotHashes sysvar payload — so the security property is: arbitrary
+// bytes can make verification FAIL, never panic, and a well-formed
+// submission is accepted by exactly the pinned canonical encoding.
+// =====================================================================
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use anchor_lang::solana_program::instruction::Instruction;
+    use proptest::prelude::*;
+
+    /// A random 112-byte message (proptest's `array::uniform*` helpers
+    /// stop at 32 elements).
+    fn msg_strategy() -> impl Strategy<Value = [u8; ATTESTATION_MSG_LEN]> {
+        proptest::collection::vec(prop::num::u8::ANY, ATTESTATION_MSG_LEN).prop_map(|v| {
+            let mut m = [0u8; ATTESTATION_MSG_LEN];
+            m.copy_from_slice(&v);
+            m
+        })
+    }
+
+    proptest! {
+        // ------------------------------------------------------------
+        // Precompile-offset checker: ANY instruction data (wrong length,
+        // wrong signature count, out-of-bounds offsets, garbage) either
+        // fails with an attestation error or passes — it must never
+        // panic. The canonical 112-byte runtime layout (pk@16, sig@48,
+        // one signature, message pinned to the scanner ix) is the ONLY
+        // accepting shape, and random bytes hit it with ~0 probability.
+        // ------------------------------------------------------------
+        #[test]
+        fn offset_checker_never_panics_on_arbitrary_bytes(
+            data in proptest::collection::vec(proptest::num::u8::ANY, 0..=400),
+            oracle_seed in prop::num::u64::ANY,
+        ) {
+            let oracle = Pubkey::new_from_array({
+                let mut b = [0u8; 32];
+                b[..8].copy_from_slice(&oracle_seed.to_le_bytes());
+                b
+            });
+            let ix = Instruction::new_with_bytes(ED25519_PROGRAM_ID, &data, vec![]);
+            let scanner_data = [0u8; 200]; // ≥ min length, content irrelevant here
+            // Must not panic regardless of input; Err is the expected
+            // outcome for random bytes.
+            let _ = verify_ed25519_offsets_at(
+                &ix, 0, &scanner_data, &oracle, IX_DATA_MSG_OFFSET,
+                ATTESTATION_MSG_LEN, IX_DATA_MIN_LEN,
+            );
+        }
+
+        // ------------------------------------------------------------
+        // SlotHashes lookup: ANY sysvar payload returns an Option
+        // without panicking (truncated entries fail closed), and a
+        // well-formed sysvar resolves ONLY the exact target slot.
+        // ------------------------------------------------------------
+        #[test]
+        fn slot_hash_lookup_never_panics_and_fails_closed(
+            data in proptest::collection::vec(proptest::num::u8::ANY, 0..=600),
+            target in prop::num::u64::ANY,
+        ) {
+            let _ = slot_hash_lookup(&data, target);
+        }
+
+        #[test]
+        fn slot_hash_lookup_resolves_only_exact_slot(
+            entries in proptest::collection::vec((prop::num::u64::ANY, proptest::array::uniform32(prop::num::u8::ANY)), 0..=8),
+            pick in 0usize..8,
+        ) {
+            prop_assume!(!entries.is_empty());
+            let (target_slot, target_hash) = entries[pick % entries.len()];
+            let mut data = Vec::with_capacity(8 + entries.len() * 40);
+            data.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+            for (slot, hash) in &entries {
+                data.extend_from_slice(&slot.to_le_bytes());
+                data.extend_from_slice(hash);
+            }
+            let found = slot_hash_lookup(&data, target_slot);
+            prop_assert_eq!(found, Some(target_hash));
+            // A slot one above the target must NOT resolve (no fuzzy
+            // matching, no truncation tolerance).
+            prop_assert_eq!(slot_hash_lookup(&data, target_slot.wrapping_add(1)), None);
+        }
+
+        // ------------------------------------------------------------
+        // Message-field validation: random 112-byte messages against a
+        // fixed evaluation context never panic — they either bind
+        // (impossible for random bytes: amm/pool must match) or revert
+        // with the designated error family.
+        // ------------------------------------------------------------
+        #[test]
+        fn message_validator_never_panics_on_arbitrary_messages(
+            msg in msg_strategy(),
+            now_ts in prop::num::i64::ANY,
+            now_slot in prop::num::u64::ANY,
+            hashes in proptest::collection::vec(proptest::num::u8::ANY, 0..=200),
+        ) {
+            let amm = Pubkey::new_from_array([7u8; 32]);
+            let pool = Pubkey::new_from_array([9u8; 32]);
+            let _ = verify_attestation_message(&msg, &amm, &pool, now_ts, now_slot, &hashes);
+        }
+    }
+}

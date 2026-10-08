@@ -187,3 +187,171 @@ mod tests {
         assert!(verify_proof(root, lb, &[la]));
     }
 }
+
+// =====================================================================
+// Phase 7 property tests (proptest, host-only): the verifier's security
+// properties against the REAL off-chain producer. `grave-snapshotter` is
+// a dev-dependency, so these prove the producer↔verifier contract, not
+// a hand-rolled tree.
+// =====================================================================
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use grave_snapshotter::{HolderEntry, SnapshotMerkleTree};
+    use proptest::prelude::*;
+
+    /// Deterministic pseudo-random pubkey from a u64 seed (proptest
+    /// strategies cannot construct `Pubkey` directly).
+    fn seed_pubkey(seed: u64) -> Pubkey {
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        bytes[8..16].copy_from_slice(&seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_le_bytes());
+        bytes[16..].copy_from_slice(&seed.to_le_bytes().repeat(2)[..16]);
+        Pubkey::new_from_array(bytes)
+    }
+
+    /// A random holder set: n ∈ [1, 48], unique pubkeys, balances ≥ 1.
+    fn holder_set_strategy() -> impl Strategy<Value = Vec<HolderEntry>> {
+        proptest::collection::vec((0u64..1 << 48, 1u64..=u64::MAX / 2), 1..=48).prop_map(|seeds| {
+            let mut entries: Vec<HolderEntry> = seeds
+                .into_iter()
+                .map(|(seed, balance)| HolderEntry {
+                    owner: seed_pubkey(seed),
+                    lp_balance: balance,
+                })
+                .collect();
+            entries.sort_by(|a, b| a.owner.as_ref().cmp(b.owner.as_ref()));
+            entries.dedup_by(|a, b| a.owner == b.owner);
+            if entries.is_empty() {
+                entries.push(HolderEntry {
+                    owner: seed_pubkey(42),
+                    lp_balance: 1,
+                });
+            }
+            entries
+        })
+    }
+
+    proptest! {
+        // ------------------------------------------------------------
+        // Soundness: every entry of a random producer-built tree has a
+        // proof that the on-chain algorithm accepts against the sealed
+        // root — across 1..=48 leaves (odd shapes, promotions, depth 0..6).
+        // ------------------------------------------------------------
+        #[test]
+        fn honest_proofs_always_verify(entries in holder_set_strategy()) {
+            let tree = SnapshotMerkleTree::from_entries(&entries)
+                .expect("producer must build a tree for any valid entry set");
+            let root = tree.root();
+            let leaves: Vec<[u8; 32]> = entries
+                .iter()
+                .map(|e| compute_leaf(&e.owner, e.lp_balance))
+                .collect();
+            // Producer leaves and verifier leaves must agree bit-for-bit.
+            for (i, leaf) in leaves.iter().enumerate() {
+                prop_assert_eq!(tree.leaf(i), Some(*leaf));
+            }
+            for (i, leaf) in leaves.iter().enumerate() {
+                let proof = tree.proof(i).expect("proof must exist for every index");
+                prop_assert!(verify_proof(root, *leaf, &proof),
+                    "honest proof rejected: n={} idx={}", entries.len(), i);
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Tamper detection: flipping ANY single bit of the root, the
+        // leaf, or any single proof element must invalidate the proof
+        // (avalanche / second-preimage resistance of SHA-256 under the
+        // sorted-pair convention).
+        // ------------------------------------------------------------
+        #[test]
+        fn any_single_bit_flip_invalidates(
+            entries in holder_set_strategy(),
+            flip_target in 0u8..3,
+            byte_idx in 0usize..32,
+            bit_idx in 0u8..8,
+        ) {
+            let tree = SnapshotMerkleTree::from_entries(&entries).unwrap();
+            let root = tree.root();
+            // Deterministic entry under test (index 0); flip_target drives
+            // which artifact is tampered with. A single-entry tree has an
+            // empty proof, so the proof-element case is skipped there.
+            let i = 0usize;
+            let leaf = compute_leaf(&entries[i].owner, entries[i].lp_balance);
+            let proof = tree.proof(i).unwrap();
+
+            let flip = |bytes: &mut [u8; 32]| bytes[byte_idx] ^= 1 << bit_idx;
+
+            let mut bad_root = root;
+            if flip_target == 0 {
+                flip(&mut bad_root);
+                prop_assert!(!verify_proof(bad_root, leaf, &proof));
+            } else if flip_target == 1 {
+                let mut bad_leaf = leaf;
+                flip(&mut bad_leaf);
+                prop_assert!(!verify_proof(root, bad_leaf, &proof));
+            } else if !proof.is_empty() {
+                let mut bad_proof = proof.clone();
+                flip(&mut bad_proof[0]);
+                prop_assert!(!verify_proof(root, leaf, &bad_proof));
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Cross-holder replay: a proof minted for holder A must never
+        // verify holder B's leaf in the same tree — the leaf binds the
+        // holder pubkey AND the balance, so stealing someone's proof
+        // buys nothing.
+        // ------------------------------------------------------------
+        #[test]
+        fn foreign_leaf_never_verifies_with_anothers_proof(entries in holder_set_strategy()) {
+            prop_assume!(entries.len() >= 2, "need at least two holders");
+            let tree = SnapshotMerkleTree::from_entries(&entries).unwrap();
+            let root = tree.root();
+            for i in 0..entries.len() {
+                let proof_i = tree.proof(i).unwrap();
+                for (j, entry_j) in entries.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    let leaf_j = compute_leaf(&entry_j.owner, entry_j.lp_balance);
+                    prop_assert!(!verify_proof(root, leaf_j, &proof_i),
+                        "holder {}'s proof validated holder {}'s leaf", i, j);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Proof-length bound: no proof is longer than the tree depth —
+        // an extended proof is a different hash chain and cannot reach
+        // the root, and bounded length bounds the verifier's compute.
+        // (NOTE: lengths are NOT uniform and have NO log2 floor under
+        // the promotion convention — a node promoted past an odd level
+        // carries one fewer element per promotion, cascading down to a
+        // single element. The fuzzer caught both wrong assumptions; the
+        // upper bound is the real invariant, and
+        // `honest_proofs_always_verify` proves the varying shapes sound.)
+        // ------------------------------------------------------------
+        #[test]
+        fn proof_lengths_bounded_by_tree_depth(entries in holder_set_strategy()) {
+            let tree = SnapshotMerkleTree::from_entries(&entries).unwrap();
+            let depth = tree.tree_depth();
+            for p in tree.proofs() {
+                prop_assert!(p.len() <= depth, "proof longer than tree depth");
+            }
+        }
+
+        // ------------------------------------------------------------
+        // Single-entry boundary: the minimal snapshot is its own root;
+        // the empty proof accepts exactly that leaf and nothing else.
+        // ------------------------------------------------------------
+        #[test]
+        fn single_leaf_tree_empty_proof(seed in 0u64..1 << 48, balance in 1u64..=u64::MAX) {
+            let owner = seed_pubkey(seed);
+            let leaf = compute_leaf(&owner, balance);
+            prop_assert!(verify_proof(leaf, leaf, &[]));
+            let other = compute_leaf(&owner, balance.wrapping_add(1));
+            prop_assert!(!verify_proof(leaf, other, &[]));
+        }
+    }
+}
