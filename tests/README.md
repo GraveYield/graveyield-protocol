@@ -95,10 +95,11 @@ Seven tests prove the settlement economics end-to-end:
 The harness forges exactly five things: the EligibilityCert PDA, the
 salvor's LP balance, the salvor's/holders'/sweeper's lamports, the Jupiter
 stand-in, and the off-chain LP-holder snapshot (the Merkle tree an honest
-snapshotter would produce — the snapshotter itself shipped in Phase 5.1,
-`snapshotter/`; the on-chain verifier is the code under test).
+snapshotter would produce — the snapshotter and its Merkle/artifact
+machinery shipped in Phases 5.1–5.2, `snapshotter/`; the on-chain
+verifier is the code under test).
 
-## LP-holder snapshotter (Phase 5.1)
+## LP-holder snapshotter (Phases 5.1–5.2)
 
 `snapshotter/` — the `grave-snapshotter` crate — is the off-chain producer
 of the LP-holder snapshot whose `(holder, balance)` entries feed the
@@ -110,12 +111,23 @@ completeness gate, closes the token ledger with `entries_total +
 sink_exclusions_total == enumerated_total`, identifies the UNCX custody
 account by exact-balance reconciliation (fail-closed on ambiguity), and
 attributes locked LP to the beneficial `TokenLock.lock_owner` (spec D11).
-30 host tests (22 lib + 8 integration) cover the pipeline without a
+53 host tests (38 lib + 15 integration) cover the pipeline without a
 network; the integration suite pins the leaf-format compatibility with
 `grave_vault::merkle::compute_leaf` (via independent SHA-256) and
-byte-equality of the UNCX constants with the scanner adapter. SNAPSHOT-001
-tracks the Phase 5.2 remainder (tree builder + proof generator +
-persistence).
+equality of the UNCX constants with the scanner adapter.
+
+Phase 5.2 completes the claims machinery (spec D12, SNAPSHOT-001
+retired): `tree::SnapshotMerkleTree` seals the canonical leaf set into
+the root under the fork-proven convention — sorted-pair SHA-256, odd
+node promotes unchanged, a promotion contributes no proof element — with
+the 3-leaf root AND proofs bit-locked against the fork suite's
+`build_three_leaf_tree` (`settlement_economics_fork.rs`) and every
+generated proof tested against the on-chain `verify_proof` across 12
+tree sizes. `artifact::SnapshotArtifact` persists the publishable claims
+metadata (pool/mint/slot/supply, root, per-holder balance + leaf +
+ready-to-submit proof) as deterministic JSON (base58 pubkeys, hex
+hashes) that re-derives its own integrity from its entries
+(`verify_integrity`, fail-closed on any drift).
 
 Setup and run:
 
@@ -140,7 +152,7 @@ Without fixtures the fork tests SKIP with a message so CI stays green; the
 host unit tests below never need fixtures or a network.
 
 Host unit tests today (all `cargo test -p grave-scanner` / `-p grave-vault`
-/ `-p grave-snapshotter`): 134 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
+/ `-p grave-snapshotter`): 156 total — scanner 81 (criteria 18 incl. the Phase 1.3 zero-baseline and
 extreme-price boundary tests, attestation 31: 16 last-swap [Phase 1.2] +
 15 launch-price [Phase 1.3], adapters 25: raydium_v4 layout 4 + locker 21
 [Phase 1.1], cert lifecycle 5 [Phase 1.4: inclusive expiry boundary,
@@ -154,7 +166,10 @@ dev-dependency feature on host builds). Phase 3 adds 8 vault host tests
 + receipt layout stability 1 — `salvage_pool.rs` / `salvage_receipt.rs`
 `mod tests`), bringing vault to 22. Phase 5.1 adds 30 in the new
 `grave-snapshotter` crate (22 lib + 8 integration — see the snapshotter
-section above), bringing the host total to 134. Every manipulated-baseline
+section above), bringing the host total to 134. Phase 5.2 adds 23 more
+in the same crate (16 lib + 7 integration — the Merkle tree/proof
+builder and the sealed artifact), bringing the host total to 156. Every
+manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,
 zero/future issued slot, truncated instruction data — is covered.

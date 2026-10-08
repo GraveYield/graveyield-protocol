@@ -1,6 +1,6 @@
 [package]
 name = "grave-snapshotter"
-description = "GraveYield off-chain LP-holder snapshotter: deterministic, invariant-checked enumeration and attribution of the LP-holder set that feeds the claim-side Merkle root (Phase 5.1)."
+description = "GraveYield off-chain LP-holder snapshotter: deterministic, invariant-checked enumeration and attribution of the LP-holder set, plus the Merkle tree / proof generator and the sealed snapshot artifact that feed the claim-side root (Phases 5.1 + 5.2)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,6 +24,18 @@ solana-sdk = "2.3"
 # through solana-client 2.3 — it comes from this types crate, already
 # resolved at 2.3.13 in Cargo.lock.
 solana-account-decoder-client-types = "2.3"
+# Canonical SHA-256 for the leaf/parent hashing (Phase 5.2). Pure-Rust
+# backend, byte-identical to the on-chain `solana_sha256_hasher::hash`
+# path — the equality is pinned by tests against
+# `grave_vault::merkle::{compute_leaf, verify_proof}`. Version already
+# resolved in Cargo.lock (the on-chain hasher's `sha2` feature uses it).
+sha2 = "0.10"
+# Sealed snapshot artifact persistence (Phase 5.2): deterministic JSON
+# with hex-encoded hashes and canonical base58 pubkeys. Both crates are
+# already resolved in Cargo.lock via the workspace graph — no new
+# resolution churn.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 # Leaf-format compatibility lock: the snapshot's (holder, balance) entries
@@ -40,7 +52,7 @@ grave-scanner = { path = "../programs/grave-scanner" }
 # Declaring it here unifies the feature for the whole dev-test graph — the
 # same trick grave-vault's own dev-dependencies use.
 solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
-# Independent SHA-256 for the leaf-preimage compatibility test (must NOT go
-# through grave-vault's own hasher path — that would be circular).
-sha2 = "0.10"
-serde_json = "1"
+# (`sha2` and `serde_json` moved to regular dependencies in Phase 5.2 —
+# the tree builder and artifact persistence use them in the lib itself;
+# the leaf-compatibility tests still run against the vault's own hasher
+# path so the two implementations stay independently pinned.)

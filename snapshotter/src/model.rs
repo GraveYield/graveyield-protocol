@@ -6,6 +6,7 @@
 // story (spec §6.3: the on-chain verifier cannot detect a wrong root
 // supply chain, so the producer must be verifiable instead of trusted).
 
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::error::SnapshotError;
@@ -109,7 +110,11 @@ pub struct LockedReport {
 /// leaf, an unclaimable declared sink, or locked-but-attributed (which
 /// re-enters the leaf set). The builder enforces
 /// `entries_total + sink_exclusions_total == enumerated_total == supply`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Serialize`/`Deserialize` because the sealed snapshot artifact carries
+/// the reconciliation so readers can audit the conservation identity
+/// without re-enumerating (spec D12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reconciliation {
     /// Sum of all enumerated token-account balances — enforced equal to
     /// `lp_total_supply_at_snapshot` (`SupplyMismatch` otherwise).

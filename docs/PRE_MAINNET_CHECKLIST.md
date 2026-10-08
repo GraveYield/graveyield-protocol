@@ -98,12 +98,6 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | --- | --- | --- | --- |
 | GOV-001 | `programs/grave-vault/src/instructions/update_protocol_config.rs` (and both `state/protocol_config.rs`) | 🟡 | The 72h parameter-change timelock is multisig-enforced (Squads transaction-buffer scheduling) only. `pending_authority`, `pending_authority_eta`, `timelock_seconds` are write-only reserved state; error 7014 `TimelockNotElapsed` is never raised (spec D2). Either wire an on-chain timelock or document the fields as explicitly reserved before mainnet. |
 
-### SNAPSHOT
-
-| ID | File | Status | Description |
-| --- | --- | --- | --- |
-| SNAPSHOT-001 | `snapshotter/` | 🟧 | Off-chain Merkle tree builder + proof generator + deterministic snapshot persistence (roadmap Phase 5.2). The Phase 5.1 snapshotter (`grave-snapshotter`) already produces the canonical, ledger-auditable holder set (spec D11); what remains is turning it into the sealed artifact: leaves / root / proofs under the fork-proven sorted-pair convention (odd node promotes unchanged — see `settlement_economics_fork.rs::build_three_leaf_tree`), persisted snapshot metadata a third party can recompute bit-for-bit, and a cross-check that any published root derives from a re-runnable snapshot. The on-chain verifier is done and fork-proven. |
-
 ## How to retire a row
 
 1. Implement the change. Replace the `PRE-MAINNET-TODO(...)` marker with
@@ -129,6 +123,7 @@ after the PR lands so the row can be tagged to its exact post-merge SHA.
 | CPI-011 | `programs/grave-vault/src/cpi/jupiter.rs`, `programs/grave-vault/src/instructions/salvage_pool.rs` | Phase 3 (referenced by spec rev 1.5.0 §6.3 before this row existed — the route-destination integrity gap, N1): route-account vetting (no vault custody/state account may appear in a route) + the vault's WSOL destination must be present among route accounts + the slippage ceiling forbids `floor = 0`; the delivered amount is re-checked post-CPI. Proven by the hijack / protected-account / zero-floor fork tests. | `<filled by post-merge fix-up commit>` |
 | SLIP-001 | `programs/grave-vault/src/instructions/salvage_pool.rs` | Phase 3: protocol slippage ceiling wired (`config.max_slippage_bps` + `HARD_MAX_SLIPPAGE_BPS` + tighten-only `max_slippage_bps_override` all read); the submitted floor must cover the pool-implied conversion minus the cap BEFORE the swap CPI. Spec D4 amended. | `<filled by post-merge fix-up commit>` |
 | DUST-001 | `programs/grave-vault/src/instructions/sweep_dust.rs` | Phase 4 (D6 dust policy): retained memecoin recorded on the receipt (`memecoin_mint` + `dust_memecoin_lamports`), permissionless one-shot `sweep_dust` recovers it to the protocol treasury's ATA and closes the vault ATA; proven by `tests/settlement_economics_fork.rs`. | `<filled by post-merge fix-up commit>` |
+| SNAPSHOT-001 | `snapshotter/` | Phase 5.2 (D12): `grave_snapshotter::tree` — Merkle tree builder + proof generator under the fork-proven sorted-pair convention (odd node promotes unchanged; 3-leaf root AND proofs bit-locked against `settlement_economics_fork.rs::build_three_leaf_tree`); every generated proof is tested against the on-chain `grave_vault::merkle::verify_proof` across 12 tree sizes incl. every promotion shape; `grave_snapshotter::artifact` — sealed `SnapshotArtifact` persists pool/mint/slot/supply + root + per-holder (balance, leaf, ready-to-submit proof) as deterministic JSON (base58 pubkeys, hex hashes) whose `verify_integrity` re-derives everything from its own entries (fail-closed on any drift); `seal` rejects foreign trees. Stale odd-node comment in `grave-vault/src/merkle.rs` corrected (comment-only). | `<filled by post-merge fix-up commit>` |
 
 ## Audit handoff
 
