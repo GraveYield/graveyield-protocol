@@ -39,7 +39,6 @@ import {
 } from "@solana/web3.js";
 
 import {
-  ATTESTATION_MSG_LEN,
   buildEd25519VerifyInstruction,
 } from "./lastSwapAttestation.js";
 
@@ -156,10 +155,11 @@ export function buildLaunchPriceEd25519VerifyInstruction(opts: {
   /** Index of the `record_launch_price` instruction in the transaction. */
   recordInstructionIndex: number;
 }): TransactionInstruction {
-  // The precompile message span is data[msgOffset..end] of the scanner
-  // instruction; length-validate against a synthetic message of the
-  // canonical size by reusing the shared builder.
-  const placeholder = new Uint8Array(ATTESTATION_MSG_LEN);
+  // The precompile message span is data[LAUNCH_PRICE_MSG_OFFSET..end] of
+  // the `record_launch_price` instruction; length-validate against a
+  // synthetic message of the canonical C2 size by reusing the shared
+  // builder (the placeholder length becomes `message_data_size`).
+  const placeholder = new Uint8Array(LAUNCH_PRICE_MSG_LEN);
   return buildEd25519VerifyInstruction({
     signature: opts.signature,
     oraclePublicKey: opts.oraclePublicKey,
