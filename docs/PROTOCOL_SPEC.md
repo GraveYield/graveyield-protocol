@@ -9,7 +9,27 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.8.0 — Phase 5.1: the off-chain LP-holder
+> **Revisions:** rev 1.9.0 — Phase 5.2: the Merkle tree builder, proof
+> generator, and sealed snapshot artifact ship (`snapshotter/`, modules
+> `tree` / `artifact`), completing the off-chain claims machinery.
+> Tree convention pinned as D12: leaves are the D11 entries hashed as
+> `SHA256(pubkey || balance_le_u64)` (40-byte preimage, byte-locked to
+> `grave_vault::merkle::compute_leaf`), parents are sorted-pair SHA-256
+> (`min || max`, the OZ/Uniswap convention), and an odd node at any level
+> promotes unchanged — the exact convention the Phase 4 fork harness
+> proved end-to-end (`settlement_economics_fork.rs::
+> build_three_leaf_tree`), now bit-locked between the shipped builder and
+> the fork suite; a promotion contributes no proof element, and the
+> on-chain `verify_proof` folds only the siblings the proof carries. The
+> sealed artifact (`SnapshotArtifact`) persists the publishable claims
+> metadata (pool/mint/slot/supply, root, per-holder balance + leaf +
+> ready-to-submit proof) as deterministic JSON — base58 pubkeys, lowercase
+> hex hashes, canonical field and entry order; sealing the same snapshot
+> twice is byte-identical, and `verify_integrity` refuses any artifact
+> whose root, leaves, proofs, depth, count, format version, or closing
+> reconciliation identity does not rebuild exactly from its persisted
+> entries. SNAPSHOT-001 retired.
+> rev 1.8.0 — Phase 5.1: the off-chain LP-holder
 > snapshotter ships (`snapshotter/`, crate `grave-snapshotter`):
 > deterministic, invariant-checked enumeration of the LP-holder set that
 > feeds the claim-side Merkle root. Snapshot policies pinned as D11:
@@ -169,7 +189,9 @@ revision is out of scope.
   **shipped** (Phase 5.1) — deterministic enumeration + locked-LP
   attribution, fully host-tested (D11).
 - **Merkle tree builder / proof generator / snapshot persistence**:
-  missing (Phase 5.2 scope, SNAPSHOT-001).
+  **shipped** (Phase 5.2) — `tree::SnapshotMerkleTree` +
+  `artifact::SnapshotArtifact`, proofs tested against the on-chain
+  `verify_proof` (D12).
 - **Salvor bot**: does not exist yet (Phase 10 scope).
 
 ## 3. Lifecycle (normative)
@@ -472,7 +494,7 @@ violate it).
 |---|---|---|
 | Priority-fee ceiling | SDK `shouldRejectFee` + operational max `min(margin-ratio × expected profit, ceiling)` (default margin 25%) | A callee program cannot enforce a compute-unit price; the fee is paid by the transaction payer before program execution. `ProtocolConfig.max_priority_fee_ceiling_lamports` (default 1 SOL lamports/CU) is **advisory** config consumed by SDKs (D3). |
 | Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | **On-chain (Phase 3):** the route is forwarded verbatim (no route-plan parsing), but every route account is vetted — none may reference a vault custody/state account — and the vault's WSOL destination must be present; the submitted floor must cover the pool-implied conversion minus the protocol slippage ceiling (SLIP-001 retired, D4); the swap-leg floor re-checks the delivered amount post-CPI. Proven against real bytecode for both orientations by the Phase 3 fork harness. |
-| Honest snapshot and Merkle tree construction | Off-chain snapshotter (`grave-snapshotter`, Phase 5.1) + Merkle tree builder (Phase 5.2) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. The shipped snapshotter is deterministic and re-runnable (same ledger state → bit-identical snapshot), enforces `Σ enumerated balances == lp_mint.supply` as a completeness gate, attributes locked LP to beneficial `TokenLock.lock_owner`s with fail-closed custody reconciliation, and ledgers every excluded token (D11). The tree/proof builder that seals the root remains open (SNAPSHOT-001). |
+| Honest snapshot and Merkle tree construction | Off-chain snapshotter (`grave-snapshotter`, Phases 5.1 + 5.2) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. The shipped snapshotter is deterministic and re-runnable (same ledger state → bit-identical snapshot), enforces `Σ enumerated balances == lp_mint.supply` as a completeness gate, attributes locked LP to beneficial `TokenLock.lock_owner`s with fail-closed custody reconciliation, and ledgers every excluded token (D11). The tree/proof builder and sealed artifact now ship (Phase 5.2, D12): the root is built under the fork-proven promote-unchanged convention, every generated proof is tested against the on-chain `verify_proof`, and the persisted artifact re-derives its own integrity from its entries. |
 | Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
 | Activity-oracle honesty and availability (C1) | Off-chain indexer derives the last-swap time from Raydium V4 transaction history (`sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and signs attestations with `activity_oracle` | On-chain verification is cryptographic but cannot re-derive swap history itself (Raydium V4 `AmmInfo` stores no last-swap field; `SlotHashes` spans ≈ 512 slots). A buggy or colluding oracle could attest a wrong timestamp; the oracle key is governance-held and rotatable. Oracle downtime blocks new evaluations (availability, not integrity). ORACLE-003 in the checklist tracks the operational runbook. |
 | Launch-price oracle honesty and archive availability (C2) | Off-chain indexer derives the pre-first-swap reserve ratio from full-history Raydium V4 transaction data (`sdk/src/launchPriceAttestation.ts::deriveLaunchPriceV4`, fail-closed on incomplete history) and signs attestations with `launch_price_oracle` | On-chain verification cannot re-derive historical vault balances (Solana programs cannot read past account state). A buggy or colluding oracle could attest a wrong baseline; because the `LaunchPrice` PDA is init-once, a wrong record is permanent — mitigated by key separation from the activity oracle, governance rotation, and the ORACLE-003 runbook (shared with C1). |
@@ -723,6 +745,41 @@ no timestamps or ambient state in the output). The on-chain verifier
 remains the final gate: it cannot detect a wrong-but-self-consistent
 root (§6.3), which is precisely why the producer is deterministic,
 ledger-complete, and re-runnable.
+
+**D12 — Merkle tree and sealed-artifact policy (Phase 5.2).** The
+off-chain builder (`snapshotter/`, `tree::SnapshotMerkleTree`) is the
+reference producer of the root that `salvage_pool` seals into
+`PoolRegistry` and that `claim_lp_proceeds` verifies. Normative
+decisions: (1) **leaves** are the D11 canonical entries hashed as
+`SHA256(pubkey || lp_balance_le_u64)` (40-byte preimage), byte-identical
+to `grave_vault::merkle::compute_leaf` — the equality is locked by tests
+in both directions (the builder's leaf against the vault function, and
+the preimage shape against independent SHA-256); (2) **parents** are
+sorted-pair SHA-256 (`SHA256(min || max)`, the OZ/Uniswap convention), so
+neither builder nor verifier tracks which side of the pair a node is on;
+(3) **an odd node at any level promotes unchanged** — it is never
+duplicated — and a promotion contributes NO proof element, because the
+on-chain verifier folds only the siblings the proof carries; this is the
+convention the Phase 4 fork harness sealed real claims through
+(`settlement_economics_fork.rs::build_three_leaf_tree`), and the shipped
+builder's 3-leaf root AND proofs are bit-locked to that recipe by test;
+(4) **the tree input must be canonical** (ascending owner bytes, unique
+owners, strictly positive balances — the same validator the snapshot
+enforces), so the root is a pure function of the leaf set and misuse is
+loud, not silently re-paired; (5) **persistence is deterministic** —
+`SnapshotArtifact` publishes pool/mint/slot/supply metadata, the root,
+and per-holder (balance, leaf, ready-to-submit proof) as JSON with fixed
+field order, base58 pubkeys, and lowercase hex hashes; sealing the same
+snapshot twice yields byte-identical JSON; (6) **the artifact re-derives
+its own integrity** — `verify_integrity` rebuilds the tree from the
+persisted entries and refuses any drift in root, leaves, proofs, depth,
+count, format version, or the closing reconciliation identity
+(`ArtifactMismatch`); and (7) **sealing is fail-closed against mixed-up
+handles** — `SnapshotArtifact::seal` re-derives the tree from the
+snapshot and rejects a foreign tree, so no artifact can be published
+whose root does not derive from its own entries. The on-chain verifier
+remains the final gate (§6.3): the artifact is the audit story, not the
+trust anchor.
 
 ## 8. Documentation / code discrepancy ledger
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// grave-snapshotter — the off-chain LP-holder snapshotter (Phase 5.1).
+// grave-snapshotter — the off-chain LP-holder snapshotter and Merkle
+// artifact producer (Phases 5.1 + 5.2).
 //
 // ROLE IN THE LIFECYCLE
 //
@@ -59,15 +60,29 @@
 // (spec §6.3), so the snapshotter is built to be re-runnable and auditable
 // instead of trusted.
 //
-// PRE-MAINNET-TODO(SNAPSHOT): Merkle tree builder + proof generator + deterministic snapshot persistence (roadmap Phase 5.2) | reverts: N/A (off-chain; the on-chain verifier rejects bad proofs) | verify: tree output must satisfy grave_vault::merkle::verify_proof and match the fork-suite convention (odd node promotes)
+// PHASE 5.2 — FROM SNAPSHOT TO SEALED ARTIFACT
+//
+// [`tree::SnapshotMerkleTree`] seals the canonical leaf set into the
+// Merkle root under the fork-proven convention (sorted-pair SHA-256,
+// odd node promotes unchanged — `grave_vault::merkle` byte-format, proven
+// end-to-end by `settlement_economics_fork.rs` through
+// `claim_lp_proceeds`), and [`artifact::SnapshotArtifact`] persists the
+// publishable claims metadata (root + per-holder proofs) as deterministic
+// JSON that re-derives its own integrity (`verify_integrity`). The
+// end-to-end path is: `SnapshotBuilder::build` → `SnapshotMerkleTree::
+// from_snapshot` → `SnapshotArtifact::seal` → publish JSON → LP holder
+// looks up their proof → `claim_lp_proceeds`.
 
+pub mod artifact;
 pub mod builder;
 pub mod error;
 pub mod locked;
 pub mod model;
 pub mod rpc;
 pub mod source;
+pub mod tree;
 
+pub use artifact::{ArtifactEntry, SnapshotArtifact, ARTIFACT_FORMAT_VERSION};
 pub use builder::{SnapshotBuilder, SnapshotRequest};
 pub use error::SnapshotError;
 pub use locked::{InMemoryLocks, LockedLpEvidence, TokenLockRecord};
@@ -76,3 +91,4 @@ pub use model::{
     LockedReport, LpSnapshot, MintSupply, Reconciliation, TokenAccountSnapshot,
 };
 pub use source::{InMemorySource, LpAccountSource};
+pub use tree::SnapshotMerkleTree;

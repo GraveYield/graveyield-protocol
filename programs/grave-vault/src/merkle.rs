@@ -5,12 +5,17 @@
 // Matches the OpenZeppelin / Uniswap `MerkleProof.verify` convention:
 //   * Leaf = SHA256(pubkey || balance_le_u64)        (40 bytes)
 //   * Parent = SHA256(min(a, b) || max(a, b))        (64 bytes)
-//   * Odd leaf-out at a tree level promotes unchanged (handled implicitly:
-//     the off-chain builder pads odd levels by duplicating; we don't need
-//     special on-chain logic — the proof itself reflects the structure).
+//   * Odd node at a tree level promotes UNCHANGED to the next level (the
+//     fork-proven convention — `settlement_economics_fork.rs::
+//     build_three_leaf_tree` sealed real claims through `claim_lp_proceeds`
+//     this way; the reference off-chain builder is `snapshotter/`, crate
+//     `grave-snapshotter`, `tree::SnapshotMerkleTree`). A promotion
+//     contributes NO proof element, which this verifier handles
+//     implicitly: it folds only the siblings the proof carries.
 //
-// The off-chain GraveScanner v2 indexer builds the tree using the same
-// rules and submits proofs that this function verifies. The Merkle root
+// The off-chain producers (the Phase 5.2 snapshotter today; the
+// GraveScanner v2 indexer / SDK later) build the tree using the same
+// rules and submit proofs that this function verifies. The Merkle root
 // is recorded in `PoolRegistry.lp_snapshot_merkle_root` by salvage_pool
 // at salvage time and is immutable thereafter.
 

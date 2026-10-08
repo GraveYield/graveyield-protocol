@@ -48,6 +48,14 @@ pub enum SnapshotError {
     InvariantViolated(String),
     /// Arithmetic overflow while aggregating balances.
     Overflow,
+    /// Snapshot artifact (de)serialization failed (JSON structure or hex
+    /// field encoding).
+    Serialization(String),
+    /// A sealed artifact disagrees with the tree/snapshot it claims to
+    /// represent: root, leaf, proof, count, depth, format version, or the
+    /// closing reconciliation identity failed to re-derive. The artifact
+    /// is refused instead of published.
+    ArtifactMismatch(String),
 }
 
 impl fmt::Display for SnapshotError {
@@ -94,6 +102,11 @@ impl fmt::Display for SnapshotError {
             ),
             Self::InvariantViolated(msg) => write!(f, "internal invariant violated: {msg}"),
             Self::Overflow => write!(f, "arithmetic overflow while aggregating balances"),
+            Self::Serialization(msg) => write!(f, "artifact serialization failure: {msg}"),
+            Self::ArtifactMismatch(msg) => write!(
+                f,
+                "sealed artifact does not derive from its own entries: {msg}"
+            ),
         }
     }
 }

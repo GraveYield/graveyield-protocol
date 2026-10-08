@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased — Phase 5.2: Merkle tree + sealed snapshot artifact (SNAPSHOT-001 retired)]
+
+### Added
+- **`grave_snapshotter::tree` (`SnapshotMerkleTree`)** — the off-chain
+  Merkle tree builder and proof generator, the reference producer of the
+  root `salvage_pool` seals into `PoolRegistry` and `claim_lp_proceeds`
+  verifies against. Leaves are `SHA256(pubkey || balance_le_u64)`
+  (40-byte preimage, byte-locked to `grave_vault::merkle::compute_leaf`),
+  parents are sorted-pair SHA-256, and an odd node at any level promotes
+  unchanged — the exact convention the Phase 4 fork harness proved
+  end-to-end (`build_three_leaf_tree`), now bit-locked between the
+  shipped builder and the fork suite by test. Tree input must be
+  canonical (ascending owner bytes, unique owners, strictly positive
+  balances — the snapshot's own validator, fail-closed), so the root is a
+  pure function of the leaf set. Proofs fold under the on-chain
+  `verify_proof`; a promotion level contributes no element.
+- **`grave_snapshotter::artifact` (`SnapshotArtifact`)** — the sealed,
+  publishable claims artifact: pool/mint/slot/supply metadata, the
+  Merkle root, and per-holder (balance, leaf, ready-to-submit proof) as
+  deterministic JSON (base58 pubkeys, lowercase hex hashes, canonical
+  field and entry order — the same snapshot always seals to
+  byte-identical JSON). `seal()` fail-closes against mixed-up
+  tree/snapshot handles (the tree is re-derived and compared);
+  `verify_integrity()` re-derives root, leaves, proofs, depth, count,
+  format version, and the closing reconciliation identity from the
+  persisted entries and refuses any drift (`ArtifactMismatch`).
+- **23 new host tests** (16 lib + 7 integration), host total 134 → 156:
+  tree shapes n ∈ {1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 32, 33} (every
+  promotion shape, depth/proof-length invariants), canonical-order
+  fail-closed gates, leaf/preimage pins, artifact
+  determinism/round-trip/tamper matrix, and the integration locks:
+  every generated proof verifies under the on-chain `verify_proof`, the
+  3-leaf root and proofs are bit-identical to the fork recipe, and the
+  production-shaped fixture (sink + custody + locks) seals into a
+  verifiable artifact whose JSON round-trip stays verifiable.
+
+### Changed
+- `grave-vault/src/merkle.rs`: the stale header comment ("the off-chain
+  builder pads odd levels by duplicating") now documents the fork-proven
+  convention actually shipped (odd node promotes unchanged; a promotion
+  contributes no proof element) and names the reference builder.
+  Comment-only; no behavior change. Spec rev 1.8.0 → 1.9.0 (D12 added;
+  §2/§6.3 updated); SNAPSHOT-001 retired with the
+  `PRE-MAINNET-TODO(SNAPSHOT)` marker removed;
+  `SnapshotError` gained `Serialization`/`ArtifactMismatch`;
+  `snapshotter` regular deps: `sha2 0.10`, `serde 1 (derive)`,
+  `serde_json 1` (all pre-resolved in Cargo.lock).
+
 ## [Unreleased — Phase 5.1: off-chain LP-holder snapshotter (`grave-snapshotter`)]
 
 ### Added
