@@ -78,7 +78,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 fn scanner_id() -> Pubkey {
-    Pubkey::from_str("7ZZ78chnUh5iipPgwR4L8fT8wKFmUM7kauRzjaYARr9m").unwrap()
+    Pubkey::from_str("5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF").unwrap()
 }
 fn ed25519_id() -> Pubkey {
     Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()

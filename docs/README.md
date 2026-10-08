@@ -40,6 +40,12 @@ canon outside this list is either superseded or unrelated to the project.
 |-------|----------|
 | Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
 
+## Operations
+
+| Topic | Document |
+|-------|----------|
+| Devnet launch runbook (deploy, initialize, emergency-control drill) | [`DEVNET.md`](DEVNET.md) |
+
 ## Glossary
 
 [`glossary.md`](glossary.md) defines the canonical v4.0 vocabulary. It is the

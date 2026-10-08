@@ -1,4 +1,5 @@
 packages:
   - sdk
   - indexer
+  - scripts/devnet
   # `tests/` is added once it has its own package.json (anchor + ts-mocha harness).
