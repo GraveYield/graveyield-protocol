@@ -129,6 +129,53 @@ ready-to-submit proof) as deterministic JSON (base58 pubkeys, hex
 hashes) that re-derives its own integrity from its entries
 (`verify_integrity`, fail-closed on any drift).
 
+## LP claims fork harness (Phase 5.3 — the exit condition)
+
+`programs/grave-vault/tests/lp_claim_fork.rs` closes Phase 5: it retires
+the Phase 4 suite's forged-snapshot stand-in and drives the claim path
+END-TO-END through the real `grave-snapshotter` producer, against the
+same real mainnet bytecode / pool 1 fixtures. The lifecycle it executes:
+
+    VM ledger (read live) → SnapshotBuilder → SnapshotMerkleTree →
+    SnapshotArtifact (JSON round-trip = publication) → salvage_pool seals
+    the artifact root → claim_lp_proceeds with the artifact proofs → SOL
+    in the holder's wallet
+
+Five tests, one per roadmap acceptance item:
+
+- **Claim successfully**: five claimants — the four wallets plus the
+  SALVOR (D11 policy 2: the salvor's pre-burn balance is an ordinary
+  leaf) — each receive exactly `floor(bucket × balance / supply)`,
+  wallet → proof → claim → SOL with no manual steps, including the
+  promotion shapes the real tree builder emits for a 5-leaf set.
+- **Reject invalid proof**: swapped sibling, truncated proof, forged
+  element, and a wrong-signer submission all revert 7010 with zero state
+  movement; the honest claim succeeds afterwards (positive control).
+- **Reject duplicate claim**: the ClaimRecord init constraint rejects the
+  second claim with zero movement.
+- **Reject overclaim**: an inflated `lp_balance_at_snapshot` breaks its
+  own Merkle leaf (7010); a dishonest snapshotter that seals an
+  oversubscribed tree runs into the cumulative conservation cap (7009) —
+  both the single-shot payout-above-bucket shape and the cumulative
+  cross-holder drift.
+- **Verify cumulative accounting**: `Σ ClaimRecord.amount ==
+  registry.lp_holder_pool_claimed_lamports == Σ floors recomputed from
+  the artifact alone`; the vault keeps exactly rent + (bucket − claimed)
+  — the sink-excluded pool-LP custody share plus the claim-side rounding
+  dust, ledgered and unclaimable (D11).
+
+The harness forges exactly five things: the EligibilityCert PDA, the
+salvor's LP balance, the claimants' lamports, the Jupiter stand-in, and
+the VM's LP-token ledger SHAPE (the canonical pool's real supply is
+spread over thousands of mainnet holder accounts the sandbox cannot
+host, so the harness seeds one pool-LP custody account — owner = the
+real Raydium AMM authority, a PDA that can never sign, the exact shape
+the D11 sink exclusion exists for — plus the five claimant wallets; the
+UNCX locker evidence is honestly empty because no locker state exists in
+the VM). The snapshot itself is taken from live VM reads through the
+same source seam an RPC serves, so the snapshotter's `Σ balances ==
+supply` completeness gate runs for real.
+
 Setup and run:
 
 ```bash
@@ -146,6 +193,7 @@ node scripts/fetch_v4_fork_fixtures.mjs     # from the repo root
 cargo test -p grave-vault --test raydium_v4_fork
 cargo test -p grave-vault --test jupiter_conversion_fork
 cargo test -p grave-vault --test settlement_economics_fork
+cargo test -p grave-vault --test lp_claim_fork
 ```
 
 Without fixtures the fork tests SKIP with a message so CI stays green; the
@@ -168,7 +216,10 @@ dev-dependency feature on host builds). Phase 3 adds 8 vault host tests
 `grave-snapshotter` crate (22 lib + 8 integration — see the snapshotter
 section above), bringing the host total to 134. Phase 5.2 adds 23 more
 in the same crate (16 lib + 7 integration — the Merkle tree/proof
-builder and the sealed artifact), bringing the host total to 156. Every
+builder and the sealed artifact), bringing the host total to 156.
+Phase 5.3 adds no host tests; it adds the `lp_claim_fork` fork suite
+(5 tests — the claims lifecycle on the real snapshotter path), taking
+the fork-suite total from 29 to 34. Every
 manipulated-baseline
 vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,

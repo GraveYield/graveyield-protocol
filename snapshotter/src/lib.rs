@@ -12,6 +12,11 @@
 // The fork harness (Phase 4) proved that economics end-to-end with a forged
 // snapshot — this crate is the real snapshot producer the harness stood in
 // for (`tests/README.md`: "the snapshotter itself is a Phase 5 deliverable").
+// As of Phase 5.3 the claim lifecycle runs THIS crate end-to-end against
+// real mainnet bytecode (`programs/grave-vault/tests/lp_claim_fork.rs`):
+// the artifact's root is sealed by the real `salvage_pool` and its proofs
+// claim real SOL through `claim_lp_proceeds` — wallet → proof → claim →
+// SOL with no manual steps.
 //
 // SNAPSHOT POINT (normative)
 //

@@ -1,5 +1,65 @@
 # Changelog
 
+## [Unreleased — Phase 5.3: the claim path proven on the real snapshotter (wallet → proof → claim → SOL)]
+
+### Added
+- **`programs/grave-vault/tests/lp_claim_fork.rs`** — the Phase 5.3 claims
+  fork harness and the roadmap's Phase 5 exit condition, proven against the
+  real mainnet Raydium V4 / OpenBook / SPL-token bytecode (canonical
+  SOL/USDC pool 1 fixtures, same harness family as Phases 2.1–4). The
+  suite retires the Phase 4 harness's documented forged-snapshot stand-in:
+  every root and every proof now comes from the shipped
+  `grave-snapshotter` crate exactly as production will produce them — the
+  LP-holder ledger is read from the live VM through the same source seam
+  an RPC serves, `SnapshotBuilder` runs its `Σ enumerated balances ==
+  lp_mint.supply` completeness gate for real, `SnapshotMerkleTree` +
+  `SnapshotArtifact::seal` produce the published claims document (JSON
+  round-trip is the publication boundary — holders only ever consume the
+  published artifact), `salvage_pool` seals the artifact's root + supply
+  into `PoolRegistry`, and each holder claims with THEIR OWN entry
+  (`proof_for`) — wallet → proof → claim → SOL with no manual steps.
+  Five tests, one per roadmap acceptance item:
+  - **Claim successfully** — five claimants, including the SALVOR (D11
+    policy 2: the pre-burn balance is an ordinary leaf), each receive
+    exactly `floor(bucket × balance / supply)`, exercising the promotion
+    shapes the real tree builder emits for a 5-leaf set; per-claim
+    accounting (holder delta, registry cumulative, bucket drain) asserted
+    after every claim.
+  - **Reject invalid proof** — swapped sibling, truncated proof, forged
+    element, and a wrong-signer submission (the leaf binds the signer) all
+    revert 7010 with zero state movement; the honest entry still claims
+    afterwards (positive control).
+  - **Reject duplicate claim** — the ClaimRecord init constraint rejects
+    the second claim; only the tx fee moves.
+  - **Reject overclaim** — both defense layers: an inflated
+    `lp_balance_at_snapshot` breaks its own Merkle leaf (7010); a
+    dishonest snapshotter that seals an oversubscribed tree (canonical
+    doctored entries through the REAL tree builder — what a buggy or
+    malicious producer would emit, invisible to `salvage_pool` since the
+    root is opaque) hits the cumulative conservation cap (7009), in both
+    the single-shot payout-above-bucket shape and the cumulative
+    cross-holder drift the defense-in-depth comment describes.
+  - **Verify cumulative accounting** — `Σ ClaimRecord.amount ==
+    registry.lp_holder_pool_claimed_lamports == Σ floors recomputed from
+    the artifact alone`; every ClaimRecord matches its artifact entry
+    (pool, holder, amount, balance-at-snapshot); the vault keeps exactly
+    rent + (bucket − claimed), where the remainder decomposes into the
+    sink-excluded pool-LP custody share plus the claim-side rounding dust
+    (< 1 lamport per floor) — ledgered and unclaimable per D11.
+- Fork-suite total 29 → 34. Host totals unchanged (156: scanner 81 /
+  vault 22 / snapshotter 53).
+
+### Changed
+- `programs/grave-vault/Cargo.toml`: `grave-snapshotter` added as a
+  dev-dependency (dev-only edge; the snapshotter only dev-depends back on
+  `grave-vault`, so no build cycle exists). `Cargo.lock` gains the single
+  dev-dependency edge — no new resolution.
+- `tests/settlement_economics_fork.rs` header: the forged-snapshot note now
+  points at the real producer (comment-only; the hand-built tree remains
+  the claims-economics regression lock).
+- `snapshotter/src/lib.rs`: crate docs point at the Phase 5.3 end-to-end
+  proof (comment-only).
+
 ## [Unreleased — Phase 5.2: Merkle tree + sealed snapshot artifact (SNAPSHOT-001 retired)]
 
 ### Added
