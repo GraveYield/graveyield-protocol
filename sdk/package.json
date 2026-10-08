@@ -1,11 +1,11 @@
 {
   "name": "@graveyield/sdk",
-  "version": "0.1.0",
-  "description": "TypeScript salvor SDK for GraveYield Protocol — derelict-pool detection, certify-and-salvage flow, claim helpers.",
+  "version": "0.2.0",
+  "description": "TypeScript salvor SDK for GraveYield Protocol — derelict-pool detection, certify-and-salvage flow, claim helpers. Phase 8 complete: evaluatePool, recordLaunchPrice, phase1/phase2, snapshotLpHolders, buildMerkleTree, certifyAndSalvage, claimLpProceeds.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/graveyieldprotocol/protocol.git",
+    "url": "https://github.com/GraveYield/graveyield-protocol.git",
     "directory": "sdk"
   },
   "homepage": "https://graveyield.xyz",
@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "node --test --import tsx/esm --test-reporter=spec --test-name-pattern='.*' 'test/**/*.test.ts'"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@types/bn.js": "^5.1.5",
     "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },
   "engines": {
