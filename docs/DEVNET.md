@@ -1,16 +1,28 @@
 # Devnet Runbook — GraveYield Protocol
 
-> **Status (this commit):** deployment tooling shipped; the full sequence —
-> build → deploy → initialize → emergency-control drill — is **rehearsed
-> end-to-end on `solana-test-validator`** via the exact production scripts
-> (`scripts/devnet/local_rehearsal.sh`). The devnet execution itself is a
-> funded-wallet step of an already-proven sequence: the sandbox that produced
-> this runbook is faucet-rate-limited, so the deploy commands below must be
-> executed from any funded devnet keypair (CI cannot and should not hold
-> keys). Roadmap Phase 11 "Infrastructure" and "Observability" sections
-> (indexer, SDK publication, first Salvor, Merkle service, event indexing,
-> alerting) are deliberately NOT in this phase — they depend on Phases 8–10
-> and remain sequenced per the shipping roadmap.
+> **Status:** EXECUTED. Both programs are live on devnet under the real
+> program IDs below, both ProtocolConfigs are initialized at spec defaults,
+> and the emergency-control drill passed on both programs (authority pause,
+> intruder rejection — GraveScanner 6000 / GraveVault 7000 — authority
+> unpause, readback-verified at every step). The sequence was first
+> rehearsed end-to-end on `solana-test-validator` via the exact production
+> scripts (`scripts/devnet/local_rehearsal.sh`), then executed on devnet on
+> 2026-10-09:
+>
+> | Step | Program | Transaction |
+> |---|---|---|
+> | Deploy | GraveScanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `PUXKJWGYnGg5JkEFLRqqjrdrbNyDFWMKRCrpYcY32K6Fq3SXdZTgv86EFKbnxYr5oLaB2vmxamZwVoSJ36N12ww` |
+> | Deploy | GraveVault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | `5gEVQfsddMg5kHqiasw2JwKPwa1CGNpJ57CuksMiau9GhGigYe9CkQV5TAxuAtnHJDpA3nPy8eABd67vrq55HgN6` |
+> | Initialize | scanner ProtocolConfig `GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu` | `5boq7igXj311M836EUDFgsxq1goNj5kabniX4QYj7ZFnBb471NydLTE4gvps55EjGssxhPnaBbCyx6jPvLBeqTTh` |
+> | Initialize | vault ProtocolConfig `2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU` | `2psMkdruwRQvdssBRiUTGtdThbCCH9nUhSgyWCJi3vJsWbYGNBPjJLwxYtoVd8hPBqJ95z9HFF4hrjpg3ETEty9H` |
+>
+> Upgrade authority for both programs: the deployer keypair (single key —
+> see the custody note below). The drill's pause/unpause transactions are
+> reproducible via `protocol_admin.mjs drill`; the intruder key is a
+> throwaway. Roadmap Phase 11 "Infrastructure" and "Observability"
+> sections (indexer, SDK publication, first Salvor, Merkle service, event
+> indexing, alerting) are deliberately NOT in this phase — they depend on
+> Phases 8–10 and remain sequenced per the shipping roadmap.
 
 ## Network facts
 

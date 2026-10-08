@@ -56,17 +56,21 @@ flag flipped; (4) an intruder keypair attempts pause and the transaction
 MUST revert with that program's `Unauthorized` (GraveScanner 6000 /
 GraveVault 7000) — a silent land fails the drill; (5) authority unpauses;
 readback asserts restoration. The drill ran green on both programs in the
-test-validator rehearsal; the identical commands are the devnet handover
-step (see `docs/DEVNET.md` §3).
+test-validator rehearsal and then again on live devnet (see
+`docs/DEVNET.md` §3 and the status table in its header).
 
-### Deployment status (honest note)
+### Deployment status (honest note, updated on execution)
 The producing sandbox is faucet-rate-limited (CLI airdrop and the public
-JSON faucet both reject its IP), so the on-chain devnet deployment is
-handed over as a funded-wallet step of the already-proven sequence —
-`docs/DEVNET.md` §1 is copy-paste ready. Everything except the network
-transfer is proven: the ELFs build under the real IDs, the identity gates
-hold, and deploy/initialize/pause/intruder-reject/unpause all behave per
-spec in the local rehearsal.
+JSON faucet both reject its IP), so the tooling commit above handed the
+network transfer over as a funded-wallet step. The deployer was funded
+from the public faucet and the sequence was then executed on devnet
+(2026-10-09): both programs deployed under the real IDs, both
+ProtocolConfigs initialized at spec defaults, and the emergency-control
+drill passed on both programs — authority pause, intruder rejection
+(GraveScanner 6000 / GraveVault 7000), authority unpause, with every
+step readback-verified. Full transaction list and on-chain facts
+(program accounts, upgrade authority, config PDAs) are recorded in
+`docs/DEVNET.md`.
 
 ## [Unreleased — Phase 7: security hardening — fuzz, invariant, and adversarial account testing across both programs and the full fork harness]
 
