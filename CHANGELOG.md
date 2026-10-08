@@ -1,8 +1,179 @@
 # Changelog
 
-## [Unreleased — Phase 11 (Protocol scope, run ahead of Phases 8-10 by owner call): devnet launch kit — real program IDs, identity-gated deployment tooling, and the rehearsed emergency-control drill]
+## [Unreleased — Phase 9: GraveScanner v2 indexer (Raydium V4 only): pool discovery → activity indexing → reserve/TVL filtering → token metadata → scoring → queue → scanner submission → result tracking]
 
 ### Added
+
+- **`@graveyield/indexer` v0.2.0 — Phase 9 indexer is functionally
+  complete.** The v1 discovery target is Raydium V4 only (roadmap
+  Phase 9: "Don't support every DEX. Start with: Raydium V4 only.").
+  The full nine-stage pipeline is implemented:
+  - **Raydium pool discovery** (`sources/raydiumV4.ts`) — enumerates
+    every 752-byte AmmInfo account via `getProgramAccounts` with a
+    dataSize filter.
+  - **Last activity indexing** (`activity.ts`) — derives each pool's
+    last-swap timestamp from RPC signature history via the SDK's
+    `deriveLastSwapV4`. Results are cached (1h TTL — a pool that has
+    not swapped in 90+ days is unlikely to swap in the next hour).
+  - **Reserve/TVL filtering** (`reserves.ts`) — reads vault balances +
+    LP supply via the SDK's `readVaultReserve` / `readLpMintSupply`,
+    identifies the WSOL side (7019 guard), computes TVL in lamports.
+  - **Token metadata** (`metadata.ts`) — reads mint supply + decimals
+    for the pool's three mints (base, quote, LP) via `unpackMint`.
+  - **Candidate scoring** (`scoring.ts`) — combines the C1 inactivity
+    margin, C3 TVL margin, and C2 price collapse potential into a
+    single numeric score = inactivityMargin × tvlMargin ×
+    priceCollapseMargin. Higher score = submit first.
+  - **Queue** (`queue.ts`) — in-memory priority queue ordered by score
+    descending, with deduplication by pool address (highest score wins).
+  - **Scanner submission** (`submit.ts`) — builds the 112-byte C1
+    attestation message, signs it with the activity oracle key (Ed25519
+    via tweetnacl), builds the (precompile, phase1) instruction pair
+    via the SDK's `GraveYieldClient.buildPhase1Ix`, and submits the
+    transaction. If no oracle key is configured, runs in discovery-only
+    mode (logs candidates without submitting).
+  - **Scanner result tracking** (`tracking.ts`) — monitors the
+    EligibilityAnchor and EligibilityCert PDAs via the SDK's
+    `fetchEligibilityAnchor` / `fetchEligibilityCert` to confirm the
+    on-chain scanner accepted the submission and later certified the
+    pool (after the multi-epoch confirmation gap).
+
+- **`GraveScannerV2` main loop** (`index.ts`) — ties the nine stages
+  together in a `runOnce()` method that discovers pools, indexes
+  activity, reads reserves + metadata, pre-filters, scores, queues,
+  drains the top N candidates, submits them, and tracks the results.
+  `start()` runs the loop forever on a configurable interval (default
+  5 minutes). `buildScanner(config)` is a convenience constructor
+  that reads from `loadConfig()` (env-driven).
+
+- **Configuration** (`config.ts`) — all parameters read from
+  environment variables with safe defaults. The indexer runs in
+  discovery-only mode with zero configuration. Setting
+  `ACTIVITY_ORACLE_KEY` (base58-encoded 32-byte Ed25519 secret key)
+  enables on-chain submission. Setting `RPC_URL` + `CLUSTER=mainnet-beta`
+  targets mainnet.
+
+- **Six-criterion pre-filter** (`eligibility.ts`) — evaluates C1
+  inactivity, C2 price collapse (WSOL side guard), C3 min TVL, C4 LP
+  not burned, C5 no lock (flag in v1 — UNCX marker is the on-chain
+  adapter's job), C6 epoch confirmed (assumed for new candidates; the
+  on-chain scanner enforces it at Phase 2). The pre-filter is the
+  indexer's wide funnel; the on-chain GraveScanner is the narrow
+  authority.
+
+- **Indexer test suite (`node:test` + `tsx`).** 29 tests, all green:
+  - `preFilter.test.ts` — the six-criterion pre-filter: all-pass
+    (bitmap 0x3F), per-criterion pass/fail (C1 inactivity, C2 WSOL
+    side, C3 TVL, C4 LP burn, C5/C6 assumed pass), multiple-criteria
+    fail, boundary conditions (at-threshold pass, below-threshold fail).
+  - `queue.test.ts` — enqueue/drain by score descending, drain(n)
+    returns top N, duplicate pool dedup (highest score wins), peek
+    without removal, remove by address, clear.
+  - `scoring.test.ts` — score ≥ 0, inactivity margin scales with
+    elapsed time, TVL margin scales with TVL, noSwapFound yields very
+    high inactivity margin, score = product of three margins.
+  - `config.test.ts` — env-driven defaults, per-env-var overrides
+    (RPC_URL, MIN_TVL_LAMPORTS, MAX_CANDIDATES_PER_CYCLE, CLUSTER).
+
+- **`pnpm -r test` now covers the indexer.** The indexer's
+  `package.json` has a `test` script (was missing pre-Phase 9).
+  `tsx` is a devDependency (same as the SDK). The SDK must be built
+  first (`pnpm --filter @graveyield/sdk build`) so the indexer's
+  `workspace:*` dependency resolves the `dist/` output.
+
+- **New dependencies** — `bs58` (base58 decoding for the oracle key),
+  `tweetnacl` (Ed25519 signing for C1 attestations),
+  `@solana/spl-token` (mint unpacking for token metadata).
+
+### Changed
+
+- **`indexer/README.md`** — the Status section is no longer the stale
+  "Phase 0 scaffold". Now documents the full nine-stage pipeline, the
+  env-var configuration table, the architecture diagram, and the
+  relationship to the SDK.
+
+- **`indexer/package.json`** — added the `test` script, `tsx` +
+  `bs58` + `tweetnacl` + `@solana/spl-token` as dependencies, bumped
+  `@graveyield/indexer` from `0.1.0` (scaffold) to `0.2.0` (Phase 9
+  functional completion).
+
+- **`indexer/src/scanner.ts`** — the `AmmSource` interface now yields
+  `DiscoveredPool` records (with parsed AmmInfo fields) instead of raw
+  `PublicKey`s. The `GraveScannerV2` class moved to `index.ts` (the
+  main entry point) where it has access to all pipeline stages.
+
+- **`indexer/src/eligibility.ts`** — `preFilterPool` now takes the
+  indexed data (activity, reserves, metadata) as explicit parameters
+  instead of fetching from a connection. The `PreFilterResult` type
+  moved to `types.ts` (where `Candidate` can reference it without
+  circular imports).
+
+- **`tests/README.md`** — added the Phase 9 addendum noting the
+  indexer's test suite at `indexer/test/` (29 tests).
+
+### Spec rev
+
+No spec rev bump — Phase 9 is off-chain tooling. The indexer reuses the
+SDK's byte-locked conventions (D8 / D9 — the C1 / C2 attestation
+formats) and the on-chain program's PDA seeds. No protocol semantics
+changed.
+
+### Relationship to Phase 8
+
+The indexer is a consumer of `@graveyield/sdk` (Phase 8). It reuses the
+SDK's `deriveLastSwapV4` (activity indexing), `fetchV4Pool` /
+`parseV4AmmInfo` (pool discovery), `readVaultReserve` /
+`readLpMintSupply` (reserve reading), `identifyBaseToken` (WSOL guard),
+`buildAttestationMessage` / `buildEd25519VerifyInstruction` (C1
+attestation), `GraveYieldClient.buildPhase1Ix` (phase 1 tx), and
+`eligibilityAnchorPda` / `eligibilityCertPda` /
+`fetchEligibilityAnchor` / `fetchEligibilityCert` (result tracking).
+
+---
+
+## [Phase 8: Salvor bots SDK — eight operations + transaction builders + account decoders + PDA derivation + error decoding + simulation helpers, with the IDL-free pattern and the byte-locked Merkle convention]
+
+### Added
+
+- **`@graveyield/sdk` v0.2.0 — Phase 8 SDK is functionally complete.**
+  All eight operations the handoff §4 list demands are implemented as
+  top-level methods on `GraveYieldClient`:
+  - `evaluatePool()` — pure read; walks all six derelict-pool criteria
+    (C1 inactivity, C2 price collapse, C3 TVL, C4 LP-not-burned, C5
+    no-lock, C6 multi-epoch confirmation). Returns a per-criterion
+    pass/fail plus the canonical PDA addresses.
+  - `recordLaunchPrice()` — one tx: C2 precompile (168-byte message
+    at offset 152) + `record_launch_price` ix. Init-once per pool.
+  - `phase1()` — one tx: C1 precompile (112-byte message at offset
+    72) + `evaluate_pool_phase_1` ix.
+  - `phase2()` — one tx: fresh C1 precompile + `evaluate_pool_phase_2`
+    ix (writes an `EligibilityCert` PDA, TTL = 1h).
+  - `snapshotLpHolders()` — off-chain snapshot: enumerate SPL token
+    accounts by mint via `getProgramAccounts` + memcmp filter,
+    aggregate per-owner (ascending pubkey bytes), completeness gate
+    `Σ balances == lp_mint.supply`, build the Merkle root. Surfaces
+    LOCKER-002 as a flag.
+  - `buildMerkleTree()` — TS port of `snapshotter/src/tree.rs` (the
+    reference off-chain builder). Byte-locked against the on-chain
+    verifier `grave_vault::merkle::verify_proof`. The 3-leaf fork-proven
+    vector from `settlement_economics_fork.rs::build_three_leaf_tree`
+    is in the test suite as the canonical regression test.
+  - `certifyAndSalvage()` — bundle (C1 precompile, phase-2 certify,
+    `salvage_pool`) into a single atomic transaction so the 1h cert
+    TTL cannot race network congestion.
+  - `claimLpProceeds()` — `claim_lp_proceeds` ix with the Merkle proof
+    from the snapshot artifact. Callable during emergency pause.
+
+- **Instruction builders (IDL-free pattern).** Every GraveScanner and
+  GraveVault instruction is built directly via the pattern proven in
+  `scripts/devnet/protocol_admin.mjs`. 108 tests cover borsh
+  round-trips, discriminators, PDA seeds, Merkle vectors, priority-fee
+  edges, Charter guard, and attestation wire formats.
+
+---
+
+## [Phase 11 (Protocol scope): devnet launch kit — real program IDs, identity-gated deployment tooling, and the rehearsed emergency-control drill]
+
 - **Devnet program IDs are real keypairs.** The keyless SHA-256-derived
   placeholder IDs were undeployable by construction (nobody holds their
   secret). Real devnet keypairs were generated OUTSIDE the repository
