@@ -4,6 +4,16 @@ Integration tests for GraveYield. Anchor + ts-mocha harness lands in milestone m
 alongside the first real instruction handlers. Until then this directory is
 intentionally empty so the layout is visible on the filesystem.
 
+> **Phase 8–9 addendum:** the SDK (`sdk/test/`, 108 tests) and the
+> indexer (`indexer/test/`, 29 tests) have their own test suites. Both
+> run via `pnpm -r test` using `node:test` + `tsx` (zero new heavy
+> deps). The SDK's `devnetSmoke` suite is SKIPPED when `DEVNET_RPC_URL`
+> is unset; setting `DEVNET_RPC_URL=https://api.devnet.solana.com`
+> runs the read-only smoke tests against the live devnet
+> ProtocolConfigs. Priority-fee ceiling enforcement is SDK-side policy
+> — covered by the SDK unit tests, not the program fork suites (see
+> `docs/PROTOCOL_SPEC.md` D3).
+
 Test plan (m1+):
 
 - `tests/grave-scanner/` — Phase 1/Phase 2 evaluation flows, multi-epoch gating,
