@@ -8,6 +8,9 @@ members = [
     # A workspace member so `cargo fmt --check` / `clippy -D warnings` cover
     # it like every other crate.
     "programs/grave-vault/tests/jupiter_v6_stub",
+    # Off-chain LP-holder snapshotter (Phase 5.1): deterministic enumeration
+    # + locked-LP attribution feeding the claim-side Merkle root.
+    "snapshotter",
 ]
 
 [workspace.package]
