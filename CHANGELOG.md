@@ -1,5 +1,73 @@
 # Changelog
 
+## [Unreleased — Phase 7: security hardening — fuzz, invariant, and adversarial account testing across both programs and the full fork harness]
+
+### Added
+- **Property-based security testing (`proptest`, host-side; both programs).**
+  The roadmap's fuzz / invariant / arithmetic-boundary rows, implemented as
+  property suites on the pinned stable toolchain (no nightly/cargo-fuzz
+  needed):
+  - `grave-vault/src/merkle.rs::proptests` (5): honest producer-built
+    proofs always verify across random 1..=48-entry trees (cross-component:
+    the REAL `grave-snapshotter` builder against the on-chain verifier);
+    ANY single-bit flip of root, leaf, or a proof element invalidates; a
+    proof minted for one holder never verifies another holder's leaf;
+    proof lengths are bounded by tree depth (the fuzzer DISPROVED the
+    uniformity and log2-floor assumptions — promotion shapes legitimately
+    vary proof length, both wrong assumptions are documented in the test);
+    single-entry boundary (empty proof accepts exactly that leaf).
+    Regression seeds for the disproven assumptions are committed under
+    `programs/grave-vault/proptest-regressions/`.
+  - `grave-vault/src/instructions/salvage_pool.rs::proptests` (3): D7
+    conservation under EVERY valid share config and EVERY total (0, 1,
+    u64::MAX, random) — the three shares exhaust the total exactly, floors
+    are exact, and the protocol share never receives less than its own
+    floor; boundary totals route the indivisible lamport to protocol; the
+    slippage cap is bounded by the hard ceiling and the per-tx override
+    can only tighten.
+  - `grave-scanner/src/attestation.rs::proptests` (4): the ed25519
+    precompile-offset checker and the SlotHashes lookup NEVER panic on
+    arbitrary attacker-controlled bytes (fail-closed on truncation);
+    well-formed sysvars resolve only the exact target slot; the message
+    validator never panics on random 112-byte messages.
+  - `grave-scanner/src/criteria.rs::proptests` (3): the price-collapse
+    arithmetic is total (clamped bps or clean MathOverflow, never a
+    panic), monotone in the current price with the re-float guard pinned,
+    and exact at the 9_900 / 10_000 / 1-bps boundaries.
+- **`programs/grave-vault/tests/security_negative_fork.rs`** (6 fork
+  tests): the vault-side adversarial-account roadmap rows against real
+  mainnet bytecode — wrong authority signers revert 7000 (config update +
+  pause, with the rightful authority as positive control); pause gates the
+  first salvage ATOMICALLY (7003 and no pool-scoped PDA survives the
+  revert), unpausing restores it, and a replayed salvage dies on the
+  PoolRegistry init constraint with the sealed root byte-identical;
+  substituting the AMM-authority slot (remaining_accounts[0]) with an
+  attacker key reverts 7013 pre-CPI and the honest salvage succeeds after;
+  an EligibilityCert PDA with byte-identical data but an ATTACKER-OWNED
+  account owner is repelled by the ownership constraint; re-running
+  `initialize` cannot steal the config authority; claims against a
+  never-salvaged pool and with a cross-pool `claim_record` PDA both fail
+  with zero cumulative movement.
+- **`programs/grave-vault/tests/scanner_windows_fork.rs`** (6 fork tests):
+  the scanner-side windows, rotation, and replay rows — `update_protocol_config`
+  rotates BOTH oracle keys and the RETIRED oracle's valid signature over a
+  fresh message reverts 6026 while the new oracle certifies (authority
+  rotation; the recorded LaunchPrice PDA survives untouched); the cert
+  reissue gate rejects a second Phase 2 while valid (6034) with the cert
+  byte-identical (the expiry CROSSING is unreachable in-VM — program-test
+  freezes unix_timestamp on warp — and stays covered by the Phase 1.4 host
+  predicate tests and the Phase 2.1 expired-cert 7002 fork test); the
+  attestation freshness matrix proves future slot 6031, future timestamp
+  6028, never-in-SlotHashes slot 6029, and corrupted hash 6030 over VALID
+  signatures, then certifies honestly; `record_launch_price` is init-once
+  (replay rejected, price byte-identical); scanner pause gates evaluation
+  (6010) while governance stays live and a wrong signer cannot unpause
+  (6000); Phase 2 requires exactly `anchor_epoch + MIN_EPOCH_CONFIRMATION`
+  (6016 at +1, success at +2).
+- Fork-suite total 35 → 47. Host unit-test total 156 → 171 (scanner 88 /
+  vault 30 / snapshotter 53). `proptest = "1"` added as a dev-dependency
+  of both programs (host test targets only; the BPF builds are unchanged).
+
 ## [Unreleased — Phase 6: the first complete lifecycle integration test; the C1/C2 precompile wire contract corrected (spec rev 1.10.0)]
 
 ### Added

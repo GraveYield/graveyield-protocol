@@ -36,4 +36,8 @@ anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
 
 [dev-dependencies]
+# Phase 7 security hardening: property-based fuzz tests for the ed25519
+# precompile wire parser and the SlotHashes lookup (malformed-input
+# robustness, never-panic guarantees) on the pinned stable toolchain.
+proptest = "1"
 solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
