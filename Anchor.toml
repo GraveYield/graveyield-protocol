@@ -8,16 +8,17 @@ solana_version = "3.0.10"
 resolution = true
 skip-lint = false
 
-# Placeholder program IDs. These are valid base58 32-byte pubkeys derived
-# deterministically from SHA-256 seeds; they are NOT real keypairs and have no
-# secret. Run `anchor keys list && anchor keys sync` after generating real
-# keypairs to update both these entries and the `declare_id!` calls in lib.rs.
+# Program IDs. On devnet these are real keypairs deployed per docs/DEVNET.md
+# (the devnet keypairs are throwaways — never reuse them for mainnet). The
+# mainnet deployment generates fresh keypairs under custody and syncs them
+# here and into the `declare_id!` calls in lib.rs (KEYS-003).
 [programs.localnet]
-grave_scanner = "7ZZ78chnUh5iipPgwR4L8fT8wKFmUM7kauRzjaYARr9m"
-grave_vault   = "FZbMHXKRsgXXoEGfSPF5gw74ThKBauThDfpCPt1MvKfw"
+grave_scanner = "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF"
+grave_vault   = "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"
 
 [programs.devnet]
-# Filled in at devnet deploy time.
+grave_scanner = "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF"
+grave_vault   = "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"
 
 [registry]
 url = "https://api.apr.dev"

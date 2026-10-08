@@ -41,10 +41,11 @@ pub mod state;
 
 use instructions::*;
 
-// Localnet placeholder (deterministic SHA-256 seed; not a real keypair). Run
-// `anchor keys list && anchor keys sync` after generating real keypairs to
-// replace this and the matching entry in Anchor.toml.
-declare_id!("7ZZ78chnUh5iipPgwR4L8fT8wKFmUM7kauRzjaYARr9m");
+// Devnet program ID (real keypair, deployed per docs/DEVNET.md; mirrored in
+// Anchor.toml). The devnet keypair is a throwaway and MUST NOT be reused for
+// mainnet: mainnet ships with fresh keypairs generated under custody and
+// synced here + into Anchor.toml (KEYS-003).
+declare_id!("5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF");
 
 #[program]
 pub mod grave_scanner {

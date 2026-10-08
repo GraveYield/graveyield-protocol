@@ -1,5 +1,73 @@
 # Changelog
 
+## [Unreleased — Phase 11 (Protocol scope, run ahead of Phases 8-10 by owner call): devnet launch kit — real program IDs, identity-gated deployment tooling, and the rehearsed emergency-control drill]
+
+### Added
+- **Devnet program IDs are real keypairs.** The keyless SHA-256-derived
+  placeholder IDs were undeployable by construction (nobody holds their
+  secret). Real devnet keypairs were generated OUTSIDE the repository
+  (never in git; `target/deploy/` copies are gitignored) and synced across
+  the full surface: both `declare_id!` calls, every `Anchor.toml` program
+  section, and the six fork suites that derive scanner PDAs
+  (`raydium_v4_fork`, `jupiter_conversion_fork`,
+  `settlement_economics_fork`, `lp_claim_fork`, `scanner_windows_fork`,
+  `security_negative_fork`). KEYS-003 reworded to track the remaining gap
+  (mainnet ships fresh custody-generated keypairs; devnet keys are
+  throwaways and MUST NOT be reused). No program logic changed, no error
+  codes changed, no spec rev bump — program IDs are deployment facts, not
+  protocol semantics.
+  - GraveScanner devnet ID: `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF`
+  - GraveVault devnet ID: `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6`
+- **`scripts/devnet/` — new internal workspace package
+  `@graveyield/devnet-tools`** (private, unpublished; `pnpm-workspace.yaml`
+  + lockfile updated):
+  - `protocol_admin.mjs` — devnet/rehearsal administration with no IDL
+    dependency: Anchor discriminators via `sha256("global:<name>")[0..8]`,
+    hand-rolled borsh for both `InitializeParams` shapes, `["protocol_config"]`
+    PDA derivation, full borsh readback of BOTH `ProtocolConfig` layouts
+    (field offsets hand-derived from the state structs, account
+    discriminator verified, not just fields), and a compact error-name
+    mirror of `docs/error_codes.md`. Commands: `init-scanner` / `init-vault`
+    / `init-all` / `pause` / `check` / `drill`.
+  - `deploy_devnet.sh` — identity-gated build + deploy: refuses to run when
+    a keypair's pubkey does not match the compiled `declare_id!` (an ELF
+    deployed under a foreign address would fail every Anchor owner check),
+    when the deployer holds < 2 SOL, or when `target/deploy` holds a stale
+    keypair from a different identity. Builds via `cargo build-sbf`
+    per package, deploys via `solana program deploy` with the matching
+    `--program-id` keypair.
+  - `local_rehearsal.sh` — the whole devnet sequence (deploy → init-all →
+    both drills) executed against a bare `solana-test-validator` using the
+    production scripts, with throwaway payer/intruder keys minted into a
+    `mktemp` dir and discarded.
+- **`docs/DEVNET.md`** — the devnet runbook: network facts, key-custody
+  policy (devnet throwaways vs mainnet custody keys), prerequisites, the
+  gated deployment stages, the initialization defaults table for both
+  configs, the five-step emergency-control drill, the rehearsal path, and
+  the explicitly out-of-scope items (Phase 8-10 infrastructure; controlled
+  salvage scenarios). Registered under the new `## Operations` section of
+  `docs/README.md` and in `scripts/README.md`.
+
+### The emergency-control drill (Phase 11: "emergency controls tested")
+Per program, `drill` asserts the full spec behavior on a live chain:
+(1) freshly initialized config readback — authority, every default from
+`constants.rs`, unpaused; (2) authority pauses; (3) readback asserts the
+flag flipped; (4) an intruder keypair attempts pause and the transaction
+MUST revert with that program's `Unauthorized` (GraveScanner 6000 /
+GraveVault 7000) — a silent land fails the drill; (5) authority unpauses;
+readback asserts restoration. The drill ran green on both programs in the
+test-validator rehearsal; the identical commands are the devnet handover
+step (see `docs/DEVNET.md` §3).
+
+### Deployment status (honest note)
+The producing sandbox is faucet-rate-limited (CLI airdrop and the public
+JSON faucet both reject its IP), so the on-chain devnet deployment is
+handed over as a funded-wallet step of the already-proven sequence —
+`docs/DEVNET.md` §1 is copy-paste ready. Everything except the network
+transfer is proven: the ELFs build under the real IDs, the identity gates
+hold, and deploy/initialize/pause/intruder-reject/unpause all behave per
+spec in the local rehearsal.
+
 ## [Unreleased — Phase 7: security hardening — fuzz, invariant, and adversarial account testing across both programs and the full fork harness]
 
 ### Added
