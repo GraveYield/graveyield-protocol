@@ -1,0 +1,46 @@
+[package]
+name = "grave-snapshotter"
+description = "GraveYield off-chain LP-holder snapshotter: deterministic, invariant-checked enumeration and attribution of the LP-holder set that feeds the claim-side Merkle root (Phase 5.1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+
+[lib]
+name = "grave_snapshotter"
+
+[dependencies]
+# Blocking JSON-RPC client for the enumeration source. The 2.3 line is
+# aligned with the solana-program 2.3.x transitively pulled by
+# anchor-lang 0.32.1 (see Cargo.lock — solana-client 2.3.13 already
+# resolved for the fork-harness stack, so this adds no new resolution).
+solana-client = "2.3"
+solana-sdk = "2.3"
+# `UiAccountEncoding` (rpc_config's encoding field) is not re-exported
+# through solana-client 2.3 — it comes from this types crate, already
+# resolved at 2.3.13 in Cargo.lock.
+solana-account-decoder-client-types = "2.3"
+
+[dev-dependencies]
+# Leaf-format compatibility lock: the snapshot's (holder, balance) entries
+# must feed `grave_vault::merkle::compute_leaf` byte-for-byte. Type identity
+# (anchor-world Pubkey == solana-sdk Pubkey) is proven at compile time by
+# simply passing our entries into the vault's leaf function.
+grave-vault = { path = "../programs/grave-vault" }
+# UNCX constants drift lock: the snapshotter's locker facts must stay
+# byte-identical to the on-chain scanner adapter's (C5 evidence ↔ locked-LP
+# attribution).
+grave-scanner = { path = "../programs/grave-scanner" }
+# Host builds of grave-vault's merkle code need the software sha2 backend of
+# solana-sha256-hasher 3.x (the on-chain build uses the runtime syscall).
+# Declaring it here unifies the feature for the whole dev-test graph — the
+# same trick grave-vault's own dev-dependencies use.
+solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
+# Independent SHA-256 for the leaf-preimage compatibility test (must NOT go
+# through grave-vault's own hasher path — that would be circular).
+sha2 = "0.10"
+serde_json = "1"

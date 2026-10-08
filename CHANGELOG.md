@@ -1,5 +1,52 @@
 # Changelog
 
+## [Unreleased — Phase 5.1: off-chain LP-holder snapshotter (`grave-snapshotter`)]
+
+### Added
+- **`snapshotter/` workspace crate (`grave-snapshotter`)** — the Phase 5.1
+  off-chain LP-holder snapshotter, the real producer of the snapshot the
+  Phase 4 fork harness stood in for: deterministic, invariant-checked
+  enumeration of the LP-holder set whose `(holder, balance)` entries feed
+  the fork-proven `claim_lp_proceeds` Merkle verifier. Pipeline: LP mint
+  supply + full token-account enumeration (RPC source via
+  `getProgramAccounts` behind the pluggable `LpAccountSource` trait) →
+  per-owner aggregation over ascending pubkey bytes → exclusion ledger
+  (zero balances + operator-declared sinks) → UNCX locked-LP attribution
+  to beneficial `TokenLock.lock_owner`s (records strictly validated
+  off-chain with the scanner adapter's exact on-chain checks — size,
+  discriminator, PDA re-derivation, (amm_id, lp_mint) binding) → custody
+  account identified by exact-balance reconciliation (`balance ==
+  Σ current_locked_amount`, the 74/74 mainnet LOCKER-001 identity;
+  fail-closed on ambiguity, `custody_owner_overrides` as the escape
+  hatch) → merged leaf set with the closing identity
+  `entries_total + sink_exclusions_total == enumerated_total ==
+  lp_mint.supply` enforced as a hard gate (`SupplyMismatch`).
+- **Snapshot policies pinned (spec rev 1.8.0, D11)** — pre-salvage
+  snapshot point (the on-chain supply pin is the integrity anchor); the
+  salvor's pre-burn balance is an ordinary leaf (omitting it would strand
+  its share of the LP bucket); burned LP needs no exclusion (it never
+  enumerates); locked LP is attributed to beneficial owners, never to
+  custody PDAs; zero-balance/sink exclusions are ledgered, never silent;
+  determinism is part of the contract (same ledger state in,
+  bit-identical snapshot out).
+- **30 host tests** (`cargo test -p grave-snapshotter`, no network):
+  determinism across rebuilds and input orderings, canonical ordering,
+  exclusion ledger, custody reconciliation matrix (unique match /
+  ambiguity fail-closed / override / not-found / lock-owner-is-custody /
+  custody-as-sink misconfiguration), supply-mismatch and empty-snapshot
+  gates, TokenLock validation vectors (size / discriminator / forged PDA /
+  foreign amm / foreign mint), RPC filter wire shapes, leaf-format
+  compatibility lock against `grave_vault::merkle::compute_leaf` (via
+  independent SHA-256), and UNCX constants drift lock against the scanner
+  adapter.
+
+### Changed
+- Workspace: `snapshotter` joins the members list, so `cargo fmt --check`
+  and `clippy -D warnings` cover it like every other crate.
+  `scripts/list-pre-mainnet-todos.sh` now scans `snapshotter/` and lists
+  the `SNAPSHOT` scope (marker registered for the Phase 5.2 remainder,
+  tracked as SNAPSHOT-001 in the checklist).
+
 ## [Unreleased — Phase 4: settlement economics proven (D6 dust policy retired + D7 invariant proven)]
 
 ### Added

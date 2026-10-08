@@ -9,7 +9,18 @@
 > Precedence order: this file → `docs/whitepaper.md` → `README.md` →
 > everything else.
 >
-> **Revisions:** rev 1.7.0 — Phase 4: settlement economics proven and the
+> **Revisions:** rev 1.8.0 — Phase 5.1: the off-chain LP-holder
+> snapshotter ships (`snapshotter/`, crate `grave-snapshotter`):
+> deterministic, invariant-checked enumeration of the LP-holder set that
+> feeds the claim-side Merkle root. Snapshot policies pinned as D11:
+> pre-salvage snapshot point (the on-chain supply pin is the integrity
+> anchor), the salvor's pre-burn balance is an ordinary leaf, burned LP
+> needs no exclusion (it never enumerates; `Σ enumerated balances ==
+> lp_mint.supply` is a hard completeness gate), locked LP is attributed to
+> the beneficial `TokenLock.lock_owner` with fail-closed custody
+> reconciliation, and every excluded token is ledgered. The Merkle tree
+> builder / proof generator remains Phase 5.2 (SNAPSHOT-001).
+> rev 1.7.0 — Phase 4: settlement economics proven and the
 > D6 dust policy implemented. `salvage_pool` records `memecoin_mint` and
 > the retained memecoin amount (`dust_memecoin_lamports`) on the receipt
 > (below-threshold dust AND swap-leg route residual; existing receipt byte
@@ -154,8 +165,11 @@ revision is out of scope.
 - **SDK** (`sdk/`): priority-fee policy implemented; `evaluatePool`,
   `snapshotLpHolders`, `buildCertifyAndSalvage` are stubs.
 - **Indexer** (`indexer/`): scaffold only (Phase 9 scope).
-- **LP snapshotter / Merkle tree builder / proof generator**: missing
-  (Phase 5 scope).
+- **LP snapshotter** (`snapshotter/`, crate `grave-snapshotter`):
+  **shipped** (Phase 5.1) — deterministic enumeration + locked-LP
+  attribution, fully host-tested (D11).
+- **Merkle tree builder / proof generator / snapshot persistence**:
+  missing (Phase 5.2 scope, SNAPSHOT-001).
 - **Salvor bot**: does not exist yet (Phase 10 scope).
 
 ## 3. Lifecycle (normative)
@@ -458,7 +472,7 @@ violate it).
 |---|---|---|
 | Priority-fee ceiling | SDK `shouldRejectFee` + operational max `min(margin-ratio × expected profit, ceiling)` (default margin 25%) | A callee program cannot enforce a compute-unit price; the fee is paid by the transaction payer before program execution. `ProtocolConfig.max_priority_fee_ceiling_lamports` (default 1 SOL lamports/CU) is **advisory** config consumed by SDKs (D3). |
 | Jupiter route integrity | Salvor builds the route from Jupiter's quote API and supplies `min_quote_output_lamports` | **On-chain (Phase 3):** the route is forwarded verbatim (no route-plan parsing), but every route account is vetted — none may reference a vault custody/state account — and the vault's WSOL destination must be present; the submitted floor must cover the pool-implied conversion minus the protocol slippage ceiling (SLIP-001 retired, D4); the swap-leg floor re-checks the delivered amount post-CPI. Proven against real bytecode for both orientations by the Phase 3 fork harness. |
-| Honest snapshot and Merkle tree construction | Off-chain snapshotter (Phase 5) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. |
+| Honest snapshot and Merkle tree construction | Off-chain snapshotter (`grave-snapshotter`, Phase 5.1) + Merkle tree builder (Phase 5.2) | The on-chain verifier rejects bad proofs; it cannot detect a faithfully-verified-but-wrong root supply chain. The shipped snapshotter is deterministic and re-runnable (same ledger state → bit-identical snapshot), enforces `Σ enumerated balances == lp_mint.supply` as a completeness gate, attributes locked LP to beneficial `TokenLock.lock_owner`s with fail-closed custody reconciliation, and ledgers every excluded token (D11). The tree/proof builder that seals the root remains open (SNAPSHOT-001). |
 | Locker evidence completeness (C5) | Off-chain TokenLock enumeration (discriminator + `memcmp` on `lp_mint`) and cross-checks of all known lockers before certification | On-chain validation is sound but cannot prove that the supplied TokenLock set is exhaustive (ids are sequential-global, not mint-derivable), nor introspect lockers outside UNCX v4 (LOCKER-002). |
 | Activity-oracle honesty and availability (C1) | Off-chain indexer derives the last-swap time from Raydium V4 transaction history (`sdk/src/lastSwapAttestation.ts::deriveLastSwapV4`) and signs attestations with `activity_oracle` | On-chain verification is cryptographic but cannot re-derive swap history itself (Raydium V4 `AmmInfo` stores no last-swap field; `SlotHashes` spans ≈ 512 slots). A buggy or colluding oracle could attest a wrong timestamp; the oracle key is governance-held and rotatable. Oracle downtime blocks new evaluations (availability, not integrity). ORACLE-003 in the checklist tracks the operational runbook. |
 | Launch-price oracle honesty and archive availability (C2) | Off-chain indexer derives the pre-first-swap reserve ratio from full-history Raydium V4 transaction data (`sdk/src/launchPriceAttestation.ts::deriveLaunchPriceV4`, fail-closed on incomplete history) and signs attestations with `launch_price_oracle` | On-chain verification cannot re-derive historical vault balances (Solana programs cannot read past account state). A buggy or colluding oracle could attest a wrong baseline; because the `LaunchPrice` PDA is init-once, a wrong record is permanent — mitigated by key separation from the activity oracle, governance rotation, and the ORACLE-003 runbook (shared with C1). |
@@ -673,6 +687,42 @@ recovery; both are reserved for future revisions. This is a
 succeeds on an expired cert instead of reverting
 `AccountAlreadyInitialized`); no instruction data or account size
 changed.
+
+**D11 — LP-holder snapshot policy (Phase 5.1).** The claims-side root is
+only as honest as its supply chain, so the snapshotter (`snapshotter/`,
+crate `grave-snapshotter`) is built to be recomputed and audited rather
+than trusted. Normative decisions: (1) the snapshot point is
+**pre-salvage** — `salvage_pool` pins `lp_total_supply_at_snapshot`
+against the live `lp_mint.supply` (`InvalidSnapshotData`), so the
+snapshot must capture the full pre-burn supply; (2) the **salvor's
+pre-burn balance is an ordinary leaf** — the on-chain denominator
+includes it, and omitting it would permanently strand that fraction of
+the LP bucket (nobody could ever claim it); (3) **burned LP needs no
+exclusion** — burned tokens are gone from circulation and never
+enumerate — and the snapshotter enforces `Σ enumerated balances ==
+lp_mint.supply` as a hard completeness gate (`SupplyMismatch` aborts the
+snapshot on an inconsistent view); (4) **locked LP (UNCX v4) is
+attributed to the beneficial `TokenLock.lock_owner`**, never to the
+custody account that physically holds the tokens (a program-derived
+custody PDA cannot sign a claim, so attributing to it would strand the
+locked share); the custody account is identified by exact-balance
+reconciliation — its balance must equal `Σ current_locked_amount`, the
+reconciliation identity verified 74/74 against live mainnet during
+LOCKER-001 — and the snapshot **fails closed** on ambiguity or a missing
+custody account (`CustodyAmbiguous` with a `custody_owner_overrides`
+escape hatch, `CustodyNotFound`); every TokenLock is validated off-chain
+with the scanner adapter's exact on-chain checks (size, discriminator,
+PDA re-derivation from its own declared id, (amm_id, lp_mint) binding);
+(5) **zero-balance accounts and operator-declared sink owners** are
+excluded from the leaf set but recorded in an explicit ledger, closing
+the identity `entries_total + sink_exclusions_total == enumerated_total
+== supply`; (6) **determinism is part of the contract** — same ledger
+state in, bit-identical snapshot out (per-owner aggregation over
+ascending pubkey bytes via `BTreeMap`, lock records sorted by address,
+no timestamps or ambient state in the output). The on-chain verifier
+remains the final gate: it cannot detect a wrong-but-self-consistent
+root (§6.3), which is precisely why the producer is deterministic,
+ledger-complete, and re-runnable.
 
 ## 8. Documentation / code discrepancy ledger
 

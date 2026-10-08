@@ -1022,7 +1022,12 @@ async fn inverted_orientation_pool_converts_memecoin() {
 #[tokio::test]
 async fn pool_without_wsol_side_rejected_before_any_cpi() {
     // Patch pool 1's coin mint to a random key: neither side is WSOL.
-    let manifest = load_manifest().unwrap();
+    // Like every other test in this suite, this must SKIP cleanly (not
+    // panic) when the fork fixtures are absent — the documented
+    // fixture-less behavior (tests/README.md).
+    let Some(manifest) = load_manifest() else {
+        return;
+    };
     let (pool_key, mut pool_acct) = load_real_account(&manifest["accounts"], "pool");
     let bogus = Pubkey::new_unique();
     pool_acct.data[400..432].copy_from_slice(bogus.as_ref());

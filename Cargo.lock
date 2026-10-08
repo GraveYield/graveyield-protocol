@@ -1950,6 +1950,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "grave-snapshotter"
+version = "0.1.0"
+dependencies = [
+ "grave-scanner",
+ "grave-vault",
+ "serde_json",
+ "sha2 0.10.9",
+ "solana-account-decoder-client-types",
+ "solana-client",
+ "solana-sdk",
+ "solana-sha256-hasher 3.1.0",
+]
+
+[[package]]
 name = "grave-vault"
 version = "0.1.0"
 dependencies = [

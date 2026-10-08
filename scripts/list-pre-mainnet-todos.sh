@@ -29,10 +29,11 @@ PATHS=(
   adapters
   sdk
   indexer
+  snapshotter
 )
 
 # Filter scopes (alphabetical for stable output).
-SCOPES=(CPI IDL KEYS LOCKER ORACLE RENT)
+SCOPES=(CPI IDL KEYS LOCKER ORACLE RENT SNAPSHOT)
 
 # Use ripgrep if available, otherwise grep -rn.
 if command -v rg >/dev/null 2>&1; then

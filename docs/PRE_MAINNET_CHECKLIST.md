@@ -98,6 +98,12 @@ Status legend: 🟥 blocking · 🟧 high-priority · 🟡 medium · ⬜ trackin
 | --- | --- | --- | --- |
 | GOV-001 | `programs/grave-vault/src/instructions/update_protocol_config.rs` (and both `state/protocol_config.rs`) | 🟡 | The 72h parameter-change timelock is multisig-enforced (Squads transaction-buffer scheduling) only. `pending_authority`, `pending_authority_eta`, `timelock_seconds` are write-only reserved state; error 7014 `TimelockNotElapsed` is never raised (spec D2). Either wire an on-chain timelock or document the fields as explicitly reserved before mainnet. |
 
+### SNAPSHOT
+
+| ID | File | Status | Description |
+| --- | --- | --- | --- |
+| SNAPSHOT-001 | `snapshotter/` | 🟧 | Off-chain Merkle tree builder + proof generator + deterministic snapshot persistence (roadmap Phase 5.2). The Phase 5.1 snapshotter (`grave-snapshotter`) already produces the canonical, ledger-auditable holder set (spec D11); what remains is turning it into the sealed artifact: leaves / root / proofs under the fork-proven sorted-pair convention (odd node promotes unchanged — see `settlement_economics_fork.rs::build_three_leaf_tree`), persisted snapshot metadata a third party can recompute bit-for-bit, and a cross-check that any published root derives from a re-runnable snapshot. The on-chain verifier is done and fork-proven. |
+
 ## How to retire a row
 
 1. Implement the change. Replace the `PRE-MAINNET-TODO(...)` marker with
