@@ -9,7 +9,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @graveyield/sdk build && tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "test": "node --test --import tsx/esm --test-reporter=spec --test-name-pattern='.*' 'test/**/*.test.ts'"
