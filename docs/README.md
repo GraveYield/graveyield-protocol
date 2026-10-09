@@ -20,7 +20,7 @@ canon outside this list is either superseded or unrelated to the project.
 | Document | Living source | Published snapshot |
 |----------|---------------|--------------------|
 | Whitepaper v4.0 | [`whitepaper.md`](whitepaper.md) | `published/GraveYield_Whitepaper_v4_0.docx` |
-| Technical Documentation v3.0 | [`technical-documentation.md`](technical-documentation.md) | `published/GraveYield_TechnicalDocumentation_v3_0.docx` |
+| Technical Documentation v4.0 | [`technical-documentation.md`](docs/GraveYield_TechnicalDocumentation_v4_0.pdf) | `published/GraveYield_TechnicalDocumentation_v3_0.docx` |
 | GraveScanner × GraveVault Combined Tech Doc v3.0 | [`grave-scanner-grave-vault-combined.md`](grave-scanner-grave-vault-combined.md) | `published/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx` |
 | Legal Documentation v4.0 | [`legal-documentation.md`](legal-documentation.md) | `published/GraveYield_LegalDocumentation_v4_0.docx` |
 | Liquidity Salvage Visual Deck | — | `published/GraveYield_Liquidity_Salvage.pdf` |
