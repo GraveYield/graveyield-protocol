@@ -24,7 +24,7 @@ canon outside this list is either superseded or unrelated to the project.
 | GraveScanner × GraveVault Combined Tech Doc v3.0 | [`grave-scanner-grave-vault-combined.md`](grave-scanner-grave-vault-combined.md) | `published/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx` |
 | Legal Documentation v4.0 | [`legal-documentation.md`](legal-documentation.md) | `published/GraveYield_LegalDocumentation_v4_0.docx` |
 | Liquidity Salvage Visual Deck | — | `published/GraveYield_Liquidity_Salvage.pdf` |
-| GhostPools Research WP-2026-001r3 | [`ghostpools-research.md`](ghostpools-research.md) | `published/GhostPools_Research_Paper_WP-2026-001r3.docx` |
+| GhostPools Research WP-2026-001r3 | [`ghostpools-research.md`](docs/ghostpools_research_paper_wp-2026-001r4.pdf) | `published/GhostPools_Research_Paper_WP-2026-001r3.docx` |
 
 ## Architecture deep-dives
 
