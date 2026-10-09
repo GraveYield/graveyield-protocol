@@ -69,19 +69,21 @@ anchor test
 
 ## Canonical specifications
 
-All design intent lives in [`docs/`](docs/) as markdown — this is the **living source of truth**.
-The original `.docx` deliverables and the `.pdf` research paper are preserved in
-[`docs/published/`](docs/published/) as immutable references for the v4.0 / v3.0 / WP-2026-001r4
-publishing snapshot.
+All design intent lives in [`docs/`](docs/) as markdown — this is the **living source of truth**,
+and every canonical-set row below now resolves to a committed living source. Published
+snapshots live in [`docs/published/`](docs/published/) as immutable references — the two
+committed PDFs (Technical Documentation v4.0, GhostPools Research WP-2026-001r4) sit there;
+the original `.docx` deliverables remain external publishing artifacts re-rendered at each
+release.
 
 | Document | Living source | Published snapshot |
 |----------|---------------|--------------------|
 | Whitepaper v4.0 | [`docs/whitepaper.md`](docs/whitepaper.md) | `docs/published/GraveYield_Whitepaper_v4_0.docx` |
-| Technical Documentation v4.0 | [`docs/GraveYield_TechnicalDocumentation_v4_0.pdf`](docs/GraveYield_TechnicalDocumentation_v4_0.pdf) | `docs/published/GraveYield_TechnicalDocumentation_v4_0.pdf` |
+| Technical Documentation v4.0 | [`docs/technical-documentation.md`](docs/technical-documentation.md) | [`docs/published/GraveYield_TechnicalDocumentation_v4_0.pdf`](docs/published/GraveYield_TechnicalDocumentation_v4_0.pdf) |
 | GraveScanner × GraveVault Combined v3.0 | [`docs/grave-scanner-grave-vault-combined.md`](docs/grave-scanner-grave-vault-combined.md) | `docs/published/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx` |
 | Legal Documentation v4.0 | [`docs/legal-documentation.md`](docs/legal-documentation.md) | `docs/published/GraveYield_LegalDocumentation_v4_0.docx` |
 | Liquidity Salvage Visual Deck | — | `docs/published/GraveYield_Liquidity_Salvage.pdf` |
-| GhostPools Research WP-2026-001r4 | [`docs/ghostpools_research_paper_wp-2026-001r4.pdf`](docs/ghostpools_research_paper_wp-2026-001r4.pdf) | `docs/published/GhostPools_Research_Paper_WP-2026-001r4.pdf` |
+| GhostPools Research WP-2026-001r4 | [`docs/ghostpools-research.md`](docs/ghostpools-research.md) (cover) | [`docs/published/GhostPools_Research_Paper_WP-2026-001r4.pdf`](docs/published/GhostPools_Research_Paper_WP-2026-001r4.pdf) |
 
 ## Locked invariants
 
