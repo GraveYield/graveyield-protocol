@@ -111,9 +111,9 @@ source-of-truth for the error tables, so the v3.0 `.docx` scheme is
 **superseded** and will be re-rendered at the next minor revision.
 
 The full Combined Tech Doc markdown
-(`grave-scanner-grave-vault-combined.md`) is not yet committed to the
-repo. When it lands, its error-code section MUST reference this file
-rather than re-tabulating the codes.
+(`grave-scanner-grave-vault-combined.md`) is now committed to the repo;
+its §7 references this file rather than re-tabulating the codes, as this
+contract requires.
 
 ---
 
