@@ -71,7 +71,7 @@ anchor test
 
 All design intent lives in [`docs/`](docs/) as markdown — this is the **living source of truth**.
 The original `.docx` deliverables and the `.pdf` research paper are preserved in
-[`docs/published/`](docs/published/) as immutable references for the v4.0 / v3.0 / WP-2026-001r3
+[`docs/published/`](docs/published/) as immutable references for the v4.0 / v3.0 / WP-2026-001r4
 publishing snapshot.
 
 | Document | Living source | Published snapshot |
@@ -81,7 +81,7 @@ publishing snapshot.
 | GraveScanner × GraveVault Combined v3.0 | [`docs/grave-scanner-grave-vault-combined.md`](docs/grave-scanner-grave-vault-combined.md) | `docs/published/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx` |
 | Legal Documentation v4.0 | [`docs/legal-documentation.md`](docs/legal-documentation.md) | `docs/published/GraveYield_LegalDocumentation_v4_0.docx` |
 | Liquidity Salvage Visual Deck | — | `docs/published/GraveYield_Liquidity_Salvage.pdf` |
-| GhostPools Research WP-2026-001r3 | [`docs/ghostpools-research.md`](docs/ghostpools-research.md) (cover) | `docs/published/GhostPools_Research_Paper_WP-2026-001r3.docx` |
+| GhostPools Research WP-2026-001r4 | [`docs/ghostpools_research_paper_wp-2026-001r4.pdf`](docs/ghostpools_research_paper_wp-2026-001r4.pdf) | `docs/published/GhostPools_Research_Paper_WP-2026-001r4.pdf` |
 
 ## Locked invariants
 
