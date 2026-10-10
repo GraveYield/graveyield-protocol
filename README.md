@@ -26,6 +26,7 @@ protocol/
 │   └── grave-vault/        # Anchor: salvage execution, settlement, claims
 ├── sdk/                    # TypeScript salvor SDK
 ├── indexer/                # Off-chain GraveScanner v2 (TypeScript)
+├── ops/                    # Phase 11 operations: services, observability, scenarios
 ├── adapters/               # Locker adapters (UNCX, PinkSale, TeamFinance) — future
 ├── docs/                   # Canonical specifications (living markdown source of truth)
 │   └── published/          # Original .docx / .pdf snapshots

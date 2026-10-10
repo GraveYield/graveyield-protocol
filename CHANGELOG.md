@@ -1,5 +1,86 @@
 # Changelog
 
+## [Unreleased — Phase 11 (devnet launch), infrastructure & observability scope: indexer as a service, SDK publish-ready, Merkle service, vault receipts/claims/failed-tx indexing, alerting, controlled salvage scenarios]
+
+> The Protocol scope of Phase 11 (both programs deployed to devnet,
+> ProtocolConfigs initialized at spec defaults, the emergency-control
+> drill executed) shipped earlier — see the Phase 11 devnet entry below
+> and `docs/DEVNET.md`. This entry closes the remaining roadmap rows.
+
+### Added
+
+- **`@graveyield/ops` v0.1.0 — the operations layer.** A new workspace
+  package (`ops/`) turns the Phase 8–10 components into running
+  services. Read-only by construction (no keypairs, no instruction
+  builders); every chain read goes through a four-method injectable
+  `ChainView` (real `Connection` in production, canned fixtures in
+  tests); all account decoding is the SDK's own decoders dispatched on
+  `AccountDisc`.
+  - **Indexer service** (`ops/src/indexerService.ts`) — wraps the
+    Phase 9 `GraveScannerV2` loop with health heartbeats, cycle
+    counters, and failure alerts ("indexer running").
+  - **Vault observer** (`ops/src/vaultObserver.ts`) — sweeps every
+    GraveVault-owned account: `SalvageReceipt` (events indexed /
+    salvage receipts indexed), `ClaimRecord` (claims indexed),
+    `PoolRegistry`, and the Vault `ProtocolConfig`; verifies the
+    40/40/20 invariants (sum == total; ±1-lamport share tolerance,
+    identical to the fleet Monitor's semantics); reconciles per-pool
+    claim accounting three ways (Σclaims vs registry claimed, vs
+    receipt ceiling, registry vs receipt); sweeps recent signatures
+    for failed transactions ("failed transactions monitored").
+  - **Merkle service** (`ops/src/merkleService.ts`) — deterministic
+    self-verifying snapshot artifacts over the SDK's byte-locked
+    snapshot/merkle port: canonical holder order, sha256 integrity
+    hash, root-rebuild + proof verification fail-closed on every load
+    ("Merkle service running"). Directory artifact store included.
+  - **Health** (`ops/src/health.ts`) — component registry with DERIVED
+    staleness (a component silent past 3× its poll interval reports
+    `stale`), monotonic counters, deterministic JSON snapshots.
+  - **Alerts** (`ops/src/alerts.ts`) — coded alerts (stable machine
+    codes + severity + context), dedup windows, console / JSONL /
+    webhook sinks (injectable `fetch`, never throws).
+  - **Scenario runner** (`ops/src/scenarios.ts`) — SC-01 lifecycle
+    sweep (live, read-only), SC-02 vault audit (live, read-only), SC-03
+    local deploy+drill rehearsal ("then run controlled salvage
+    scenarios"). Reports persist as JSON and gate on exit codes.
+  - **CLI** (`graveyield-ops`, `ops/src/cli.ts` + `bin.ts`) — one-shot
+    and `--loop` modes for every service, `all` supervisor with
+    graceful SIGINT/SIGTERM, health command. Argument syntax accepts
+    both `--key=value` and `--key value` (protocol_admin.mjs
+    convention).
+  - **47 offline tests** (`node:test` + `tsx`) — health freshness and
+    status math, alert dedup and sink isolation, hand-encoded Anchor
+    accounts (discriminator + borsh) through the SDK decoders covering
+    every invariant including the ±1-lamport boundary, artifact tamper
+    detection, scenario wiring. No network.
+
+- **`docs/OPS.md` — the operations runbook.** Service inventory,
+  env-var reference, tmux/systemd supervision, health + alert codes,
+  scenario procedures, SDK publication checklist pointer, known limits.
+
+- **`scripts/no_uring.c` — the io_uring seccomp wrapper, rebuilt.**
+  Agave 3.0.x wants RLIMIT_MEMLOCK ≥ 2 GB for io_uring; sandbox
+  containers cap it at 64 KB. The wrapper denies io_uring
+  setup/enter/register via seccomp and forces agave's synchronous
+  file-creator path so `solana-test-validator` (and therefore SC-03)
+  runs anywhere. Compiled artifact is gitignored.
+
+- **`sdk/PUBLISH.md` — the npm publication checklist.** The SDK is
+  publish-ready (`npm publish --dry-run` passes: dist + README only;
+  packed tarball `graveyield-sdk-0.2.0.tgz` verified). The actual
+  publish is a custodial owner action (automation token, 2FA) — the
+  checklist documents the exact steps plus the registry-free install
+  paths (GitHub / tarball) that work today.
+
+### Changed
+
+- **`pnpm-workspace.yaml`** — `ops` added as the fourth workspace
+  package.
+- **Root `README.md`** — repository layout gains `ops/`.
+- **`docs/README.md`** — Operations table gains the OPS.md runbook row.
+- **`.gitignore`** — `ops-state/` (service state) and `scripts/no_uring`
+  (compiled wrapper).
+
 ## [Unreleased — Phase 9: GraveScanner v2 indexer (Raydium V4 only): pool discovery → activity indexing → reserve/TVL filtering → token metadata → scoring → queue → scanner submission → result tracking]
 
 ### Added
