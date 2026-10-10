@@ -45,6 +45,7 @@ canon outside this list is either superseded or unrelated to the project.
 | Topic | Document |
 |-------|----------|
 | Devnet launch runbook (deploy, initialize, emergency-control drill) | [`DEVNET.md`](DEVNET.md) |
+| Ops runbook (Phase 11 services: indexer, vault observer, Merkle service, alerting, scenarios) | [`OPS.md`](OPS.md) |
 
 ## Glossary
 
