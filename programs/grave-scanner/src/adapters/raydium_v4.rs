@@ -292,3 +292,224 @@ mod tests {
         assert_eq!(read_pubkey(&buf, offsets::LP_MINT).unwrap(), lp_mint);
     }
 }
+
+// =====================================================================
+// Phase 12 adversary tests (host-only) — malicious LP/vault account
+// shapes against the Raydium V4 parser (ADV-LP-* in docs/ADVERSARY.md).
+// The parser is the trust boundary between arbitrary chain bytes and
+// the eligibility evaluator: every malformed shape must revert 6009
+// before any number reaches the criteria.
+// =====================================================================
+#[cfg(test)]
+mod adversary_tests {
+    use super::*;
+
+    fn synth_pool(
+        coin_vault: &Pubkey,
+        pc_vault: &Pubkey,
+        coin_mint: &Pubkey,
+        pc_mint: &Pubkey,
+        lp_mint: &Pubkey,
+    ) -> Vec<u8> {
+        let mut buf = vec![0u8; AMM_INFO_SIZE];
+        buf[offsets::COIN_VAULT..offsets::COIN_VAULT + 32].copy_from_slice(coin_vault.as_ref());
+        buf[offsets::PC_VAULT..offsets::PC_VAULT + 32].copy_from_slice(pc_vault.as_ref());
+        buf[offsets::COIN_VAULT_MINT..offsets::COIN_VAULT_MINT + 32]
+            .copy_from_slice(coin_mint.as_ref());
+        buf[offsets::PC_VAULT_MINT..offsets::PC_VAULT_MINT + 32].copy_from_slice(pc_mint.as_ref());
+        buf[offsets::LP_MINT..offsets::LP_MINT + 32].copy_from_slice(lp_mint.as_ref());
+        buf
+    }
+
+    fn token_account(mint: &Pubkey, amount: u64) -> Vec<u8> {
+        let mut buf = vec![0u8; TOKEN_ACCOUNT_SIZE];
+        buf[0..32].copy_from_slice(mint.as_ref());
+        buf[offsets::TOKEN_ACCOUNT_AMOUNT..offsets::TOKEN_ACCOUNT_AMOUNT + 8]
+            .copy_from_slice(&amount.to_le_bytes());
+        buf
+    }
+
+    fn mint_account(supply: u64) -> Vec<u8> {
+        let mut buf = vec![0u8; MINT_ACCOUNT_SIZE];
+        buf[offsets::MINT_SUPPLY..offsets::MINT_SUPPLY + 8].copy_from_slice(&supply.to_le_bytes());
+        buf
+    }
+
+    /// Leak-backed AccountInfo (test-only 'static plumbing).
+    fn info(key: Pubkey, owner: &Pubkey, data: Vec<u8>) -> AccountInfo<'static> {
+        let data = Box::leak(data.into_boxed_slice());
+        let key = Box::leak(Box::new(key));
+        let owner = Box::leak(Box::new(*owner));
+        let lamports = Box::leak(Box::new(1_000_000u64));
+        AccountInfo {
+            key,
+            lamports: std::rc::Rc::new(std::cell::RefCell::new(lamports as &mut u64)),
+            data: std::rc::Rc::new(std::cell::RefCell::new(&mut data[..])),
+            owner,
+            rent_epoch: 0,
+            is_signer: false,
+            is_writable: false,
+            executable: false,
+        }
+    }
+
+    /// A fully honest fixture — proves the negatives below are the
+    /// parser refusing MALICE, not a broken fixture.
+    #[test]
+    fn adv_lp00_honest_fixture_parses() {
+        let coin_vault = Pubkey::new_unique();
+        let pc_vault = Pubkey::new_unique();
+        let coin_mint = Pubkey::new_unique();
+        let pc_mint = Pubkey::new_unique();
+        let lp_mint = Pubkey::new_unique();
+        let pool = info(
+            Pubkey::new_unique(),
+            &PROGRAM_ID,
+            synth_pool(&coin_vault, &pc_vault, &coin_mint, &pc_mint, &lp_mint),
+        );
+        let remaining = [
+            info(
+                coin_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&coin_mint, 1_000),
+            ),
+            info(
+                pc_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&pc_mint, 2_000),
+            ),
+            info(lp_mint, &SPL_TOKEN_PROGRAM_ID, mint_account(10_000)),
+        ];
+        let parsed = parse(&pool, &remaining).unwrap();
+        assert_eq!(parsed.base_reserve, 1_000);
+        assert_eq!(parsed.quote_reserve, 2_000);
+        assert_eq!(parsed.lp_supply, 10_000);
+    }
+
+    /// ADV-LP-01: a required vault/mint account missing from
+    /// remaining_accounts is refused — the parser never invents state.
+    #[test]
+    fn adv_lp01_missing_remaining_accounts_refused() {
+        let coin_vault = Pubkey::new_unique();
+        let pc_vault = Pubkey::new_unique();
+        let coin_mint = Pubkey::new_unique();
+        let pc_mint = Pubkey::new_unique();
+        let lp_mint = Pubkey::new_unique();
+        let pool = info(
+            Pubkey::new_unique(),
+            &PROGRAM_ID,
+            synth_pool(&coin_vault, &pc_vault, &coin_mint, &pc_mint, &lp_mint),
+        );
+        let err = parse(&pool, &[]).unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+    }
+
+    /// ADV-LP-02: a vault account NOT owned by the SPL Token program
+    /// (attacker-owned lookalike) is refused before any read.
+    #[test]
+    fn adv_lp02_foreign_vault_owner_refused() {
+        let coin_vault = Pubkey::new_unique();
+        let pc_vault = Pubkey::new_unique();
+        let coin_mint = Pubkey::new_unique();
+        let pc_mint = Pubkey::new_unique();
+        let lp_mint = Pubkey::new_unique();
+        let pool = info(
+            Pubkey::new_unique(),
+            &PROGRAM_ID,
+            synth_pool(&coin_vault, &pc_vault, &coin_mint, &pc_mint, &lp_mint),
+        );
+        let attacker_program = Pubkey::new_unique();
+        let remaining = [
+            info(
+                coin_vault,
+                &attacker_program,
+                token_account(&coin_mint, 1_000),
+            ),
+            info(
+                pc_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&pc_mint, 2_000),
+            ),
+            info(lp_mint, &SPL_TOKEN_PROGRAM_ID, mint_account(10_000)),
+        ];
+        let err = parse(&pool, &remaining).unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+    }
+
+    /// ADV-LP-03: the mint embedded INSIDE the vault token account must
+    /// equal the mint the pool account claims — a swapped/forged vault
+    /// cannot re-label the pool's base or quote token.
+    #[test]
+    fn adv_lp03_vault_mint_crosscheck_refused() {
+        let coin_vault = Pubkey::new_unique();
+        let pc_vault = Pubkey::new_unique();
+        let coin_mint = Pubkey::new_unique();
+        let pc_mint = Pubkey::new_unique();
+        let lp_mint = Pubkey::new_unique();
+        let pool = info(
+            Pubkey::new_unique(),
+            &PROGRAM_ID,
+            synth_pool(&coin_vault, &pc_vault, &coin_mint, &pc_mint, &lp_mint),
+        );
+        let forged_mint = Pubkey::new_unique();
+        let remaining = [
+            // Vault claims to hold coin_mint, but its embedded mint is
+            // an attacker mint — the reserves it reports are not the
+            // pool's reserves.
+            info(
+                coin_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&forged_mint, 1_000),
+            ),
+            info(
+                pc_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&pc_mint, 2_000),
+            ),
+            info(lp_mint, &SPL_TOKEN_PROGRAM_ID, mint_account(10_000)),
+        ];
+        let err = parse(&pool, &remaining).unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+    }
+
+    /// ADV-LP-04: the LP mint owned by the wrong program is refused —
+    /// supply cannot be read from attacker bytes.
+    #[test]
+    fn adv_lp04_foreign_lp_mint_owner_refused() {
+        let coin_vault = Pubkey::new_unique();
+        let pc_vault = Pubkey::new_unique();
+        let coin_mint = Pubkey::new_unique();
+        let pc_mint = Pubkey::new_unique();
+        let lp_mint = Pubkey::new_unique();
+        let pool = info(
+            Pubkey::new_unique(),
+            &PROGRAM_ID,
+            synth_pool(&coin_vault, &pc_vault, &coin_mint, &pc_mint, &lp_mint),
+        );
+        let attacker_program = Pubkey::new_unique();
+        let remaining = [
+            info(
+                coin_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&coin_mint, 1_000),
+            ),
+            info(
+                pc_vault,
+                &SPL_TOKEN_PROGRAM_ID,
+                token_account(&pc_mint, 2_000),
+            ),
+            info(lp_mint, &attacker_program, mint_account(10_000)),
+        ];
+        let err = parse(&pool, &remaining).unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+    }
+
+    /// ADV-LP-05: wrong pool size (751 bytes) is refused — the layout
+    /// contract is exact, not "at least".
+    #[test]
+    fn adv_lp05_wrong_pool_size_refused() {
+        let short = info(Pubkey::new_unique(), &PROGRAM_ID, vec![0u8; 751]);
+        let err = parse(&short, &[]).unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+    }
+}

@@ -46,6 +46,7 @@ canon outside this list is either superseded or unrelated to the project.
 |-------|----------|
 | Devnet launch runbook (deploy, initialize, emergency-control drill) | [`DEVNET.md`](DEVNET.md) |
 | Ops runbook (Phase 11 services: indexer, vault observer, Merkle service, alerting, scenarios) | [`OPS.md`](OPS.md) |
+| Adversary battery (Phase 12: 15 threat classes, refusal proofs, findings ledger) | [`ADVERSARY.md`](ADVERSARY.md) |
 
 ## Glossary
 

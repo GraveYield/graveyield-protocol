@@ -421,6 +421,223 @@ mod tests {
 }
 
 // =====================================================================
+// Phase 12 adversary tests (host-only) — the deliberate-attack battery.
+// Roadmap Phase 12: "prove that GraveYield refuses to act when its
+// assumptions aren't satisfied." Each test names the attack class it
+// pins (ADV-* ids, catalogued in docs/ADVERSARY.md) and asserts the
+// exact on-chain error code the attack reverts with.
+// =====================================================================
+#[cfg(test)]
+mod adversary_tests {
+    use super::*;
+
+    fn assert_code(err: anchor_lang::error::Error, expected: GraveScannerError) {
+        match err {
+            anchor_lang::error::Error::AnchorError(e) => {
+                let expected_code: u32 = expected.into();
+                assert_eq!(
+                    e.error_code_number, expected_code,
+                    "attack must revert {} ({})",
+                    expected_code, e.error_name
+                );
+            }
+            other => panic!("expected AnchorError, got {other:?}"),
+        }
+    }
+
+    fn thresholds() -> CriteriaThresholds {
+        CriteriaThresholds {
+            inactivity_seconds: 90 * 24 * 60 * 60,
+            price_collapse_bps: 9_900,
+            min_tvl_lamports: 500_000_000,
+            lp_burn_dust_threshold: 1_000,
+        }
+    }
+
+    /// A "perfect derelict pool" — local copy of the base suite's helper
+    /// (the sibling `mod tests` is a separate scope).
+    fn passing_inputs() -> CriteriaInputs {
+        CriteriaInputs {
+            last_swap_unix_ts: 0,
+            current_unix_ts: 100 * 24 * 60 * 60,
+            launch_price_q64x64: 1u128 << 64,
+            current_price_q64x64: 1u128 << 56,
+            current_tvl_lamports: 1_000_000_000,
+            lp_supply: 1_000_000,
+            lp_locked_amount: 0,
+            current_epoch: 1_000,
+            anchor_first_eligible_epoch: Some(998),
+        }
+    }
+
+    /// ADV-TS-01 (fake timestamps): a clock regression — "current" time
+    /// BEFORE the attested last swap — is refused before any criterion
+    /// runs. An attacker cannot backdate a pool into eligibility by
+    /// submitting a last_swap_ts from the future.
+    #[test]
+    fn adv_ts01_clock_regression_refused_invalid_clock() {
+        let mut inputs = passing_inputs();
+        inputs.last_swap_unix_ts = inputs.current_unix_ts + 60;
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::InvalidClock);
+    }
+
+    /// ADV-AP-02 (active pools): the inactivity window boundary is
+    /// exact — one second short of the window is still an active pool
+    /// and is refused; exactly at the window is the first eligible
+    /// instant.
+    #[test]
+    fn adv_ap02_active_pool_boundary_is_exact() {
+        let mut inputs = passing_inputs();
+        let win = thresholds().inactivity_seconds as i64;
+        inputs.last_swap_unix_ts = inputs.current_unix_ts - (win - 1);
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+
+        inputs.last_swap_unix_ts = inputs.current_unix_ts - win;
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::One).unwrap(), 0x3F);
+    }
+
+    /// ADV-FD-03 (fake-derelict pools): a pool with no price history can
+    /// never be certified, even when every other criterion looks
+    /// satisfied — the zero launch price (6002) is an independent
+    /// refusal layer, and criterion ordering puts inactivity first so a
+    /// fake-derelict pool that is ALSO still active reads as not-eligible
+    /// (6001) rather than leaking the deeper signal.
+    #[test]
+    fn adv_fd03_zero_launch_price_refused_and_ordering_pinned() {
+        // Dead-shaped but unpriceable → 6002 LaunchPriceNotFound.
+        let mut inputs = passing_inputs();
+        inputs.launch_price_q64x64 = 0;
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::LaunchPriceNotFound);
+
+        // Fake-dead AND still-active → 6001 (C1 short-circuits first).
+        let mut active = inputs;
+        active.last_swap_unix_ts = active.current_unix_ts - 60;
+        let err = evaluate(&active, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+    }
+
+    /// ADV-DS-04 (dust): the C4 boundary is strict — an LP supply
+    /// exactly at the dust threshold is burned-to-dust and refused;
+    /// one unit above is the first salvageable supply. A zero
+    /// threshold still refuses a fully incinerated (zero-supply) pool.
+    #[test]
+    fn adv_ds04_dust_boundary_is_strict() {
+        let mut inputs = passing_inputs();
+        inputs.lp_supply = thresholds().lp_burn_dust_threshold;
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+
+        inputs.lp_supply = thresholds().lp_burn_dust_threshold + 1;
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::One).unwrap(), 0x3F);
+
+        let mut zero_threshold = thresholds();
+        zero_threshold.lp_burn_dust_threshold = 0;
+        inputs.lp_supply = 0;
+        let err = evaluate(&inputs, &zero_threshold, Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+    }
+
+    /// ADV-EC-05 (extremely low liquidity): the C3 TVL floor is
+    /// inclusive at the bottom — exactly the minimum TVL is the first
+    /// salvageable pool, one lamport below is refused.
+    #[test]
+    fn adv_ec05_min_tvl_boundary_is_inclusive() {
+        let mut inputs = passing_inputs();
+        inputs.current_tvl_lamports = thresholds().min_tvl_lamports - 1;
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+
+        inputs.current_tvl_lamports = thresholds().min_tvl_lamports;
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::One).unwrap(), 0x3F);
+    }
+
+    /// ADV-EL-06 (extreme liquidity): there is deliberately NO upper TVL
+    /// bound — a whale-sized pool satisfies C3. This test PINS that
+    /// behavior: the economic rails for large pools are the slippage
+    /// floor and the share split, not an eligibility cap. Flagged as
+    /// FINDING F2 in docs/ADVERSARY.md for the audit to weigh.
+    #[test]
+    fn adv_el06_no_upper_tvl_bound_pinned() {
+        let mut inputs = passing_inputs();
+        inputs.current_tvl_lamports = u64::MAX;
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::One).unwrap(), 0x3F);
+    }
+
+    /// ADV-MP-07 (manipulated prices): the collapse threshold is exact —
+    /// a 99% drop computes exactly 9_900 bps and passes; one basis
+    /// point less is refused. A re-floated pool (current == launch)
+    /// reads zero drop and is refused.
+    #[test]
+    fn adv_mp07_collapse_boundary_is_exact() {
+        let launch = 10_000u128 * (1u128 << 32);
+        let mut inputs = passing_inputs();
+        inputs.launch_price_q64x64 = launch;
+        inputs.current_price_q64x64 = launch / 100; // 99% drop = 9_900 bps
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::One).unwrap(), 0x3F);
+
+        inputs.current_price_q64x64 = launch / 100 + 1; // 1 bp short
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+
+        inputs.current_price_q64x64 = launch; // re-floated
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+    }
+
+    /// ADV-DC-08 (token decimals edge cases): Q64.64 math is
+    /// decimals-agnostic and exact at friendly ratios — a price that
+    /// halved reads exactly 5_000 bps regardless of the underlying
+    /// token decimals. At the top of the representable range the math
+    /// FAILS CLOSED (6004) rather than wrapping — the largest ratio a
+    /// real u64-reserve pool can express is handled, and one unit more
+    /// is refused, never mis-measured.
+    #[test]
+    fn adv_dc08_price_math_decimals_agnostic() {
+        let launch = 1u128 << 64;
+        assert_eq!(compute_drop_bps(launch, launch / 2).unwrap(), 5_000);
+        // The largest launch price whose delta × 10_000 still fits u128.
+        let max_safe = u128::MAX / 10_000;
+        assert_eq!(compute_drop_bps(max_safe, max_safe / 4).unwrap(), 7_500);
+        // One unit beyond: fail-closed 6004 — a fake-derelict pool cannot be
+        // manufactured out of an arithmetic wrap.
+        assert_eq!(
+            compute_drop_bps(max_safe + 1, 0).unwrap_err(),
+            GraveScannerError::MathOverflow.into()
+        );
+    }
+
+    /// ADV-LK-09 (malicious LP locking): a single lamport of locked LP
+    /// is enough to refuse certification — criterion 5 is a hard zero
+    /// gate, not a ratio.
+    #[test]
+    fn adv_lk09_single_locked_lamport_refuses() {
+        let mut inputs = passing_inputs();
+        inputs.lp_locked_amount = 1;
+        let err = evaluate(&inputs, &thresholds(), Phase::One).unwrap_err();
+        assert_code(err, GraveScannerError::PoolNotEligible);
+    }
+
+    /// ADV-EP-10 (epoch manipulation): Phase 2 inside the confirmation
+    /// gap is refused with the dedicated code, and the gap boundary is
+    /// exact (MIN_EPOCH_CONFIRMATION epochs is the first certifiable
+    /// instant).
+    #[test]
+    fn adv_ep10_epoch_gap_boundary_is_exact() {
+        let mut inputs = passing_inputs();
+        let anchor = inputs.anchor_first_eligible_epoch.unwrap();
+        inputs.current_epoch = anchor + MIN_EPOCH_CONFIRMATION - 1;
+        let err = evaluate(&inputs, &thresholds(), Phase::Two).unwrap_err();
+        assert_code(err, GraveScannerError::EpochConfirmationPending);
+
+        inputs.current_epoch = anchor + MIN_EPOCH_CONFIRMATION;
+        assert_eq!(evaluate(&inputs, &thresholds(), Phase::Two).unwrap(), 0x3F);
+    }
+}
+
+// =====================================================================
 // Phase 7 property tests (proptest, host-only): the price-collapse
 // arithmetic's boundary behavior — total inputs must produce a clamped
 // bps value or a clean MathOverflow, never a panic, and the criterion's

@@ -27,6 +27,7 @@ protocol/
 ├── sdk/                    # TypeScript salvor SDK
 ├── indexer/                # Off-chain GraveScanner v2 (TypeScript)
 ├── ops/                    # Phase 11 operations: services, observability, scenarios
+├── adversary/              # Phase 12 adversarial battery: 15 threat classes, refuses-first
 ├── adapters/               # Locker adapters (UNCX, PinkSale, TeamFinance) — future
 ├── docs/                   # Canonical specifications (living markdown source of truth)
 │   └── published/          # Original .docx / .pdf snapshots

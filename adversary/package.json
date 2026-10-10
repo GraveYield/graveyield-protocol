@@ -1,0 +1,29 @@
+{
+  "name": "@graveyield/adversary",
+  "version": "0.1.0",
+  "description": "GraveYield Phase 12 adversarial battery — deliberately attacks the protocol across 15 threat classes to prove that GraveYield refuses to act when its assumptions aren't satisfied. Offline by construction; runs the REAL SDK/indexer/ops logic (fakes only at the RPC boundary).",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @graveyield/sdk build && pnpm --filter @graveyield/indexer build && pnpm --filter @graveyield/ops build && tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "node --test --import tsx/esm --test-reporter=spec --test-name-pattern='.*' 'test/**/*.adversary.test.ts'"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@graveyield/sdk": "workspace:*",
+    "@graveyield/indexer": "workspace:*",
+    "@graveyield/ops": "workspace:*",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

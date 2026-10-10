@@ -1176,3 +1176,95 @@ mod proptests {
         }
     }
 }
+
+// =====================================================================
+// Phase 12 adversary tests (host-only) — settlement-math attacks
+// (ADV-ST-* in docs/ADVERSARY.md): the pure math helpers must fail
+// closed on shapes the handlers never feed them, and the orientation
+// derivation must depend on NOTHING but the mint bytes.
+// =====================================================================
+#[cfg(test)]
+mod adversary_tests {
+    use super::*;
+
+    /// Local copies of the base suite's fixture helpers (the sibling
+    /// `mod tests` is a separate scope).
+    fn amm_info_bytes(coin_mint: &Pubkey, pc_mint: &Pubkey, lp_mint: &Pubkey) -> Vec<u8> {
+        let mut buf = vec![0u8; RAYDIUM_V4_AMM_INFO_SIZE];
+        buf[RAYDIUM_V4_OFF_COIN_MINT..RAYDIUM_V4_OFF_COIN_MINT + 32]
+            .copy_from_slice(coin_mint.as_ref());
+        buf[RAYDIUM_V4_OFF_PC_MINT..RAYDIUM_V4_OFF_PC_MINT + 32].copy_from_slice(pc_mint.as_ref());
+        buf[RAYDIUM_V4_OFF_LP_MINT..RAYDIUM_V4_OFF_LP_MINT + 32].copy_from_slice(lp_mint.as_ref());
+        buf
+    }
+
+    fn to_account(bytes: Vec<u8>) -> AccountInfo<'static> {
+        let bytes = Box::leak(bytes.into_boxed_slice());
+        let key = Box::leak(Box::new(Pubkey::new_unique()));
+        let owner = Box::leak(Box::new(RAYDIUM_V4_PROGRAM_ID));
+        AccountInfo {
+            key,
+            lamports: std::rc::Rc::new(std::cell::RefCell::new(
+                Box::leak(Box::new(0u64)) as &mut u64
+            )),
+            data: std::rc::Rc::new(std::cell::RefCell::new(&mut bytes[..])),
+            owner,
+            rent_epoch: 0,
+            is_signer: false,
+            is_writable: false,
+            executable: false,
+        }
+    }
+
+    /// ADV-ST-01: the split helper is total for every VALID split, but
+    /// a split whose floors exceed the total (invalid sum that a handler
+    /// would have refused at 7004) fails CLOSED with MathOverflow — the
+    /// math can never mint lamports out of a bad config.
+    #[test]
+    fn adv_st01_split_fails_closed_on_invalid_sum() {
+        let err = split_proceeds(10_000, 9_999, 9_999).unwrap_err();
+        assert_eq!(err, GraveVaultError::MathOverflow.into());
+        // The boundary is exact: floors summing to exactly the total
+        // still conserve (protocol = 0) — a valid 50/50 config at a
+        // total the floors divide evenly.
+        let (s, l, p) = split_proceeds(10_000, 5_000, 5_000).unwrap();
+        assert_eq!((s, l, p), (5_000, 5_000, 0));
+    }
+
+    /// ADV-ST-02 (dust): a one-lamport settlement at the default split
+    /// puts the ENTIRE lamport on the protocol side — no rounding loss
+    /// can strand value between the three legs.
+    #[test]
+    fn adv_st02_single_lamport_conserves() {
+        let (s, l, p) = split_proceeds(1, 4_000, 4_000).unwrap();
+        assert_eq!((s + l + p), 1);
+        assert_eq!((s, l), (0, 0));
+    }
+
+    /// ADV-DC-03 (token decimals edge cases): orientation depends ONLY
+    /// on the three mint fields — mutating every other byte of the pool
+    /// (fee ticks, "decimals-ish" fields, status bytes) cannot change
+    /// how the pool orients or which mints bind.
+    #[test]
+    fn adv_dc03_orientation_ignores_non_mint_bytes() {
+        let memecoin = Pubkey::new_unique();
+        let lp = Pubkey::new_unique();
+        let mut bytes = amm_info_bytes(&WSOL_MINT, &memecoin, &lp);
+        let (base_coin, m, l) = derive_pool_orientation(&to_account(bytes.clone())).unwrap();
+        assert!(base_coin);
+        assert_eq!((m, l), (memecoin, lp));
+
+        // Scramble every byte outside the three mint windows.
+        for (i, b) in bytes.iter_mut().enumerate() {
+            let in_mint_window = (RAYDIUM_V4_OFF_COIN_MINT..RAYDIUM_V4_OFF_COIN_MINT + 32)
+                .contains(&i)
+                || (RAYDIUM_V4_OFF_PC_MINT..RAYDIUM_V4_OFF_PC_MINT + 32).contains(&i)
+                || (RAYDIUM_V4_OFF_LP_MINT..RAYDIUM_V4_OFF_LP_MINT + 32).contains(&i);
+            if !in_mint_window {
+                *b = b.wrapping_add(0x5A);
+            }
+        }
+        let (base_coin2, m2, l2) = derive_pool_orientation(&to_account(bytes)).unwrap();
+        assert_eq!((base_coin2, m2, l2), (base_coin, m, l));
+    }
+}
