@@ -81,6 +81,22 @@
 - **`.gitignore`** — `ops-state/` (service state) and `scripts/no_uring`
   (compiled wrapper).
 
+### Security
+
+- **`scripts/no_uring.c` — closed the arbitrary-execution sink reported
+  as Critical by the Aikido SAST scan (CWE-78).** The wrapper no longer
+  takes the program to run from the command line: argv is validated
+  against a single compile-time constant (`solana-test-validator`) and
+  the exec call itself uses only that constant, so no command-line,
+  environment, or file data can select what the wrapper executes.
+  Anything else is refused with exit 2 before the seccomp filter is
+  installed. Usage is unchanged for the documented validator flow, and
+  the BPF filter bytes are untouched.
+- **`ops/src/scenarios.ts` — removed the repo's last shell-spawn sink.**
+  `hasOnPath` now walks `PATH` directly in Node (X_OK + regular-file
+  check) instead of spawning `bash -c "command -v ${binary}"`. Same
+  SC-03 prerequisite semantics; no shell involved.
+
 ## [Unreleased — Phase 9: GraveScanner v2 indexer (Raydium V4 only): pool discovery → activity indexing → reserve/TVL filtering → token metadata → scoring → queue → scanner submission → result tracking]
 
 ### Added

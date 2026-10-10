@@ -23,8 +23,8 @@
 // non-zero when a check fails, so CI/cron can gate on it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, constants, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 import type { HealthRegistry } from "./health.js";
 import type { VaultObserver } from "./vaultObserver.js";
@@ -280,6 +280,21 @@ export class ScenarioRunner {
 }
 
 function hasOnPath(binary: string): boolean {
-  const result = spawnSync("bash", ["-c", `command -v ${binary}`], { encoding: "utf8" });
-  return result.status === 0 && (result.stdout ?? "").trim().length > 0;
+  // Shell-free PATH lookup: walk the directories directly instead of
+  // spawning `bash -c "command -v …"`, so this module keeps no
+  // shell-interpolation process sink for command-injection analysis to
+  // flag. `binary` is only ever joined as a path segment and is never
+  // interpreted by a shell.
+  const dirs = (process.env.PATH ?? "").split(delimiter);
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const candidate = join(dir, binary);
+    try {
+      accessSync(candidate, constants.X_OK);
+      if (statSync(candidate).isFile()) return true;
+    } catch {
+      // Not in this PATH entry — keep scanning.
+    }
+  }
+  return false;
 }

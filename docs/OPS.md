@@ -139,7 +139,11 @@ graveyield-ops scenario sc-03   # local deploy + drill rehearsal
   while the devnet oracle keys remain de-pointed (see the custody note
   in `DEVNET.md`). Prerequisites: Solana CLI 3.0.10 and the io_uring
   seccomp wrapper (`gcc -O2 -o scripts/no_uring scripts/no_uring.c`);
-  the scenario checks both and never auto-installs.
+  the scenario checks both and never auto-installs. The wrapper
+  executes exactly one program — `solana-test-validator`, a fixed
+  compile-time constant; any other argv is refused (exit 2) before the
+  filter is installed, so no command-line data can ever select what it
+  runs.
 
 Reports persist to `ops-state/scenario-<id>-<ts>.json` and exit `0`/`1`,
 so cron/CI can gate on them.
