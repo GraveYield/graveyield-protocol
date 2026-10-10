@@ -10,9 +10,18 @@
 // EPERM, which forces agave's synchronous (plain read/write) file-creator
 // path. No other syscall is affected.
 //
+// Security: the program to run is NOT taken from the command line. The
+// wrapper executes exactly one fixed, compile-time-constant program
+// (kWrappedProgram below); argv is validated against that constant and
+// no argv/env/file data ever flows into the exec call itself. This
+// closes the arbitrary-command-execution sink (CWE-78) reported by
+// static analysis: the wrapper cannot be used to launch anything other
+// than the validator under the filter. Refusals exit 2 before the
+// seccomp filter is installed, leaving no partial process state.
+//
 // Build:   gcc -O2 -o scripts/no_uring scripts/no_uring.c
-// Usage:   scripts/no_uring solana-test-validator --reset -- ...args
-// (scripts/devnet/local_rehearsal.sh wires this automatically.)
+// Usage:   scripts/no_uring solana-test-validator [validator args...]
+//          (solana-test-validator is the only accepted command)
 
 #define _GNU_SOURCE
 #include <errno.h>
@@ -27,6 +36,10 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+// The only program this wrapper may execute. A compile-time constant —
+// deliberately not derived from argv, the environment, or any file.
+static const char kWrappedProgram[] = "solana-test-validator";
 
 static int install_filter(void) {
   // Reject io_uring_setup (425), io_uring_enter (426), io_uring_register (427).
@@ -58,14 +71,26 @@ static int install_filter(void) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "usage: %s <command> [args...]\n", argv[0]);
+    fprintf(stderr, "usage: %s solana-test-validator [validator args...]\n", argv[0]);
+    return 2;
+  }
+  // Allowlist gate: anything that is not the exact wrapped program name
+  // is refused before any process state changes. The constant contains
+  // no '/', so path-shaped input cannot match and the exec target below
+  // can never become attacker-controlled data (CWE-78).
+  if (strcmp(argv[1], kWrappedProgram) != 0) {
+    fprintf(stderr, "no_uring: refusing '%s' - the only wrapped program is %s\n",
+            argv[1], kWrappedProgram);
     return 2;
   }
   if (install_filter() != 0) {
     fprintf(stderr, "no_uring: failed to install the seccomp filter: %s\n", strerror(errno));
     return 1;
   }
-  execvp(argv[1], &argv[1]);
-  fprintf(stderr, "no_uring: exec %s failed: %s\n", argv[1], strerror(errno));
+  // Exec target is the compile-time constant above. &argv[1] forwards
+  // only the validator's own arguments across the exec boundary
+  // (argv[1] equals the constant, so the child's argv[0] is correct).
+  execvp(kWrappedProgram, &argv[1]);
+  fprintf(stderr, "no_uring: exec %s failed: %s\n", kWrappedProgram, strerror(errno));
   return 1;
 }
