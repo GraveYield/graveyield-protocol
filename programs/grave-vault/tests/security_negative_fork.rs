@@ -1065,3 +1065,192 @@ async fn claim_pda_collisions_rejected() {
         "failed claims must not move cumulative accounting"
     );
 }
+
+// =====================================================================
+// Phase 12 adversary additions (fork-level) — economic-security attacks
+// against the LIVE programs in the in-process VM (ADV-FK-* ids,
+// catalogued in docs/ADVERSARY.md). One attack per test, one VM per
+// test, mirroring the suite's house style. These extend the battery in
+// docs/ADVERSARY.md; the skip-if-no-fixtures contract is unchanged.
+// =====================================================================
+
+const ERR_INVALID_SNAPSHOT_DATA: u32 = 7018;
+const ERR_INVALID_SHARE_SPLIT: u32 = 7004;
+const ERR_SHARE_CEILING: u32 = 7005;
+const ERR_CERT_TTL_BELOW_MIN: u32 = 6019;
+
+/// ADV-FK-01 (malicious LP accounts): the salvor's
+/// `lp_total_supply_at_snapshot` is pinned against the LIVE lp_mint
+/// supply — a forged snapshot (supply + 1) inflates the LP claim
+/// bucket and must revert 7018 before any token moves.
+#[tokio::test]
+async fn adv_fk01_forged_snapshot_supply_rejected_7018() {
+    let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
+        return;
+    };
+    let (mut client, boot) = start(boot).await;
+    let env = &boot.env1;
+
+    // The honest instruction, with the snapshot field patched to a
+    // forged supply (data offset: disc 8 + amm 32 + pool 32 + root 32
+    // = 104; supply is the next 8 bytes).
+    let mut ix = salvage_ix(
+        env,
+        &SalvageOpts {
+            lp_amount: env.lp_burn_plan,
+            cpi_authority: None,
+            merkle_root: [7u8; 32],
+        },
+    );
+    let forged = env.lp_supply.checked_add(1).expect("supply+1 fits u64");
+    ix.data[104..112].copy_from_slice(&forged.to_le_bytes());
+
+    let err = send(&mut client, &boot.salvor, &[ix])
+        .await
+        .expect_err("forged snapshot supply must be refused");
+    expect_custom(
+        err,
+        ERR_INVALID_SNAPSHOT_DATA,
+        "forged lp_total_supply_at_snapshot",
+    );
+
+    // Atomicity: the refusal left no pool-scoped PDA behind.
+    for pda in [
+        env.pool_registry,
+        env.salvage_receipt,
+        env.lp_holder_pool_vault,
+    ] {
+        assert!(
+            maybe_acct(&mut client, &pda).await.is_none(),
+            "PDA {pda} must not exist after the 7018 refusal"
+        );
+    }
+}
+
+/// ADV-FK-02 (expired/garbled certificates at the source): GraveScanner
+/// refuses to configure a cert TTL below the 600 s hard floor — a
+/// short-TTL cert would let a salvage slip through a stale eligibility
+/// window. Positive control: exactly the floor is accepted.
+#[tokio::test]
+async fn adv_fk02_scanner_cert_ttl_below_floor_rejected_6019() {
+    let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
+        return;
+    };
+    let payer = boot.salvor.pubkey();
+    let mut boot = boot;
+    let (mut client, _payer, _bh) = boot.pt.take().unwrap().start().await;
+
+    let scanner_initialize = |ttl: i64| {
+        let mut data = anchor_disc("initialize").to_vec();
+        data.extend_from_slice(payer.as_ref()); // authority
+        data.extend_from_slice(&0u64.to_le_bytes()); // inactivity (default)
+        data.extend_from_slice(&0u16.to_le_bytes()); // collapse bps (default)
+        data.extend_from_slice(&0u64.to_le_bytes()); // min TVL (default)
+        data.extend_from_slice(&0u64.to_le_bytes()); // staleness (default)
+        data.extend_from_slice(&0u64.to_le_bytes()); // lp dust (default)
+        data.extend_from_slice(&ttl.to_le_bytes()); // cert TTL
+        Instruction::new_with_bytes(
+            scanner_id(),
+            &data,
+            vec![
+                AccountMeta::new(
+                    Pubkey::find_program_address(&[b"protocol_config"], &scanner_id()).0,
+                    false,
+                ),
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(system_program::ID, false),
+            ],
+        )
+    };
+
+    // One second below the floor is refused...
+    let err = send(&mut client, &boot.salvor, &[scanner_initialize(599)])
+        .await
+        .expect_err("cert TTL 599 must be refused");
+    expect_custom(err, ERR_CERT_TTL_BELOW_MIN, "cert_ttl_seconds 599");
+    // ...and the refusal left no config PDA behind.
+    let scanner_config = Pubkey::find_program_address(&[b"protocol_config"], &scanner_id()).0;
+    assert!(
+        maybe_acct(&mut client, &scanner_config).await.is_none(),
+        "scanner config PDA must not exist after the 6019 refusal"
+    );
+
+    // Positive control: exactly the 600 s floor initializes cleanly.
+    send(&mut client, &boot.salvor, &[scanner_initialize(600)])
+        .await
+        .expect("cert TTL 600 must initialize");
+}
+
+/// ADV-FK-03 (economic config attacks): GraveVault refuses to
+/// initialize with a share split that does not sum to 10_000 bps
+/// (7004) and refuses a protocol share above the 20% Charter ceiling
+/// (7005) — settlement math can never be pointed at a config that
+/// mints or misroutes proceeds.
+#[tokio::test]
+async fn adv_fk03_vault_share_config_violations_rejected_7004_7005() {
+    let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
+        return;
+    };
+    let payer = boot.salvor.pubkey();
+    let mut boot = boot;
+    let (mut client, _payer, _bh) = boot.pt.take().unwrap().start().await;
+    let config = protocol_config_pda();
+
+    let vault_initialize = |lp: u16, salvor: u16, protocol: u16| {
+        let mut data = anchor_disc("initialize").to_vec();
+        data.extend_from_slice(payer.as_ref());
+        data.extend_from_slice(&lp.to_le_bytes());
+        data.extend_from_slice(&salvor.to_le_bytes());
+        data.extend_from_slice(&protocol.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes()); // fee ceiling (default)
+        data.extend_from_slice(&0u16.to_le_bytes()); // slippage (default)
+        data.extend_from_slice(&u64::MAX.to_le_bytes()); // dust (skip swap leg)
+        data.extend_from_slice(&0i64.to_le_bytes()); // timelock (default)
+        Instruction::new_with_bytes(
+            vault_id(),
+            &data,
+            vec![
+                AccountMeta::new(config, false),
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(system_program::ID, false),
+            ],
+        )
+    };
+
+    // Sum ≠ 10_000 → 7004, config PDA still unborn.
+    let err = send(
+        &mut client,
+        &boot.salvor,
+        &[vault_initialize(5_000, 3_000, 2_001)],
+    )
+    .await
+    .expect_err("share sum 10_001 must be refused");
+    expect_custom(err, ERR_INVALID_SHARE_SPLIT, "share sum violation");
+    assert!(
+        maybe_acct(&mut client, &config).await.is_none(),
+        "vault config PDA must not exist after the 7004 refusal"
+    );
+
+    // Protocol share above the Charter ceiling (2500 > 2000) → 7005.
+    let err = send(
+        &mut client,
+        &boot.salvor,
+        &[vault_initialize(4_000, 3_500, 2_500)],
+    )
+    .await
+    .expect_err("protocol share 2500 must be refused");
+    expect_custom(err, ERR_SHARE_CEILING, "protocol share above ceiling");
+    assert!(
+        maybe_acct(&mut client, &config).await.is_none(),
+        "vault config PDA must not exist after the 7005 refusal"
+    );
+
+    // Positive control: the 40/40/20 split initializes cleanly.
+    send(
+        &mut client,
+        &boot.salvor,
+        &[vault_initialize(4_000, 4_000, 2_000)],
+    )
+    .await
+    .expect("40/40/20 must initialize");
+}

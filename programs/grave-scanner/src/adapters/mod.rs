@@ -113,3 +113,105 @@ pub fn extract_pool_data(
         err!(GraveScannerError::UnsupportedAmm)
     }
 }
+
+// =====================================================================
+// Phase 12 adversary tests (host-only) — malicious CPI / AMM-dispatch
+// attacks (ADV-CPI-* in docs/ADVERSARY.md): the dispatch must refuse
+// every account shape that is not exactly the expected Raydium V4 pool.
+// =====================================================================
+#[cfg(test)]
+mod adversary_tests {
+    use super::*;
+
+    /// Test-only `'static` AccountInfo (Box::leak plumbing, mirroring the
+    /// locker tests' style).
+    fn account_at(key: Pubkey, owner: &Pubkey, data: Vec<u8>) -> AccountInfo<'static> {
+        let data = Box::leak(data.into_boxed_slice());
+        let key = Box::leak(Box::new(key));
+        let owner = Box::leak(Box::new(*owner));
+        let lamports = Box::leak(Box::new(1_000_000u64));
+        AccountInfo {
+            key,
+            lamports: std::rc::Rc::new(std::cell::RefCell::new(lamports as &mut u64)),
+            data: std::rc::Rc::new(std::cell::RefCell::new(&mut data[..])),
+            owner,
+            rent_epoch: 0,
+            is_signer: false,
+            is_writable: false,
+            executable: false,
+        }
+    }
+
+    /// ADV-CPI-01: the submitted pool account is not the pool named in
+    /// the instruction params — the dispatch must refuse before parsing
+    /// anything (binding, not content, is the first gate).
+    #[test]
+    fn adv_cpi01_pool_key_mismatch_refused() {
+        let pool = account_at(
+            Pubkey::new_unique(),
+            &raydium_v4::PROGRAM_ID,
+            vec![0u8; 752],
+        );
+        let other = Pubkey::new_unique();
+        let err = extract_pool_data(&pool, &other, &[]).unwrap_err();
+        assert_eq!(err, GraveScannerError::UnsupportedAmm.into());
+    }
+
+    /// ADV-CPI-02: a pool account owned by an UNKNOWN program (attacker
+    /// PDA, random program) is refused — no parse, no partial reads.
+    #[test]
+    fn adv_cpi02_unknown_amm_owner_refused() {
+        let attacker_program = Pubkey::new_unique();
+        let pool = account_at(Pubkey::new_unique(), &attacker_program, vec![0u8; 752]);
+        let err = extract_pool_data(&pool, pool.key, &[]).unwrap_err();
+        assert_eq!(err, GraveScannerError::UnsupportedAmm.into());
+    }
+
+    /// ADV-CPI-03: every registered-but-unimplemented AMM stub reverts
+    /// the dedicated honest-stub code (6007) — an attacker cannot get
+    /// Raydium V4 parsing semantics applied to another AMM's bytes.
+    #[test]
+    fn adv_cpi03_registered_stubs_refuse_with_6007() {
+        let stubs = [
+            raydium_clmm::PROGRAM_ID,
+            orca_whirlpool::PROGRAM_ID,
+            pumpswap::PROGRAM_ID,
+            meteora::PROGRAM_ID,
+        ];
+        for owner in stubs {
+            let pool = account_at(Pubkey::new_unique(), &owner, vec![0u8; 300]);
+            let err = extract_pool_data(&pool, pool.key, &[]).unwrap_err();
+            assert_eq!(
+                err,
+                GraveScannerError::AmmAdapterUnimplemented.into(),
+                "owner {owner} must revert 6007"
+            );
+        }
+    }
+
+    /// ADV-CPI-04: the Raydium V4 adapter itself refuses degenerate
+    /// current-price inputs — zero base reserves can never define a
+    /// price (fail-closed, 6009), and the u128 scaling of a maximal
+    /// quote reserve stays exact.
+    #[test]
+    fn adv_cpi04_price_math_fails_closed_on_zero_base() {
+        let data = PoolData {
+            base_reserve: 0,
+            quote_reserve: u64::MAX,
+            lp_supply: 1,
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            lp_mint: Pubkey::default(),
+        };
+        let err = data.current_price_q64x64().unwrap_err();
+        assert_eq!(err, GraveScannerError::PoolDataParseError.into());
+
+        let data = PoolData {
+            base_reserve: 1,
+            quote_reserve: u64::MAX,
+            ..data
+        };
+        let price = data.current_price_q64x64().unwrap();
+        assert_eq!(price, (u64::MAX as u128) << 64);
+    }
+}

@@ -1,5 +1,62 @@
 # Changelog
 
+## [Unreleased — Phase 12 (security + economic testnet): the adversarial battery — 15 threat classes attacked across four layers, refuses-first proofs, findings ledger for the audit]
+
+> Roadmap Phase 12, verbatim goal: "Prove that GraveYield refuses to
+> act when its assumptions aren't satisfied. That's more important than
+> proving that it works when everything is normal." Catalogue:
+> [`docs/ADVERSARY.md`](docs/ADVERSARY.md). Next: Phase 13 (external
+> audit) — this battery is its evidence base.
+
+### Added
+
+- **`@graveyield/adversary` v0.1.0 — the TS battery.** A new workspace
+  package running 39 offline attack cases against the REAL
+  SDK/indexer/ops logic (fakes only at the RPC boundary). A
+  self-auditing manifest pins the registry: all fifteen roadmap threat
+  classes stay covered, ids stay unique, refused cases must name the
+  expected refusal, and refusals remain the battery's center of
+  gravity. Verdict discipline: `refused` / `pinned` / `finding`.
+- **Rust host battery — 20 new attack tests in `grave-scanner`**
+  (`criteria::adversary_tests`, `adapters::adversary_tests`,
+  `adapters::raydium_v4::adversary_tests`): clock regressions (6005),
+  exact inactivity/dust/TVL/collapse/epoch boundaries, zero launch
+  price + criterion ordering, no-upper-TVL pin, single-locked-lamport
+  refusal, unknown-AMM + stub-adapter dispatch (6003/6007), and the
+  Raydium parser's malicious-account matrix (missing accounts, foreign
+  vault/mint owners, mint cross-check, wrong size — all 6009).
+- **Rust host battery — 3 new attack tests in `grave-vault`**
+  (`salvage_pool::adversary_tests`): the split helper fails closed on
+  invalid sums (7009), one-lamport settlements conserve exactly, and
+  pool orientation depends on nothing but the mint bytes.
+- **Fork battery — 3 new tests in `security_negative_fork.rs`**
+  (ADV-FK-01/02/03): a forged `lp_total_supply_at_snapshot` reverts
+  7018 atomically with no PDA residue; scanner initialize refuses a
+  cert TTL below the 600 s floor (6019) with a positive control at the
+  boundary; vault initialize refuses share sums ≠ 10_000 (7004) and
+  protocol shares above the Charter ceiling (7005). Skip-guarded per
+  the fork contract; compile-validated in the Phase 12 session (the
+  SBF toolchain and mainnet fixtures were absent post-rollback; run
+  end-to-end via `scripts/build_fork_harness.sh`).
+
+### Changed
+
+- **`pnpm-workspace.yaml`** — `adversary` added as the fifth workspace
+  package.
+- **Root `README.md` / `docs/README.md`** — layout and index gain the
+  adversary package and the battery catalogue row.
+
+### Security
+
+- **The battery closes documented test gaps found while attacking:**
+  6019 (cert TTL floor), 7018 (snapshot pinning), 7004/7005 (share
+  config), 6003/6007 (AMM dispatch), the 6009 parser family, and the
+  clock-regression gate (6005) had zero prior coverage. Findings that
+  are behavior, not bugs, are pinned and ledgered in
+  `docs/ADVERSARY.md` §4 (F1 fee-plan units, F2 no upper TVL bound,
+  F3 competing-Salvor pre-check, F5 lease fencing, F8 trailing bytes,
+  F9 unknown error codes) for the Phase 13 audit.
+
 ## [Unreleased — Phase 11 (devnet launch), infrastructure & observability scope: indexer as a service, SDK publish-ready, Merkle service, vault receipts/claims/failed-tx indexing, alerting, controlled salvage scenarios]
 
 > The Protocol scope of Phase 11 (both programs deployed to devnet,
