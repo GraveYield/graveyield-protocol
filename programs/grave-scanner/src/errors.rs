@@ -40,6 +40,11 @@ pub enum GraveScannerError {
     InvalidClock = 5,
 
     /// On-chain code 6006. ProtocolConfig update violates a locked invariant.
+    /// Call sites: `update_protocol_config` (price-collapse bps upper bound,
+    /// staleness-window floor) and `initialize` (staleness-window floor on
+    /// the explicit non-zero path); `emergency_pause` reverts with it when
+    /// the requested pause state equals the current one (no-op toggle
+    /// refusal — a second identical emission would pollute the audit trail).
     #[msg("Protocol config update violates a locked invariant.")]
     InvariantViolation = 6,
 

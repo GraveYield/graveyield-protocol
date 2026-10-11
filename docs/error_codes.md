@@ -37,7 +37,7 @@ future v4.x additions to the pre-anchor error space.
 | 6003 | `UnsupportedAmm` | AMM program mismatch or unsupported pool layout. |
 | 6004 | `MathOverflow` | Arithmetic overflow during eligibility computation. |
 | 6005 | `InvalidClock` | Clock sysvar unavailable or returned invalid data. |
-| 6006 | `InvariantViolation` | `ProtocolConfig` update violates a locked invariant. |
+| 6006 | `InvariantViolation` | `ProtocolConfig` update violates a locked invariant (collapse-bps ceiling, staleness-window floor). `emergency_pause` also reverts with it on a no-op toggle (requested state equals current state). |
 | 6007 | `AmmAdapterUnimplemented` | AMM adapter registered but parser is a pre-mainnet stub. Live list in [`PRE_MAINNET_CHECKLIST.md`](PRE_MAINNET_CHECKLIST.md). |
 | 6008 | `LockerAdapterUnimplemented` | Locker adapter registered but not implemented. Retired as a live call site by the Phase 1.1 UNCX Raydium V4 adapter (LOCKER-001); retained as a stable code-space slot. |
 | 6009 | `PoolDataParseError` | Pool account data did not match the expected layout. |

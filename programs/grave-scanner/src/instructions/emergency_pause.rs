@@ -7,6 +7,11 @@
 // updates remain callable — pause is an evaluation kill-switch, not a
 // full-program halt.
 //
+// Refuses-first: a toggle that would not change the flag reverts with
+// `InvariantViolation` (6006) instead of performing a redundant write and a
+// second `ProtocolPauseChanged` emission that a log reader could mistake for
+// an intervening un-pause.
+//
 // Unlike `update_protocol_config` (which the multisig schedules behind its own
 // 72h timelock), emergency pause is intentionally immediate so the multisig
 // can stop new evaluations the moment an exploit or AMM-side incident is
@@ -33,6 +38,16 @@ pub struct EmergencyPause<'info> {
 
 pub fn handler(ctx: Context<EmergencyPause>, paused: bool) -> Result<()> {
     let cfg = &mut ctx.accounts.protocol_config;
+
+    // Refuses-first: the instruction's assumption is that the toggle
+    // actually transitions the flag. A call whose requested state equals
+    // the current state would perform a no-op write and emit a second
+    // `ProtocolPauseChanged` indistinguishable from a real transition —
+    // polluting the pause audit trail (same discipline as
+    // `invalidate_anchor`'s re-invalidation refusal). Reverts before any
+    // state change or emission.
+    require!(cfg.paused != paused, GraveScannerError::InvariantViolation);
+
     cfg.paused = paused;
 
     emit!(ProtocolPauseChanged {

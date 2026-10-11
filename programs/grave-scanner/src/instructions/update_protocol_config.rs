@@ -5,7 +5,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::MIN_CERT_TTL_SECONDS;
+use crate::constants::{MIN_ANCHOR_STALENESS_SECONDS, MIN_CERT_TTL_SECONDS};
 use crate::errors::GraveScannerError;
 use crate::state::ProtocolConfig;
 
@@ -62,6 +62,15 @@ pub fn handler(
         cfg.min_tvl_lamports = v;
     }
     if let Some(v) = params.anchor_staleness_seconds {
+        // Hardcoded floor: governance cannot shrink the sweep window below
+        // MIN_ANCHOR_STALENESS_SECONDS (3 epochs / 6 days). A window that
+        // short would let the permissionless `sweep_stale_anchor` close
+        // anchors before the Phase 2 confirmation gap can elapse. Raising
+        // the floor requires a program upgrade, not a config update.
+        require!(
+            v >= MIN_ANCHOR_STALENESS_SECONDS,
+            GraveScannerError::InvariantViolation
+        );
         cfg.anchor_staleness_seconds = v;
     }
     if let Some(v) = params.lp_burn_dust_threshold {

@@ -2,7 +2,11 @@
 
 use anchor_lang::prelude::*;
 
-use crate::constants::*;
+use crate::constants::{
+    DEFAULT_ANCHOR_STALENESS_SECONDS, DEFAULT_CERT_TTL_SECONDS, DEFAULT_INACTIVITY_SECONDS,
+    DEFAULT_LP_BURN_DUST_THRESHOLD, DEFAULT_MIN_TVL_LAMPORTS, DEFAULT_PRICE_COLLAPSE_BPS,
+    MIN_ANCHOR_STALENESS_SECONDS, MIN_CERT_TTL_SECONDS, PROTOCOL_CONFIG_SEED,
+};
 use crate::errors::GraveScannerError;
 use crate::state::ProtocolConfig;
 
@@ -71,6 +75,14 @@ pub fn handler(ctx: Context<Initialize>, params: InitializeParams) -> Result<()>
     cfg.anchor_staleness_seconds = if params.anchor_staleness_seconds == 0 {
         DEFAULT_ANCHOR_STALENESS_SECONDS
     } else {
+        // Same hardcoded floor as `update_protocol_config`: an explicit
+        // staleness window below MIN_ANCHOR_STALENESS_SECONDS (3 epochs /
+        // 6 days) would arm the permissionless sweep inside the Phase 2
+        // confirmation gap. 0 keeps its "use the default" meaning.
+        require!(
+            params.anchor_staleness_seconds >= MIN_ANCHOR_STALENESS_SECONDS,
+            GraveScannerError::InvariantViolation
+        );
         params.anchor_staleness_seconds
     };
     cfg.lp_burn_dust_threshold = if params.lp_burn_dust_threshold == 0 {

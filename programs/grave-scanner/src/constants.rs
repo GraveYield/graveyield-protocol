@@ -56,6 +56,26 @@ pub const DEFAULT_CERT_TTL_SECONDS: i64 = 60 * 60;
 /// floor requires a program upgrade, not a config update.
 pub const MIN_CERT_TTL_SECONDS: i64 = 600;
 
+/// Hardcoded floor on `anchor_staleness_seconds`. Governance cannot
+/// configure a staleness window short enough to let `sweep_stale_anchor`
+/// close an anchor before the Phase 2 confirmation gap has fully elapsed.
+///
+/// Rationale: the sweep window and the Phase 2 gate are two hands on the
+/// same clock. Phase 2 opens at `first_eligible_epoch +
+/// MIN_EPOCH_CONFIRMATION`; the earliest possible sweep fires at
+/// `first_eligible_epoch + ceil(window / epoch) + 1`. Sizing the floor at
+/// `MIN_EPOCH_CONFIRMATION + 1` epochs guarantees Phase 2 always has at
+/// least one full epoch of open window before any sweep can close the
+/// anchor underneath it. A zero- or one-epoch window would otherwise let
+/// a permissionless sweep destroy anchors mid-confirmation — a pure
+/// liveness-griefing primitive. Enforced at both config write paths
+/// (`initialize`, `update_protocol_config`) and clamped defensively at
+/// the read path (`sweep_stale_anchor`), so a config written before this
+/// floor existed can never trigger a premature sweep either. Raising the
+/// floor requires a program upgrade, not a config update.
+pub const MIN_ANCHOR_STALENESS_SECONDS: u64 =
+    (MIN_EPOCH_CONFIRMATION + 1) * APPROX_EPOCH_DURATION_SECONDS;
+
 /// `EligibilityCert` TTL constant retained for backwards-compatible imports
 /// (e.g., older test fixtures). Prefer `ProtocolConfig.cert_ttl_seconds`
 /// at runtime; this alias mirrors `DEFAULT_CERT_TTL_SECONDS`.
@@ -74,6 +94,27 @@ pub const ELIGIBILITY_CERT_SEED: &[u8] = b"eligibility_cert";
 pub const LAUNCH_PRICE_SEED: &[u8] = b"launch_price";
 
 /// Approximate Solana epoch duration in seconds. Used only for the staleness
-/// arithmetic in `sweep_stale_anchor`. The on-chain check is epoch-based
-/// (not wall-clock based) so this is informational.
+/// arithmetic in `sweep_stale_anchor` and the `MIN_ANCHOR_STALENESS_SECONDS`
+/// floor. The on-chain check is epoch-based (not wall-clock based) so this
+/// is informational.
 pub const APPROX_EPOCH_DURATION_SECONDS: u64 = 2 * 24 * 60 * 60;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Locks the staleness floor's relationship to the Phase 2 window:
+    /// ceil(floor / epoch) must equal `MIN_EPOCH_CONFIRMATION + 1`, so the
+    /// earliest possible sweep (`first_eligible_epoch + floor_epochs + 1`)
+    /// always leaves Phase 2 — gated at `first_eligible_epoch +
+    /// MIN_EPOCH_CONFIRMATION` — at least one full epoch of open window.
+    /// A future edit that moves either constant silently breaks the
+    /// certify-then-sweep ordering; this test is the tripwire.
+    #[test]
+    fn staleness_floor_keeps_phase2_window_open() {
+        let floor_epochs = MIN_ANCHOR_STALENESS_SECONDS.div_ceil(APPROX_EPOCH_DURATION_SECONDS);
+        assert_eq!(floor_epochs, MIN_EPOCH_CONFIRMATION + 1);
+        // 3 epochs at the 2-day approximation = 6 days.
+        assert_eq!(MIN_ANCHOR_STALENESS_SECONDS, 518_400);
+    }
+}

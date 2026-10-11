@@ -9,22 +9,21 @@
 // duplicates across modules, but that ambiguity is harmless: lib.rs only
 // ever invokes `handler` via the fully-qualified path
 // `instructions::<module>::handler(...)`, never through the glob.
+//
+// That ambiguity is intentional and accepted, so it is suppressed exactly
+// once, module-wide, by the inner attribute below — instead of repeating
+// `#[allow(ambiguous_glob_reexports)]` on all eight `pub use` items. If a
+// future Anchor version removes the duplicate-symbol expectation, delete
+// the attribute AND collapse the globs into explicit re-exports.
+#![allow(ambiguous_glob_reexports)]
 
-#[allow(ambiguous_glob_reexports)]
 pub use emergency_pause::*;
-#[allow(ambiguous_glob_reexports)]
 pub use evaluate_pool_phase1::*;
-#[allow(ambiguous_glob_reexports)]
 pub use evaluate_pool_phase2::*;
-#[allow(ambiguous_glob_reexports)]
 pub use initialize::*;
-#[allow(ambiguous_glob_reexports)]
 pub use invalidate_anchor::*;
-#[allow(ambiguous_glob_reexports)]
 pub use record_launch_price::*;
-#[allow(ambiguous_glob_reexports)]
 pub use sweep_stale_anchor::*;
-#[allow(ambiguous_glob_reexports)]
 pub use update_protocol_config::*;
 
 pub mod emergency_pause;

@@ -159,10 +159,10 @@ proceeds.
 | `record_launch_price` | Stores the first-swap launch-price baseline for a pool. | Requires the 168-byte launch-price Ed25519 attestation; init-once per pool. |
 | `evaluate_pool_phase_1` | Evaluates C1–C6 and creates EligibilityAnchor with `first_eligible_epoch` and the bitmap. | Requires the 112-byte C1 attestation and supported Raydium V4 account evidence. |
 | `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap and creates or reissues EligibilityCert. | Requires a fresh C1 attestation; bitmap must match the anchor; certificate TTL defaults to one hour, with a 10-minute minimum. |
-| `invalidate_anchor` | Invalidates an anchor before Phase 2. | Authority-gated; an anchor invalidated this way cannot lead to a certificate. |
-| `sweep_stale_anchor` | Closes a stale, uncertified anchor after its configured staleness window. | Permissionless; rent returns to the original anchor writer. Does not confer salvage rights. |
+| `invalidate_anchor` | Invalidates an anchor so Phase 2 cannot certify it. | Authority-gated; pre-certification control — an already-issued certificate is unaffected (its own TTL bounds it). |
+| `sweep_stale_anchor` | Closes a stale anchor after its configured staleness window (any anchor — certified pools included; a cert's 1-hour default TTL has long expired by sweep time). | Permissionless; rent returns to the original anchor writer. Does not confer salvage rights. |
 | `update_protocol_config` | Updates bounded thresholds and oracle/authority settings. | Authority-gated. The 72-hour parameter-change delay is enforced by the intended multisig scheduling process, not by an on-chain timelock implementation. |
-| `emergency_pause` | Sets or clears the Scanner pause flag. | Authority-gated; gates Phase 1 and Phase 2. Cleanup and governance paths remain available. |
+| `emergency_pause` | Sets or clears the Scanner pause flag; a no-op toggle reverts (6006). | Authority-gated; gates Phase 1 and Phase 2. Cleanup and governance paths remain available. |
 
 ### 3.3 Scanner state
 

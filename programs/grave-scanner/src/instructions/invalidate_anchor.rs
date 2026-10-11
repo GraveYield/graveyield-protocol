@@ -5,12 +5,19 @@
 // salvage authority. Used when out-of-band signal indicates the pool is no
 // longer derelict (e.g., upstream team reactivated it).
 //
-// Per v4.0.1 spec patch: this remains multisig-only; auto-invalidation was
-// rejected as redundant with Phase 2's natural re-verification gate.
+// Scope note: invalidation is a PRE-certification control. An
+// EligibilityCert already issued from this anchor is NOT affected — the
+// cert's own TTL (governance-configurable, floored at 10 minutes, default
+// 1 hour) bounds its life, and `salvage_pool` verifies freshness against
+// the cert, not the anchor. Halting a live salvage window immediately is
+// GraveVault's `emergency_pause`, not this instruction.
 //
 // Refuses-first: invalidating an already-invalidated anchor reverts with
 // `AnchorInvalidated` (6017) instead of silently re-emitting the event, so
 // the audit trail records exactly one invalidation per anchor.
+//
+// Per v4.0.1 spec patch: this remains multisig-only; auto-invalidation was
+// rejected as redundant with Phase 2's natural re-verification gate.
 
 use anchor_lang::prelude::*;
 

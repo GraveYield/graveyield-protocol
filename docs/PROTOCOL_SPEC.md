@@ -173,10 +173,10 @@ revision is out of scope.
 | `record_launch_price` | Creates the init-once `LaunchPrice` PDA (Criterion 2 baseline) — only from an oracle-signed Ed25519 attestation (D9). |
 | `evaluate_pool_phase_1` | Evaluates all six criteria; writes `EligibilityAnchor` stamped with `first_eligible_epoch`. |
 | `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap; requires bitmap equality with the anchor; issues the `EligibilityCert` — or reissues it in place once expired (`CertStillValid` on a live cert; D10). |
-| `invalidate_anchor` | Multisig-only: marks an anchor `invalidated` (censors a wrong Phase 1 pass). |
-| `sweep_stale_anchor` | Permissionless rent reclaim for uncertified anchors older than `anchor_staleness_seconds` (default 14 days). |
-| `update_protocol_config` | Multisig-only threshold updates, bounded (cert TTL floor 600s; collapse bps ≤ 10_000). |
-| `emergency_pause` | Multisig-only pause flag; gates `evaluate_pool_*` only. |
+| `invalidate_anchor` | Multisig-only: marks an anchor `invalidated` (censors a wrong Phase 1 pass). Pre-certification control — an already-issued cert is unaffected (its own TTL bounds it). |
+| `sweep_stale_anchor` | Permissionless rent reclaim for any anchor older than `anchor_staleness_seconds` (default 14 days, floored at 3 epochs / 6 days). By then any cert minted from the anchor has expired (TTL default 1h); rent returns to the original writer. |
+| `update_protocol_config` | Multisig-only threshold updates, bounded (cert TTL floor 600s; collapse bps ≤ 10_000; staleness window floor 6 days). |
+| `emergency_pause` | Multisig-only pause flag; gates `evaluate_pool_*` only. A no-op toggle reverts (6006). |
 
 **GraveVault** (`programs/grave-vault`) — settlement.
 

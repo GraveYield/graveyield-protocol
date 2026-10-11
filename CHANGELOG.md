@@ -67,9 +67,51 @@
   reverts with the existing `AnchorInvalidated` code (6017) instead of
   silently succeeding. No new error codes; the 6000–6034 table, the SDK
   mirror, and the adversary manifest are unchanged.
+- **`emergency_pause` no-op toggles now revert (refuses-first).**
+  Calling `emergency_pause` with the state the flag already holds
+  performed a redundant write and emitted a second
+  `ProtocolPauseChanged` indistinguishable from a real transition — a
+  log reader could mistake it for an intervening un-pause. The handler
+  now reverts with `InvariantViolation` (6006) before any state change
+  or emission, matching the `invalidate_anchor` discipline above. Same
+  failed-checks report as the re-invalidation fix; this closes the
+  finding on `emergency_pause.rs`.
+- **`instructions/mod.rs` ambiguity suppression collapsed to one
+  module-wide attribute.** The eight repeated
+  `#[allow(ambiguous_glob_reexports)]` items became a single inner
+  `#![allow(ambiguous_glob_reexports)]` with an expanded rationale
+  comment. No semantic change: the glob re-exports stay (Anchor 0.32.x
+  requires them), and lib.rs still invokes handlers only via
+  fully-qualified paths.
+- **Docs truth-up for `sweep_stale_anchor` and `invalidate_anchor`.**
+  Three doc surfaces described the sweep as closing "uncertified"
+  anchors and invalidation as purely pre-Phase 2. The code sweeps ANY
+  anchor past its window (safe by construction: a cert's TTL is orders
+  of magnitude shorter than the sweep window) and invalidation does not
+  affect an already-issued cert. `PROTOCOL_SPEC.md`,
+  `architecture/eligibility-anchors.md`, and
+  `technical-documentation.md` now state the actual contract;
+  `error_codes.md`'s 6006 row lists the new call sites.
 
 ### Security
 
+- **The anchor sweep window is now floor-locked against the Phase 2
+  confirmation gap (`MIN_ANCHOR_STALENESS_SECONDS` = 3 epochs / 6
+  days).** `anchor_staleness_seconds` previously accepted any `u64` on
+  both config write paths — including 0. A zero- or one-epoch window
+  would have let the permissionless `sweep_stale_anchor` close anchors
+  before the Phase 2 gate (first_eligible_epoch + 2 epochs) could even
+  open: a pure liveness-griefing primitive on the certify pipeline
+  (anchor destroyed mid-confirmation, Phase 1 re-run required). The
+  floor is enforced at both write paths (`initialize`'s explicit
+  non-zero path and `update_protocol_config`, reverting 6006) and
+  clamped defensively at the read path (`sweep_stale_anchor` widens
+  any below-floor window to the floor), so a pre-upgrade config can
+  never arm a premature sweep either. A host test in `constants.rs`
+  pins ceil(floor / epoch) == MIN_EPOCH_CONFIRMATION + 1 as the
+  certify-then-sweep ordering tripwire. No new error codes; the
+  6000–6034 table, the SDK mirror, and the adversary manifest are
+  unchanged.
 - **The battery closes documented test gaps found while attacking:**
   6019 (cert TTL floor), 7018 (snapshot pinning), 7004/7005 (share
   config), 6003/6007 (AMM dispatch), the 6009 parser family, and the

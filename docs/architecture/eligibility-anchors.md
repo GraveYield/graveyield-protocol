@@ -100,8 +100,8 @@ exist:
 
 | Path | Access | Effect |
 |------|--------|--------|
-| `sweep_stale_anchor` | Permissionless, after `anchor_staleness_seconds` (default 14 days) | Closes an anchor that never reached Phase 2; rent returns to the original writer. Error `AnchorNotStale` (6018) fires early. Confers no salvage rights. |
-| `invalidate_anchor` | Authority, any time before Phase 2 | Marks the anchor invalid; certification via this anchor becomes impossible (`AnchorInvalidated`, 6017). |
+| `sweep_stale_anchor` | Permissionless, after `anchor_staleness_seconds` (default 14 days, floored at 3 epochs / 6 days) | Closes any anchor whose window elapsed — certified pools included, safe because a cert's TTL (default 1h) is far shorter than the sweep window; rent returns to the original writer. Error `AnchorNotStale` (6018) fires early. Confers no salvage rights. |
+| `invalidate_anchor` | Authority, any time (pre-certification control) | Marks the anchor invalid; Phase 2 certification via this anchor becomes impossible (`AnchorInvalidated`, 6017). Does not affect an already-issued cert — the cert's own TTL bounds it; halting live salvage is GraveVault's `emergency_pause`. |
 
 Neither path touches a pool's actual liquidity. Housekeeping is purely a
 state-hygiene concern, which is why it can be permissionless.
