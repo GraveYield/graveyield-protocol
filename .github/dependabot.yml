@@ -8,15 +8,32 @@ updates:
     labels: ["dependencies", "rust"]
     # The on-chain stack is a pinned platform, not a rolling target: the
     # programs build against anchor-lang 0.32.1 (whose solana-* 2.x
-    # transitive tree the whole SDK/indexer/ops surface mirrors), and CI
-    # pins SOLANA_VERSION 3.0.10 / ANCHOR_VERSION 0.32.1. Anchor 1.x is a
-    # ground-up rewrite and agave solana-* 3.x+ breaks anchor-spl 0.32.x,
-    # so those majors cannot be adopted piecemeal by a Dependabot bump —
-    # each one lands as a red CI run until the planned Phase 13+ migration.
-    # Ignore them here and migrate deliberately instead. Patch/minor bumps
-    # within 0.32.x and solana 2.x keep flowing normally.
+    # transitive tree the whole SDK/indexer/ops surface mirrors — crate,
+    # anchor-cli, Anchor.toml, @coral-xyz/anchor and the docs all cite the
+    # same number), and CI pins SOLANA_VERSION 3.0.10 / ANCHOR_VERSION
+    # 0.32.1. Anchor 1.x is a ground-up rewrite and agave solana-* 3.x+
+    # breaks anchor-spl 0.32.x, so those majors cannot be adopted
+    # piecemeal by a Dependabot bump — each one lands as a red CI run
+    # until the planned Phase 13+ migration. Ignore them here and migrate
+    # deliberately instead. Solana 2.x patch/minor bumps keep flowing.
+    #
+    # anchor-* ignores are NOT limited to majors: even a 0.32.x minor
+    # breaks the platform's lockstep. Dependabot re-locks one crate at a
+    # time — the anchor-lang 0.32.2 bump (PR #45) left anchor-spl at
+    # 0.32.1 compiled against a 0.32.2 macro layer, and the crate drifted
+    # from anchor-cli, Anchor.toml and the TS client. Ignore the whole
+    # family until the deliberate migration.
+    #
+    # sha2 is pinned for the same class of reason: the on-chain hasher's
+    # `sha2` feature resolves the 0.10 line, and the snapshotter's direct
+    # dependency must reuse that SAME lockfile instance (single crypto
+    # core in the tree; byte-identity is test-pinned against
+    # `grave_vault::merkle`). Dependabot files a 0.x minor (0.10 -> 0.11)
+    # as a semver-major, so the major rule covers it; 0.10.x patches keep
+    # flowing.
     ignore:
       - dependency-name: "anchor-*"
+      - dependency-name: "sha2"
         update-types: ["version-update:semver-major"]
       - dependency-name: "solana-*"
         update-types: ["version-update:semver-major"]

@@ -92,6 +92,32 @@
   `architecture/eligibility-anchors.md`, and
   `technical-documentation.md` now state the actual contract;
   `error_codes.md`'s 6006 row lists the new call sites.
+- **`sha2` walked back to the 0.10 line — the lockfile carries one copy
+  of the crypto core again.** The Dependabot bundle merged at `3f538cd`
+  moved the snapshotter's direct `sha2` dependency from 0.10.9 to 0.11.0
+  (PR #44). CI stayed green — clippy compiles both lines fine and the
+  byte-identity tests still pass — but the tree silently split into two
+  sha2 instances (0.10.9 for the on-chain hasher's `sha2` feature,
+  0.11.0 for the snapshotter), breaking the single-instance invariant
+  documented in `snapshotter/Cargo.toml` and doubling the supply-chain
+  surface of the one crate the Merkle root's determinism rests on. The
+  manifest is back at `"0.10"` (0.11.0 and its `const-oid` tail are
+  pruned from the lock), and `.github/dependabot.yml` now ignores sha2
+  majors — Dependabot files a 0.x minor (0.10 → 0.11) as
+  `semver-major`, which is exactly how this one slipped past the
+  anchor/solana/agave guard added in the same cycle.
+- **`anchor-lang` walked back to the pinned 0.32.1 — the platform is in
+  lockstep again.** The same bundle (PR #45) re-locked `anchor-lang` to
+  0.32.2 while everything else that names the Anchor platform —
+  `anchor-cli` in CI, `anchor_version` in `Anchor.toml`,
+  `@coral-xyz/anchor` in the TS clients, and the README/CONTRIBUTING/
+  docs tables — stayed on 0.32.1, and `anchor-spl` was left at 0.32.1
+  compiled against a 0.32.2 macro layer. Green CI here only proves the
+  mix compiles; it does not prove the macro/codegen/IDL surface matches
+  what the pinned toolchain emits. The lock is back at 0.32.1 across
+  the whole family, and the `anchor-*` ignore rule now covers every
+  update (not just majors) so 0.32.x minors stop re-opening the skew
+  before the deliberate Phase 13+ migration.
 
 ### Security
 
