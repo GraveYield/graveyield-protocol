@@ -29,7 +29,7 @@ solana-account-decoder-client-types = "2.3"
 # path — the equality is pinned by tests against
 # `grave_vault::merkle::{compute_leaf, verify_proof}`. Version already
 # resolved in Cargo.lock (the on-chain hasher's `sha2` feature uses it).
-sha2 = "0.10"
+sha2 = "0.11"
 # Sealed snapshot artifact persistence (Phase 5.2): deterministic JSON
 # with hex-encoded hashes and canonical base58 pubkeys. Both crates are
 # already resolved in Cargo.lock via the workspace graph — no new
