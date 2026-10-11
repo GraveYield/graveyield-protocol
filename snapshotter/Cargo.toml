@@ -29,7 +29,12 @@ solana-account-decoder-client-types = "2.3"
 # path — the equality is pinned by tests against
 # `grave_vault::merkle::{compute_leaf, verify_proof}`. Version already
 # resolved in Cargo.lock (the on-chain hasher's `sha2` feature uses it).
-sha2 = "0.11"
+# Pinned to the 0.10 line deliberately: that is the version the on-chain
+# hasher's `sha2` feature resolves, so this declaration reuses the SAME
+# lockfile instance instead of compiling a second copy of the crypto
+# core into the snapshotter (the 0.11 bump would have split the tree —
+# Dependabot files 0.x minors as majors; ignored in .github/dependabot.yml).
+sha2 = "0.10"
 # Sealed snapshot artifact persistence (Phase 5.2): deterministic JSON
 # with hex-encoded hashes and canonical base58 pubkeys. Both crates are
 # already resolved in Cargo.lock via the workspace graph — no new
