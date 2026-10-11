@@ -45,7 +45,7 @@ future v4.x additions to the pre-anchor error space.
 | 6011 | `CriteriaBitmapMismatch` | Phase 2 produced a bitmap that disagrees with the originating `EligibilityAnchor`. |
 | 6015 | `AnchorNotFound` | Phase 2 attempted without an `EligibilityAnchor` PDA. |
 | 6016 | `EpochConfirmationPending` | Phase 2 attempted before `anchor.first_eligible_epoch + MIN_EPOCH_CONFIRMATION`. |
-| 6017 | `AnchorInvalidated` | `EligibilityAnchor` was invalidated by multisig. |
+| 6017 | `AnchorInvalidated` | `EligibilityAnchor` was invalidated by multisig. Phase 2 certification attempts and repeat `invalidate_anchor` calls on an already-invalidated anchor revert with this code. |
 | 6018 | `AnchorNotStale` | `sweep_stale_anchor` called before the staleness window elapsed. |
 | 6019 | `CertTtlBelowMinimum` | `update_protocol_config` rejected a `cert_ttl_seconds` value below `MIN_CERT_TTL_SECONDS` (600s = 10 min). |
 | 6020 | `LockerMarkerAccountRequired` | The UNCX per-pool lock marker PDA (`["global_lp_tracker", amm_id]`) was not supplied in `remaining_accounts`; Criterion 5 cannot be evaluated soundly without it. See [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md) §5. |

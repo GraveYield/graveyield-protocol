@@ -6,6 +6,22 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "rust"]
+    # The on-chain stack is a pinned platform, not a rolling target: the
+    # programs build against anchor-lang 0.32.1 (whose solana-* 2.x
+    # transitive tree the whole SDK/indexer/ops surface mirrors), and CI
+    # pins SOLANA_VERSION 3.0.10 / ANCHOR_VERSION 0.32.1. Anchor 1.x is a
+    # ground-up rewrite and agave solana-* 3.x+ breaks anchor-spl 0.32.x,
+    # so those majors cannot be adopted piecemeal by a Dependabot bump —
+    # each one lands as a red CI run until the planned Phase 13+ migration.
+    # Ignore them here and migrate deliberately instead. Patch/minor bumps
+    # within 0.32.x and solana 2.x keep flowing normally.
+    ignore:
+      - dependency-name: "anchor-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "solana-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "agave-*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/"
@@ -21,6 +37,11 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/bn.js"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the native (Go) rewrite with a different config
+      # surface; the workspace's tsconfig/tsc-based typecheck gates target
+      # the 5.x line. Migrate deliberately, not via a Dependabot bump.
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"

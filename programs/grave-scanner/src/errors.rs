@@ -83,7 +83,9 @@ pub enum GraveScannerError {
     #[msg("EpochConfirmationPending: anchor first_eligible_epoch + MIN_EPOCH_CONFIRMATION not yet reached.")]
     EpochConfirmationPending = 16,
 
-    /// On-chain code 6017. EligibilityAnchor was invalidated by multisig.
+    /// On-chain code 6017. An invalidated `EligibilityAnchor` was acted
+    /// on: Phase 2 attempted certification, or `invalidate_anchor` was
+    /// called on an anchor that is already invalidated.
     #[msg("AnchorInvalidated: this anchor was invalidated by multisig.")]
     AnchorInvalidated = 17,
 

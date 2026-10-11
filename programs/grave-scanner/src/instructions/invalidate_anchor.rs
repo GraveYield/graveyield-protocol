@@ -7,6 +7,10 @@
 //
 // Per v4.0.1 spec patch: this remains multisig-only; auto-invalidation was
 // rejected as redundant with Phase 2's natural re-verification gate.
+//
+// Refuses-first: invalidating an already-invalidated anchor reverts with
+// `AnchorInvalidated` (6017) instead of silently re-emitting the event, so
+// the audit trail records exactly one invalidation per anchor.
 
 use anchor_lang::prelude::*;
 
@@ -46,6 +50,16 @@ pub struct InvalidateAnchor<'info> {
 
 pub fn handler(ctx: Context<InvalidateAnchor>, _params: InvalidateAnchorParams) -> Result<()> {
     let anchor_account = &mut ctx.accounts.eligibility_anchor;
+
+    // The instruction's assumption is that the anchor is still live. An
+    // already-invalidated anchor satisfies that assumption no longer, so
+    // the call reverts rather than performing a second write and a second
+    // `AnchorInvalidated` emission (refuses-first discipline).
+    require!(
+        !anchor_account.invalidated,
+        GraveScannerError::AnchorInvalidated
+    );
+
     anchor_account.invalidated = true;
 
     emit!(AnchorInvalidated {

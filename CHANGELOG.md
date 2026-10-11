@@ -45,6 +45,28 @@
   package.
 - **Root `README.md` / `docs/README.md`** — layout and index gain the
   adversary package and the battery catalogue row.
+- **`.github/dependabot.yml`** — the pinned on-chain platform is now
+  guarded against impossible majors. `anchor-*`, `solana-*`, and
+  `agave-*` cargo majors plus the npm `typescript` major are ignored:
+  anchor 1.x is a ground-up rewrite and agave `solana-*` 3.x+ breaks
+  `anchor-spl` 0.32.x, so those bumps cannot be adopted piecemeal — each
+  previously landed as a red CI run on a Dependabot branch
+  (`anchor-lang-1.2.1`, `solana-sdk-5.0.0`, `solana-client-4.1.2`) until
+  the planned Phase 13+ migration. Patch/minor bumps within the pinned
+  lines keep flowing; open PRs matching the ignore rules are closed by
+  Dependabot on its next sweep.
+
+### Fixed
+
+- **`invalidate_anchor` re-invalidation now reverts (refuses-first).**
+  Calling `invalidate_anchor` on an anchor that is already invalidated
+  previously performed a second write and emitted a second
+  `AnchorInvalidated` event, polluting the audit trail with phantom
+  invalidations. The instruction's assumption is that the anchor is
+  still live; when that assumption is not satisfied the call now
+  reverts with the existing `AnchorInvalidated` code (6017) instead of
+  silently succeeding. No new error codes; the 6000–6034 table, the SDK
+  mirror, and the adversary manifest are unchanged.
 
 ### Security
 
