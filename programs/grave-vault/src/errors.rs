@@ -118,6 +118,14 @@ pub enum GraveVaultError {
     /// sweep timestamp and a second sweep would double-credit the treasury.
     #[msg("Dust for this pool was already swept.")]
     DustAlreadySwept = 21,
+
+    /// On-chain code 7022. A no-op `emergency_pause` toggle (requested
+    /// state equals current state). Mirrors the GraveScanner
+    /// `InvariantViolation` (6006) refuses-first discipline: a redundant
+    /// toggle would emit a second `ProtocolPauseChanged` indistinguishable
+    /// from a real transition and pollute the pause audit trail.
+    #[msg("InvariantViolation: emergency_pause toggle is a no-op (requested state equals current state).")]
+    InvariantViolation = 22,
 }
 
 #[cfg(test)]
@@ -155,6 +163,7 @@ mod tests {
             (GraveVaultError::UnsupportedBaseToken, 7019),
             (GraveVaultError::DustNothingToSweep, 7020),
             (GraveVaultError::DustAlreadySwept, 7021),
+            (GraveVaultError::InvariantViolation, 7022),
         ];
         for (variant, expected) in cases {
             let actual: u32 = u32::from(*variant);

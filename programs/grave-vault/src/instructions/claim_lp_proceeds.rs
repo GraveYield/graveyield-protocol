@@ -5,11 +5,20 @@
 //
 // 1. Verify a Merkle proof of (lp_holder, lp_balance_at_snapshot) against
 //    `pool_registry.lp_snapshot_merkle_root`. The root was sealed at
-//    salvage time and is immutable thereafter.
+//    salvage time and is immutable thereafter. Leaf format (see
+//    `crate::merkle::compute_leaf`):
+//      leaf = sha256(lp_holder.key() (32B) || lp_balance_at_snapshot.to_le_bytes() (8B))
+//    The holder signs the outer transaction, so the leaf binding to
+//    `lp_holder.key()` is the authority check — only the holder named
+//    in the leaf can claim it. Hash convention is SHA-256 sorted-pair
+//    (OpenZeppelin / Uniswap `MerkleProof.verify`), matching the
+//    off-chain snapshotter (`grave-snapshotter::tree`).
 // 2. Compute pro-rata share:
 //        amount = lp_holder_pool_total_lamports
 //                 * lp_balance_at_snapshot
 //                 / lp_total_supply_at_snapshot
+//    u128 intermediate avoids overflow; division is safe because step 1
+//    rejects zero `lp_total_supply_at_snapshot`.
 // 3. Reject if (a) claim would push cumulative claimed past the total
 //    (defense-in-depth — Merkle root uniqueness should prevent this), or
 //    (b) lp_balance_at_snapshot is zero (invalid claim).

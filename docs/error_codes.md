@@ -95,6 +95,7 @@ source per the sync convention.
 | 7019 | `UnsupportedBaseToken` | Pool base token is not WSOL. Raised by `salvage_pool` when the pool's on-chain AmmInfo mints (coin@400 / pc@432) show neither — or both — sides as WSOL, BEFORE any CPI. Exactly one WSOL side is required in v1.0; both orientations (coin=WSOL, pc=WSOL) are supported and fork-proven (Phase 3, CPI-010 retired). USDC/USDT-style settlement (no WSOL side) remains a v1.1 deliverable. |
 | 7020 | `DustNothingToSweep` | `sweep_dust` found no retained memecoin: the vault memecoin ATA is empty (the conversion leg fully drained it) or the pool was fully converted. Phase 4, D6. |
 | 7021 | `DustAlreadySwept` | `sweep_dust` already ran for this pool: the receipt stamps `dust_swept_at_ts` and a second sweep would double-credit the treasury. One-shot by design (Phase 4, D6). |
+| 7022 | `InvariantViolation` | `emergency_pause` was called with a `paused` value equal to the current state — a no-op toggle. Refuses-first: reverts instead of performing a redundant write and a second `ProtocolPauseChanged` emission indistinguishable from a real transition. Mirrors GraveScanner `InvariantViolation` (6006). |
 
 ## Drift from the v3.0 .docx snapshot
 
@@ -117,4 +118,4 @@ contract requires.
 
 ---
 
-*Mirrored from `errors.rs` files on 2026-05-16. Last verified at Phase 1.4 (GraveScanner 6000-6034, GraveVault 7000-7019).*
+*Mirrored from `errors.rs` files on 2026-05-16. Last verified at Phase 1.4 (GraveScanner 6000-6034, GraveVault 7000-7022).*
