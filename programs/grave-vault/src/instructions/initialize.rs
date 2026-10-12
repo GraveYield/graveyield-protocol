@@ -1,4 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
+//
+// initialize — multisig-only at launch. Creates the singleton
+// `ProtocolConfig` PDA. Called once per program deployment; a second
+// call reverts at the `init` constraint (PDA already exists).
+//
+// Zero-means-default convention: every numeric param field uses `0` as
+// the "accept the constant from `constants.rs`" sentinel. This lets the
+// multisig initialize with all-zeros to take the canonical 40/40/20
+// split and the documented operational defaults, or override individual
+// fields without re-stating the rest.
+//
+// Charter invariants validated at write time (and re-validated by
+// `update_protocol_config` on every subsequent change):
+//   * `protocol_share_bps` ≤ `PROTOCOL_SHARE_BPS_CEILING` (2_000 = 20%).
+//     Governance can lower but cannot raise — raising requires a
+//     program upgrade, not a config update.
+//   * Share split (`lp_holder + salvor + protocol`) must sum to exactly
+//     10_000 bps. A split that doesn't sum is rejected with
+//     `InvalidShareSplit` (7004).
+//
+// The 72h timelock on parameter changes is enforced by the Squads
+// multisig's transaction-buffer scheduling, not by this program (spec
+// D2 deferral). `pending_authority` / `pending_authority_eta` /
+// `timelock_seconds` are write-only reserved state in v1.0 — no
+// instruction reads them — see `update_protocol_config.rs`'s
+// PRE-MAINNET-TODO(GOV).
 
 use anchor_lang::prelude::*;
 
