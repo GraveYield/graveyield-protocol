@@ -27,12 +27,12 @@
     "lint:rust": "cargo clippy --all-targets -- -D warnings"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.19.2",
     "typescript": "^5.6.0"
   },
   "pnpm": {
     "overrides": {
-      "@types/node": "^24.0.0",
+      "@types/node": "^24.19.2",
       "@types/bn.js": "^5.1.5"
     },
     "peerDependencyRules": {
