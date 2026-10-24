@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly run so the sdk-sync drift check also fires when ONLY the
+  # vendored copy in GraveYield/salvor-bots changes (a push there cannot
+  # trigger this workflow). See the sdk-sync-check job below.
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -47,6 +52,46 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
+
+  # Baseline audit (Phase 0, blocker B4 / NS-5): the repo had 668 passing
+  # host/TS tests locally but CI gated on ZERO of them — fmt, clippy,
+  # anchor build and typecheck only. These two jobs make the existing
+  # suites merge-blocking. The fork harness (47+ tests, needs cargo
+  # build-sbf + multi-MB mainnet fixtures) lives in fork-harness.yml.
+  rust-host-tests:
+    name: cargo test (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: grave-scanner (lib)
+        run: cargo test -p grave-scanner --lib
+      - name: grave-vault (lib)
+        run: cargo test -p grave-vault --lib
+      - name: grave-snapshotter (lib + integration)
+        run: cargo test -p grave-snapshotter
+
+  ts-build-and-test:
+    name: pnpm build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Ordering note: setup-node MUST come before pnpm/action-setup@v6
+      # (see ts-typecheck below).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      # Includes the SDK's live-devnet smoke tests: read-only RPC calls
+      # against public devnet, no keys required. If devnet itself is
+      # degraded the job fails — treat that as a real operational signal,
+      # not flake (the SDK refuses to ship untested against the cluster).
+      - run: pnpm -r test
 
   anchor-build:
     name: anchor build
@@ -157,11 +202,13 @@ jobs:
       # `version:` input — that field is what we want to be the single
       # source of truth for the pnpm pin anyway.
       - uses: pnpm/action-setup@v6
-      # NOTE: `cache: pnpm` was removed from setup-node. setup-node hashes
-      # `**/pnpm-lock.yaml` to compute the cache key, and no lockfile is
-      # committed yet (scaffold gap). Re-add once a `pnpm-lock.yaml` lands
-      # at the repo root.
-      - run: pnpm install --frozen-lockfile=false
+      # pnpm-lock.yaml IS committed at the repo root, so the install is
+      # frozen (reproducible builds). If you intentionally bump deps,
+      # regenerate the lockfile in the same PR.
+      # The `cache: pnpm` input on setup-node is still unused: it needs a
+      # well-formed lockfile hash and buys little here since pnpm's own
+      # store cache dominates. Revisit if install times regress.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
 
   terminology-lint:

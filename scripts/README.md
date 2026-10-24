@@ -6,6 +6,8 @@ Operational and development scripts for GraveYield Protocol.
 |--------|---------|
 | `check-toolchain.sh` | Verify pinned versions of solana, anchor, rust, node, pnpm. |
 | `terminology-lint.sh` | Enforce GraveYield's canonical v4.0 vocabulary across the repo. Runs in CI. |
+| `build_fork_harness.sh` | Build both programs + Jupiter stub with `cargo build-sbf`, fetch real mainnet fixtures, run all seven fork suites. Nightly in CI (`.github/workflows/fork-harness.yml`) and via the `fork-harness` PR label. |
+| `fetch_v4_fork_fixtures.mjs` | Fetch + cross-validate the mainnet Raydium V4 state and program ELFs the fork suites fork against. Invoked by `build_fork_harness.sh`. |
 | `devnet/deploy_devnet.sh` | Build both programs with `cargo build-sbf` and deploy them to devnet under the devnet program IDs (identity + funding gated). Runbook: [`../docs/DEVNET.md`](../docs/DEVNET.md). |
 | `devnet/protocol_admin.mjs` | Devnet/rehearsal administration: ProtocolConfig initialization, emergency pause/unpause, config readback, and the full emergency-control drill (including the intruder-rejection assertion). |
 | `devnet/local_rehearsal.sh` | Rehearse the entire devnet sequence (deploy → initialize → drills) against a local `solana-test-validator` using the production scripts. |

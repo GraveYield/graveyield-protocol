@@ -1,0 +1,102 @@
+# fork-harness.yml — nightly + label-gated execution of the seven
+# solana-program-test fork suites under programs/grave-vault/tests/.
+#
+# Baseline audit (Phase 0, blocker B4 / NS-5): the fork suites are the ONLY
+# tests that exercise the programs against REAL mainnet state (Raydium V4
+# AmmInfo/MarketState layouts, Jupiter v6 routing, scanner windows), yet
+# pre-audit they were compile-validated at best — never run in CI, and the
+# CHANGELOG admits the post-rollback suites were only build-checked. This
+# workflow closes that gap without paying its cost on every PR:
+#
+#   - nightly cron (03:00 UTC, off-peak)
+#   - workflow_dispatch (manual runs)
+#   - pull_request runs ONLY when the PR carries the `fork-harness` label
+#
+# The heavy work is `scripts/build_fork_harness.sh`: build both programs +
+# the Jupiter v6 stub with cargo build-sbf, fetch real mainnet fixtures
+# (several MB, intentionally gitignored), then run all seven suites.
+# Fixture fetches hit the public mainnet RPC; override with the
+# FORK_FIXTURES_RPC_URL secret if the default endpoint rate-limits.
+
+name: fork-harness
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERSION: 3.0.10
+  RUST_TOOLCHAIN: 1.91.1
+  NODE_VERSION: 24
+
+jobs:
+  fork-harness:
+    name: build + fetch + run 7 fork suites
+    # Schedule/dispatch always run; PRs only when labeled `fork-harness`.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'fork-harness')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # Same hidapi/libudev requirement as anchor-build in ci.yml: anchor
+      # 0.32.1's transitive deps probe for libudev headers when compiling
+      # from source. cargo-build-sbf needs the same system libs on cold
+      # cache, and the fork suites link solana-program-test which builds
+      # parts of the Solana stack natively.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
+      # Solana 3.0.10's bundled platform-tools v1.51 ships cargo 1.84,
+      # which can't parse edition2024 manifests (blake3 0.12 et al.).
+      # Replace the cached platform-tools with v1.54 contents exactly as
+      # ci.yml's anchor-build does — see the rationale block there.
+      - name: Pin platform-tools v1.54 (edition2024 fix)
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/platform-tools.tar.bz2 \
+            "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+          CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
+          rm -rf "$CACHE_DEST"
+          mkdir -p "$CACHE_DEST"
+          tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
+          "$CACHE_DEST/rust/bin/cargo" --version
+          "$CACHE_DEST/rust/bin/rustc" --version
+      - name: Build harness, fetch fixtures, run all fork suites
+        env:
+          # Public mainnet RPC by default; point the optional repo secret
+          # FORK_FIXTURES_RPC_URL at a dedicated endpoint if needed.
+          RPC_URL: ${{ secrets.FORK_FIXTURES_RPC_URL || 'https://api.mainnet-beta.solana.com' }}
+        run: |
+          set -o pipefail
+          bash scripts/build_fork_harness.sh 2>&1 | tee /tmp/fork-harness.log
+      - name: Upload harness log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-harness-log
+          path: /tmp/fork-harness.log
+          if-no-files-found: warn
+          retention-days: 7
