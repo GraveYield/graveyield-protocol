@@ -331,21 +331,18 @@ export class GraveYieldClient {
     }
 
     // --- C2: price collapse — needs a recorded launch price ---
+    // The on-chain Raydium V4 adapter maps base_reserve = coin_amount and
+    // quote_reserve = pc_amount UNCONDITIONALLY (programs/grave-scanner/
+    // src/adapters/raydium_v4.rs), and `deriveLaunchPriceV4` mirrors that
+    // (launch price = pc/coin ratio at the first swap). The like-for-like
+    // current price is therefore ALWAYS the coin/pc ratio — never mint-
+    // address ordering (the previous version inverted the price for every
+    // pool whose coin-side mint sorts after its pc-side mint; FLEET-M0
+    // audit F5).
     let c2PriceCollapse = false;
     if (launchPrice && launchPrice.launchPriceQ64x64 > 0n) {
-      const currentPrice = identifyBaseToken(pool).coinIsWsol
-        ? quotePerBaseQ64x64(coinReserve, pcReserve)
-        : quotePerBaseQ64x64(coinReserve, pcReserve);
-      // The Q64.64 price is quote_per_base. The pool's base side is the
-      // memecoin (the WSOL side is the quote); the SDK mirrors the on-chain
-      // `PoolData::current_price_q64x64` math.
-      void currentPrice;
-      // Apply the same drop math `criteria::compute_drop_bps` uses:
       const launch = launchPrice.launchPriceQ64x64;
-      const current = quotePerBaseQ64x64(
-        pool.baseMint.toBase58() < pool.quoteMint.toBase58() ? coinReserve : pcReserve,
-        pool.baseMint.toBase58() < pool.quoteMint.toBase58() ? pcReserve : coinReserve,
-      );
+      const current = quotePerBaseQ64x64(coinReserve, pcReserve);
       if (current < launch && launch > 0n) {
         const dropBps = Number(((launch - current) * 10_000n) / launch);
         c2PriceCollapse = dropBps >= scanner.priceCollapseBps;

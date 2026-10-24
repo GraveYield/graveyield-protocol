@@ -93,6 +93,35 @@ jobs:
       # not flake (the SDK refuses to ship untested against the cluster).
       - run: pnpm -r test
 
+  # NS-4 (baseline blocker B3): the shared salvor SDK used to live in two
+  # copies that drifted silently (FLEET-M0 audit F1/F5/F7 — priority-fee
+  # unit mismatch, launch-price inversion, base58-vs-byte snapshot sort),
+  # with the fixes stranded only in the salvor-bots copy. sdk/src/ is now
+  # the single source of truth; salvor-bots/src/ is a vendored mirror.
+  # This job fails on ANY divergence. Both repos are public, so a token
+  # is not required to read salvor-bots. The weekly cron on this workflow
+  # additionally catches salvor-side-only edits: a push to GraveYield/
+  # salvor-bots cannot trigger this workflow, so without the schedule the
+  # mirror could drift for weeks unnoticed.
+  sdk-sync-check:
+    name: sdk sync (salvor-bots mirror)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: GraveYield/salvor-bots
+          ref: main
+          path: _salvor-bots
+      - name: Fail on any SDK divergence
+        run: |
+          set -euo pipefail
+          echo "Enforcing byte-equality of the shared SDK modules:"
+          echo "  graveyield-protocol/sdk/src  (single source of truth)"
+          echo "  salvor-bots/src              (vendored mirror)"
+          diff -r sdk/src _salvor-bots/src
+          echo "in sync: sdk/src == salvor-bots/src (policy: sdk/README.md)"
+
   anchor-build:
     name: anchor build
     runs-on: ubuntu-latest
