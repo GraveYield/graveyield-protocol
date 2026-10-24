@@ -39,6 +39,7 @@ canon outside this list is either superseded or unrelated to the project.
 | Topic | Document |
 |-------|----------|
 | Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
+| Phase 0 baseline (verified on-chain + repo state, 2026-10-24; blocker register, devnet usability decision, next steps) | [`BASELINE_REPORT.md`](BASELINE_REPORT.md) |
 
 ## Operations
 
