@@ -143,11 +143,32 @@ export async function snapshotLpHolders(
     );
   }
 
-  // 5. Sort by ascending owner pubkey bytes (BTreeMap equivalent).
-  const sortedOwners = [...byOwner.keys()].sort();
-  const holders: SnapshotHolder[] = sortedOwners.map((ownerStr) => ({
-    holder: new PublicKey(ownerStr),
-    balance: new BN(byOwner.get(ownerStr)!.toString(10)),
+  // 5. Sort by ascending owner pubkey BYTES (Rust BTreeMap<Pubkey>
+  //    order — the canonical order `SnapshotMerkleTree.fromEntries`
+  //    enforces and the on-chain verifier consumes). Sorting by base58
+  //    STRING diverges from byte order for keys whose encodings differ
+  //    in length (the shorter string can sort on the wrong side — e.g.
+  //    a 43-digit encoding starting '2' vs a 42-digit one starting '8');
+  //    random holder keys hit that with a few-percent probability per
+  //    pair, which surfaced as intermittent
+  //    "entries not sorted" tree failures. (FLEET-M0 audit F7.)
+  const holderPairs = [...byOwner.entries()].map(([ownerStr, balance]) => ({
+    owner: new PublicKey(ownerStr),
+    balance,
+  }));
+  holderPairs.sort((a, b) => {
+    const ab = a.owner.toBytes();
+    const bb = b.owner.toBytes();
+    for (let i = 0; i < ab.length; i++) {
+      const x = ab[i] ?? 0;
+      const y = bb[i] ?? 0;
+      if (x !== y) return x - y;
+    }
+    return 0;
+  });
+  const holders: SnapshotHolder[] = holderPairs.map((p) => ({
+    holder: p.owner,
+    balance: new BN(p.balance.toString(10)),
   }));
 
   // 6. Build the Merkle tree over the canonical leaf set.

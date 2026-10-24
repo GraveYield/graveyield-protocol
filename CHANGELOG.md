@@ -38,6 +38,16 @@
   the fork contract; compile-validated in the Phase 12 session (the
   SBF toolchain and mainnet fixtures were absent post-rollback; run
   end-to-end via `scripts/build_fork_harness.sh`).
+- **CI now gates the existing suites (baseline NS-5 / blocker B4).** The
+  Phase 0 audit found 668 green host/TS tests carried by the repo while
+  CI gated on zero of them. `ci.yml` gains `rust-host-tests`
+  (`cargo test -p grave-scanner --lib`, `-p grave-vault --lib`,
+  `-p grave-snapshotter`) and `ts-build-and-test`
+  (`pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test`).
+  A new `fork-harness.yml` runs the full seven-suite fork battery
+  nightly (03:00 UTC), on `workflow_dispatch`, and on PRs carrying the
+  `fork-harness` label — build-sbf + mainnet fixtures are too heavy for
+  per-PR gating but too important to leave unexecuted.
 
 ### Changed
 
@@ -55,8 +65,43 @@
   the planned Phase 13+ migration. Patch/minor bumps within the pinned
   lines keep flowing; open PRs matching the ignore rules are closed by
   Dependabot on its next sweep.
+- **`build_fork_harness.sh` runs all seven fork suites.**
+  `scanner_windows_fork.rs` and `security_negative_fork.rs` (both Phase
+  7) existed but were never wired into the script — it silently ran 5
+  of 7 suites. Both now run in the script and in the nightly
+  `fork-harness.yml`; header corrected (both late suites are Phase 7).
+- **`ts-typecheck` installs frozen.** `pnpm-lock.yaml` has been tracked
+  at the repo root all along; the job's “no lockfile committed yet”
+  comment was stale and its `--frozen-lockfile=false` install
+  non-reproducible. Both the flag and the comment are fixed, matching
+  the new `ts-build-and-test` job.
+- **SDK sync policy documented in BOTH repos (baseline NS-4).**
+  `sdk/README.md` declares `sdk/src/` the single source of truth and
+  `salvor-bots/README.md` the matching vendored-mirror policy; the
+  `sdk-sync-check` CI job enforces byte-equality on every push/PR plus
+  a weekly scheduled run (a salvor-bots push cannot trigger this
+  workflow, so the schedule is what catches salvage-side-only edits).
+  `scripts/README.md` gains rows for `build_fork_harness.sh` and
+  `fetch_v4_fork_fixtures.mjs`, both now CI-load-bearing.
 
 ### Fixed
+
+- **The salvor SDK was reunified — protocol copy adopts the F1/F5/F7
+  fixes verbatim (baseline NS-4 / blocker B3).** The shared SDK had
+  drifted: F1 priority-fee unit mismatch (total-fee budget computed as
+  a per-CU price — `derivePriorityFeePlan` supersedes
+  `computeOperationalMaxLamportsPerCu` for executor decisions, which is
+  now deprecated in-doc), F5 launch-price inversion in
+  `client.ts::evaluatePool` C2 (current price is ALWAYS the coin/pc
+  ratio, mirroring the on-chain V4 adapter — never mint-address
+  ordering), F7 base58-string snapshot ordering in `snapshot.ts`
+  (holders now sort by pubkey BYTES, matching the Rust
+  `BTreeMap<Pubkey>` order the on-chain verifier enforces). The fixes
+  lived only in `salvor-bots/src/` while this repo's vectors pinned the
+  buggy behavior; `sdk/src/` now matches `salvor-bots/src/`
+  byte-for-byte, and the corrected regression vectors (`evaluatePool`,
+  `priorityFeePlan`, `snapshotOrder` + `fakeRpc` helper) were adopted
+  from the salvor-bots suite — SDK suite 102 → 116 tests, all green.
 
 - **`invalidate_anchor` re-invalidation now reverts (refuses-first).**
   Calling `invalidate_anchor` on an anchor that is already invalidated

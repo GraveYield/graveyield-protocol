@@ -114,6 +114,37 @@ The SDK mirrors these on-chain byte layouts exactly:
 - **Ed25519 precompile wire format**: 112 bytes (header + pk + sig) —
   the runtime's OWN layout, not the pre-Phase-6 "14-byte header" form.
 
+## SDK source of truth & sync policy (NS-4)
+
+The modules under `sdk/src/` are the **single source of truth** for the
+shared salvor SDK code. `GraveYield/salvor-bots` keeps a byte-identical
+vendored mirror at `salvor-bots/src/` so the fleet repo stays
+self-contained (its tests never import from a workspace package).
+
+Rules:
+
+1. **Edit `sdk/src/` first.** Never patch the salvor-bots copy directly.
+2. Mirror the change into `salvor-bots/src/` in the same change set
+   (`cp sdk/src/<file>.ts <salvor-bots>/src/<file>.ts`) and run both
+   repos' test suites before pushing either side.
+3. CI enforces byte-equality: the `sdk-sync-check` job in
+   `.github/workflows/ci.yml` diffs `sdk/src/` against a fresh clone of
+   `salvor-bots@main` on every push/PR, plus a weekly scheduled run that
+   also catches salvor-side-only edits (a push there cannot trigger this
+   workflow). Any divergence fails CI.
+4. The test directories MAY diverge (protocol-side vectors live here;
+   fleet-side harnesses live there) — the gate covers `src/` only.
+
+History: the two copies drifted silently — FLEET-M0 audit F1
+(priority-fee unit mismatch), F5 (launch-price inversion), F7
+(base58-string vs byte-order snapshot sorting) — and the fixes lived
+ONLY in the salvor-bots copy while the protocol tests pinned the buggy
+behavior. The three fixes were backported here verbatim on 2026-10-24
+(Phase 0 baseline, next step NS-4), the corrected regression vectors
+(`evaluatePool`, `priorityFeePlan`, `snapshotOrder`) were adopted from
+the salvor-bots suite, and the drift gate above now makes any future
+divergence a CI failure.
+
 ## Devnet program IDs (real, deployed)
 
 | Program | Devnet ID |
