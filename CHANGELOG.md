@@ -166,6 +166,31 @@
 
 ### Security
 
+- **Dependency override parity with salvor-bots: the same 10-advisory
+  transitive tree patched here via three `pnpm.overrides` (root
+  `package.json`).** The protocol workspace ships the identical JS
+  dependency tree as salvor-bots (`@graveyield/sdk` +
+  `@coral-xyz/anchor` + `@solana/web3.js`), so the ten Dependabot
+  advisories triaged there (2026-10-24) resolve to the same
+  vulnerable versions in this repo's lockfile — `toml@3.0.0` (5
+  GHSAs: recursion, prototype pollution, quadratic DoS ×3),
+  `uuid@8.3.2` (GHSA-w5hq-g745-h8pq, missing buffer bounds check in
+  v3/v5/v6; runtime-reachable through
+  `web3.js → jayson` request IDs on every RPC call), and
+  `stream-json@1.9.1` (3 GHSAs: quadratic filters, JSONC re-scan,
+  Assembler prototype pollution). Dependabot alerts are disabled on
+  this repository, so the salvor-bots triage was applied here
+  proactively rather than reactively. Overrides added:
+  `toml >=5.0.1`, `uuid >=11.1.1` (resolves 14.0.2), `stream-json
+  >=3.6.0` (resolves 3.7.0). Verified: `pnpm audit` drops from 10 to
+  1 finding — the sole remainder is `bigint-buffer@1.1.5`
+  (GHSA-3gc7-fjrx-p6mg / CVE-2025-3194), the same accepted-risk
+  disposition as salvor-bots (no upstream fix exists; availability
+  impact only; monitor `buffer-layout-utils`/`spl-token` for a bump).
+  The full 231-test TS battery passes on the patched resolutions
+  (sdk 116 + indexer 29 + ops 47 + adversary 39, all green), and the
+  `sdk-sync-check` job is unaffected (this change touches only the
+  root manifest, lockfile, and this changelog — no `sdk/src` bytes).
 - **The anchor sweep window is now floor-locked against the Phase 2
   confirmation gap (`MIN_ANCHOR_STALENESS_SECONDS` = 3 epochs / 6
   days).** `anchor_staleness_seconds` previously accepted any `u64` on

@@ -33,7 +33,10 @@
   "pnpm": {
     "overrides": {
       "@types/node": "^24.0.0",
-      "@types/bn.js": "^5.1.5"
+      "@types/bn.js": "^5.1.5",
+      "toml": ">=5.0.1",
+      "uuid": ">=11.1.1",
+      "stream-json": ">=3.6.0"
     },
     "peerDependencyRules": {
       "allowedVersions": {
