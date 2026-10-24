@@ -255,3 +255,17 @@ jobs:
       - uses: actions/checkout@v6
       - name: Relative markdown link check
         run: bash scripts/doc-links-lint.sh
+
+  # ── TEMPORARY red-check drill (NS-5 acceptance: "a deliberately seeded
+  # ── failure turns CI red — verify once"). This job MUST fail. The drill
+  # ── PR carrying it is closed unmerged immediately after the red run is
+  # ── observed and the branch is deleted. Never merge this branch.
+  seeded-red-check:
+    name: "SEEDED FAILURE — must be red"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Intentional failure (NS-5 acceptance drill)
+        run: |
+          echo "This failure is intentional and expected."
+          echo "Drill: prove the CI gate actually bites (BASELINE_REPORT.md NS-5)."
+          exit 1
