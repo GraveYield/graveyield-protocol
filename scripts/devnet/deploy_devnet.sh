@@ -54,7 +54,6 @@ for kp in "$SCANNER_KP" "$VAULT_KP" "$DEPLOYER_KP"; do
 done
 
 command -v solana >/dev/null || { echo "solana CLI not on PATH" >&2; exit 2; }
-command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
 
 echo "== [0/4] identity checks =="
 SCANNER_ID="$(solana-keygen pubkey "$SCANNER_KP")"
@@ -74,10 +73,13 @@ echo "vault:   $VAULT_ID"
 echo "deployer: $DEPLOYER"
 
 echo "== [1/4] deployer funding =="
-BAL="$(solana --url "$URL" balance "$DEPLOYER_KP" | tr -dc '0-9')"
-echo "balance: $BAL SOL"
-if (( BAL < 6 )); then
-  echo "REFUSING: deployer needs >= 6 SOL for program rent (two ~400KB ELFs at ~2.7 SOL each) + fees; got $BAL SOL." >&2
+# Lamport-exact check: digit-stripping the human SOL display mis-reads
+# decimals ("0.5" -> "05"; "5.9" -> "59" would PASS a >= 6 test).
+BAL_LAMPORTS="$(solana --url "$URL" balance --lamports "$DEPLOYER_KP" | tr -dc '0-9')"
+echo "balance: $BAL_LAMPORTS lamports"
+MIN_DEPLOY_LAMPORTS=6000000000  # 6 SOL: two ~400KB ELFs at ~2.7 SOL rent each + fees
+if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
+  echo "REFUSING: deployer needs >= 6 SOL for program rent (two ~400KB ELFs at ~2.7 SOL each) + fees; got $BAL_LAMPORTS lamports ($(( BAL_LAMPORTS / 1000000000 )) SOL and change)." >&2
   echo "Fund the deployer first (devnet faucet or your own transfer) and re-run." >&2
   exit 1
 fi
@@ -102,6 +104,9 @@ done
 
 echo "== [3/4] cargo build-sbf (scanner, vault) =="
 if (( SKIP_BUILD == 0 )); then
+  # The SBF toolchain is only required when this script builds; --skip-build
+  # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
+  command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
   # Build per package directory (the repo's canonical SBF build pattern,
   # mirroring scripts/build_fork_harness.sh): agave 3.0.10's
   # cargo-build-sbf rejects `-p` in its own parser, and cargo passthrough
