@@ -32,9 +32,14 @@ jobs:
       - name: evidence for consumers that pin vulnerable majors
         run: |
           {
+            # Several crates coexist in multiple majors (e.g. rustls-webpki
+            # 0.101.7 + 0.103.15), so `cargo tree -i <name>` is ambiguous.
+            # Enumerate every locked version and qualify the spec.
             for c in ed25519-dalek rand atty rustls-webpki curve25519-dalek; do
-              echo "=== cargo tree -i $c ==="
-              cargo tree -i "$c" || true
+              for v in $(grep -A1 "^name = \"$c\"$" Cargo.lock | grep '^version' | sed 's/version = "\(.*\)"/\1/'); do
+                echo "=== cargo tree -i $c@$v ==="
+                cargo tree -i "$c@$v" || true
+              done
             done
           } > cargo-tree-evidence.txt 2>&1
           cat cargo-tree-evidence.txt
