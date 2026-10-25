@@ -54,7 +54,7 @@ use instructions::*;
 // Anchor.toml). The devnet keypair is a throwaway and MUST NOT be reused for
 // mainnet: mainnet ships with fresh keypairs generated under custody and
 // synced here + into Anchor.toml (KEYS-003).
-declare_id!("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6");
+declare_id!("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
 
 #[program]
 pub mod grave_vault {

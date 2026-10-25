@@ -6,9 +6,11 @@
 // `programs/grave-vault/src/constants.rs`. Drift here would surface as
 // Anchor `ConstraintSeeds` reverts on chain.
 //
-// The devnet program IDs (5JiCVx... / HUyoG5...) are the REAL deployed
-// addresses (handoff §3.2). Test vectors derived against them pin the
-// canonical PDAs the SDK will reproduce on chain.
+// The devnet program IDs (CuQZes... / Bd5smh...) are the REAL deployed
+// addresses (DR-001/NS-2 fresh devnet deployment, 2026-10-25 — see
+// docs/DECISIONS.md; the pre-refresh deployment is a frozen static
+// reference). Test vectors derived against them pin the canonical PDAs
+// the SDK will reproduce on chain.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -29,8 +31,8 @@ import {
   vaultSolHoldingPda,
 } from "../src/index.js";
 
-const SCANNER = new PublicKey("5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF");
-const VAULT = new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6");
+const SCANNER = new PublicKey("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54");
+const VAULT = new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
 const AMM = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 const POOL = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const HOLDER = new PublicKey("11111111111111111111111111111111");
@@ -40,8 +42,8 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     const pda = scannerProtocolConfigPda(SCANNER);
     assert.equal(
       pda.toBase58(),
-      "GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu",
-      "scanner ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)",
+      "Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD",
+      "scanner ProtocolConfig PDA must match the devnet-deployed value (DR-001 fresh deployment)",
     );
   });
 
@@ -49,8 +51,8 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     const pda = vaultProtocolConfigPda(VAULT);
     assert.equal(
       pda.toBase58(),
-      "2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU",
-      "vault ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)",
+      "hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS",
+      "vault ProtocolConfig PDA must match the devnet-deployed value (DR-001 fresh deployment)",
     );
   });
 

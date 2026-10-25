@@ -22,8 +22,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-EXPECTED_SCANNER="5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF"
-EXPECTED_VAULT="HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"
+EXPECTED_SCANNER="CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54"
+EXPECTED_VAULT="Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"
 
 URL="https://api.devnet.solana.com"
 SCANNER_KP=""

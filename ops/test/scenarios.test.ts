@@ -74,7 +74,7 @@ function world(stateDir?: string): World {
   };
 
   const observer = new VaultObserver({
-    vaultProgramId: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+    vaultProgramId: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
     chain,
     health,
     alerts,
@@ -144,7 +144,7 @@ describe("SC-01 lifecycle sweep", () => {
           protocolAmountLamports: 1n,
           totalProceedsLamports: total,
         }),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
     ];
@@ -174,7 +174,7 @@ describe("SC-02 vault audit", () => {
       {
         pubkey: key(0xa1),
         data: encodeReceipt({ pool, salvor: key(0x11), ...split, totalProceedsLamports: total }),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
       {
@@ -184,13 +184,13 @@ describe("SC-02 vault audit", () => {
           lpHolderPoolTotalLamports: split.lpHolderAmountLamports,
           lpHolderPoolClaimedLamports: 0n,
         }),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
       {
         pubkey: key(0xa3),
         data: encodeVaultConfig(),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
     ];
@@ -221,7 +221,7 @@ describe("SC-02 vault audit", () => {
       {
         pubkey: key(0xa1),
         data: encodeReceipt({ pool, salvor: key(0x11), ...split, totalProceedsLamports: total }),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
       {
@@ -231,7 +231,7 @@ describe("SC-02 vault audit", () => {
           lpHolderPoolTotalLamports: split.lpHolderAmountLamports + 5n,
           lpHolderPoolClaimedLamports: 0n,
         }),
-        owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+        owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
         lamports: 1n,
       },
     ];

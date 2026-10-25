@@ -13,12 +13,12 @@ skip-lint = false
 # mainnet deployment generates fresh keypairs under custody and syncs them
 # here and into the `declare_id!` calls in lib.rs (KEYS-003).
 [programs.localnet]
-grave_scanner = "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF"
-grave_vault   = "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"
+grave_scanner = "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54"
+grave_vault   = "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"
 
 [programs.devnet]
-grave_scanner = "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF"
-grave_vault   = "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"
+grave_scanner = "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54"
+grave_vault   = "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"
 
 [registry]
 url = "https://api.apr.dev"
