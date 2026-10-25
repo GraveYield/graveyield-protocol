@@ -1,48 +1,73 @@
 # Devnet Runbook — GraveYield Protocol
 
-> **Status:** EXECUTED. Both programs are live on devnet under the real
-> program IDs below, both ProtocolConfigs are initialized at spec defaults,
-> and the emergency-control drill passed on both programs (authority pause,
-> intruder rejection — GraveScanner 6000 / GraveVault 7000 — authority
-> unpause, readback-verified at every step). The sequence was first
-> rehearsed end-to-end on `solana-test-validator` via the exact production
-> scripts (`scripts/devnet/local_rehearsal.sh`), then executed on devnet on
-> 2026-10-09:
+> **Status: EXECUTED (refresh).** The current devnet deployment is the
+> DR-001 refresh executed on **2026-10-25** (epoch 1191): both programs
+> live under the new program IDs below, both ProtocolConfigs initialized
+> at spec defaults, and the emergency-control drill passed on both
+> programs (authority pause, intruder rejection — GraveScanner 6000 /
+> GraveVault 7000 — authority unpause, readback-verified at every step),
+> and the SDK's read-only devnet smoke suite passes against the new
+> deployment. The sequence was first rehearsed end-to-end on
+> `solana-test-validator` via the exact production scripts
+> (`scripts/devnet/local_rehearsal.sh`), then executed on devnet:
 >
-> | Step | Program | Transaction |
+> | Step | Program | Transaction (finalized) |
 > |---|---|---|
-> | Deploy | GraveScanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `PUXKJWGYnGg5JkEFLRqqjrdrbNyDFWMKRCrpYcY32K6Fq3SXdZTgv86EFKbnxYr5oLaB2vmxamZwVoSJ36N12ww` |
-> | Deploy | GraveVault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | `5gEVQfsddMg5kHqiasw2JwKPwa1CGNpJ57CuksMiau9GhGigYe9CkQV5TAxuAtnHJDpA3nPy8eABd67vrq55HgN6` |
-> | Initialize | scanner ProtocolConfig `GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu` | `5boq7igXj311M836EUDFgsxq1goNj5kabniX4QYj7ZFnBb471NydLTE4gvps55EjGssxhPnaBbCyx6jPvLBeqTTh` |
-> | Initialize | vault ProtocolConfig `2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU` | `2psMkdruwRQvdssBRiUTGtdThbCCH9nUhSgyWCJi3vJsWbYGNBPjJLwxYtoVd8hPBqJ95z9HFF4hrjpg3ETEty9H` |
+> | Deploy | GraveScanner `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` | `46kHBf1CNaTnNQUCXGuAyJetzDn5GgKrkK745MtUSdBhuEeqiK3DuB1GnN34GizCkYvQQMYnxByJSWRL6JD3hYPM` (slot 514 928 681) |
+> | Deploy | GraveVault `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` | `5F7RYuP9aXsFjH2fv78ATDG86bPtMUGL6ua2S8aMP6DzrqhnT4DKx73GiHX24K4258QMPv2RspsMBVYYqw8Ly9YS` (slot 514 928 725) |
+> | Initialize | scanner ProtocolConfig `Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD` | `64nYNYuud68irZpi5jgKL5CQNWRMH8jcXGRYiACoVhBRtvsqLCHCCitXeuKMjUTvzdSu6Syab2XKnEbaNMDT7wki` (slot 514 928 823) |
+> | Initialize | vault ProtocolConfig `hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS` | `2venFHC3K7JWKWT61H735uK7Yi38fHvz8EnDTpKmAgSj3P8z5tRuaxQ9g1DBSHTxD4BNiuzXf3auv5M3mrNgbLKf` (slot 514 928 827) |
 >
-> Upgrade authority for both programs: the deployer keypair (single key —
-> see the custody note below). The drill's pause/unpause transactions are
-> reproducible via `protocol_admin.mjs drill`; the intruder key is a
-> throwaway. Roadmap Phase 11 "Infrastructure" and "Observability"
-> sections (indexer, SDK publication, first Salvor, Merkle service, event
-> indexing, alerting) are deliberately NOT in this phase — they depend on
-> Phases 8–10 and remain sequenced per the shipping roadmap.
+> Deployed bytes: the CI-built ELFs from run 40178764437 (commit `d4661b4`,
+> the program-ID sync commit) via `deploy_devnet.sh --skip-build`;
+> sha256 `2e367ea0…cf232` (scanner, 367 864 B) and `cbbe3b0f…98518`
+> (vault, 407 184 B). Both config PDAs landed at bump 255 — byte-exact
+> matches of the pre-deployment derivation (`scripts/pda_derive.py`).
+>
+> **Frozen static reference (DR-001):** the original 2026-10-09
+> deployment — GraveScanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF`,
+> GraveVault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6`, configs
+> `GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu` /
+> `2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU`, deploy txs
+> `PUXKJWGY…36N12ww` / `5gEVQfsd…vrq55HgN6`, init txs
+> `5boq7igX…TTh` / `2psMkdru…Tty9H` — is retained on-chain but its
+> upgrade-authority key is dead (DR-001: `recoverable = no`). It is a
+> historical artifact: not upgraded, not maintained, and no consumer
+> points at it.
+>
+> Upgrade authority for both CURRENT programs: the refresh deployer
+> keypair (single key — see the custody note below). The drill's
+> pause/unpause transactions are reproducible via `protocol_admin.mjs
+> drill`; the intruder key is a throwaway holding fee dust only.
+> Roadmap Phase 11 "Infrastructure" and "Observability" sections
+> (indexer, SDK publication, first Salvor, Merkle service, event
+> indexing, alerting) are deliberately NOT in this phase — they depend
+> on Phases 8–10 and remain sequenced per the shipping roadmap.
 
 ## Network facts
 
 | Item | Value |
 |------|-------|
 | Cluster | Solana devnet — `https://api.devnet.solana.com` |
-| GraveScanner program ID | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` |
-| GraveVault program ID | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` |
+| GraveScanner program ID (current) | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
+| GraveVault program ID (current) | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
+| Frozen static reference (DR-001) | scanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF`, vault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` — authority key dead, historical only |
 | ProtocolConfig PDA (both) | `["protocol_config"]` under each program's ID |
-| Upgrade authority (devnet) | the deployer keypair (single key — see custody note) |
+| Upgrade authority (devnet) | the refresh deployer keypair (single key — see custody note) |
 | Config authority at initialize | the deployer keypair; `activity_oracle` and `launch_price_oracle` both start at the same key and rotate independently via `update_protocol_config` |
 
-The program IDs above are real keypairs (the old SHA-256-derived placeholders
-were keyless and undeployable). They are mirrored in both `declare_id!`
-calls, every `Anchor.toml` section, and the six fork suites that derive
-scanner PDAs.
+The current program IDs above are real keypairs. They are mirrored in both
+`declare_id!` calls, every `Anchor.toml` section, and the six fork suites
+that derive scanner PDAs.
 
 **Key custody (devnet):** the devnet keypairs are throwaways. They live
-OUTSIDE the repository (`devnet-keys/` in the operator workspace, never in
-git; `target/deploy/` copies are gitignored). NEVER reuse them for mainnet —
+OUTSIDE the repository (custody handoff directory in the operator
+workspace, never in git; `target/deploy/` copies are gitignored). The
+DR-001 refresh minted a fresh key generation (program, vault, deployer,
+intruder throwaway) after the original deployer key proved unrecoverable.
+The intruder keypair intentionally holds only fee dust (0.01 SOL) — it
+must be able to pay its own probe fee for the drill's rejection step to
+reach the program check (see §3). NEVER reuse any of them for mainnet —
 KEYS-003 requires fresh custody-generated keypairs for mainnet.
 
 ## Prerequisites
@@ -72,12 +97,18 @@ Stages, each with a hard refusal on mismatch:
    `declare_id!` value. An ELF deployed under an address different from its
    declared ID would fail every Anchor owner check at runtime; the script
    refuses instead of shipping a broken program.
-2. **Funding check** — deployer balance ≥ 2 SOL.
+2. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
+   against 6 000 000 000 (never by digit-stripping the human SOL display,
+   which mis-reads decimals).
 3. **Artifact seeding** — copies the keypairs into the gitignored
    `target/deploy/` for `cargo build-sbf`; refuses if that directory already
    holds a DIFFERENT keypair (stale artifacts would silently deploy under
    the wrong address).
-4. **Build** — `cargo build-sbf -p grave-scanner` then `-p grave-vault`.
+4. **Build** — per package directory: `cargo build-sbf` in
+   `programs/grave-scanner` then `programs/grave-vault` (agave 3.0.10's
+   `cargo-build-sbf` rejects workspace `-p` selection). Skipped entirely
+   with `--skip-build`, which deploys pre-built (e.g. CI-produced) ELFs
+   and does not require the SBF toolchain.
 5. **Deploy** — `solana program deploy` with the matching
    `--program-id` keypair; the deployer becomes the upgrade authority.
 
@@ -137,6 +168,14 @@ Per program, the drill asserts the full spec behavior:
    the program's `Unauthorized` (GraveScanner 6000 / GraveVault 7000). Any
    other outcome (including a silent land) fails the drill.
 5. Authority unpauses; readback asserts restoration.
+
+The intruder keypair must hold fee dust (0.01 SOL is plenty): the probe
+transaction is signed by the intruder alone, so the intruder pays its own
+fee. An unfunded intruder fails at the system level ("Attempt to debit an
+account but found no record of a prior credit") before the program's
+authority check runs — the drill treats that as a failure, as well it
+should, because the assertion is specifically that the PROGRAM reverts
+with `Unauthorized`.
 
 Stand-alone primitives: `pause --state true|false`, `check` (full config
 dump). Custom program errors are decoded against the compact table in
