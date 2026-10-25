@@ -1,0 +1,37 @@
+name: devnet-smoke
+
+# Scheduled read-only smoke against public devnet. The push-triggered CI
+# runs the same suite (DEVNET_RPC_URL is set there since this workflow was
+# introduced); the point of THIS workflow is the gap between pushes: a
+# degraded devnet, a broken program upgrade, or an RPC regression is
+# caught daily instead of at the next push. Read-only RPC calls, no keys
+# required — the suite is the SDK's own `devnet smoke (read-only)` block.
+
+on:
+  schedule:
+    # Daily at 06:37 UTC (off the top of the hour; unrelated to CI's
+    # Monday 04:17 so failures are attributable).
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devnet-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: sdk devnet smoke (read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @graveyield/sdk test
+        env:
+          DEVNET_RPC_URL: https://api.devnet.solana.com
