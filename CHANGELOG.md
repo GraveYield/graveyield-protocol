@@ -1,5 +1,55 @@
 # Changelog
 
+## [Unreleased — Phase 1 (build + reliability): TS lint/format enforcement, toolchain pin verification in CI]
+
+> Phase 1 charter: stabilize build and test workflows without changing
+> protocol economics or weakening security controls. No economic logic,
+> program instruction layout, or security behavior was modified — the
+> changes below are toolchain, lint hygiene, and CI enforcement only.
+
+### Added
+
+- **ESLint + Prettier for the TS workspaces** (`sdk`, `indexer`, `ops`,
+  `adversary`): flat config (`eslint.config.mjs`, typescript-eslint
+  recommended + eslint-config-prettier, exact-pinned `eslint@10.13.0`,
+  `typescript-eslint@8.72.0`, `prettier@3.9.10`), root scripts `lint`,
+  `fmt:ts`, `fmt:ts:check`, `.nvmrc` (node 24). Two documented rule
+  tunings: `no-unused-vars` honors the `_`-prefix convention and
+  rest-sibling omission; `no-empty-object-type` allows the deliberate
+  `Phase2Input` marker interface (published SDK surface).
+- **CI: `ts lint + format` job** — `pnpm lint` + `pnpm fmt:ts:check` are
+  now merge-blocking; previously only the Rust side had fmt/clippy gates.
+- **CI: pinned-toolchain verification** — `scripts/check-toolchain.sh`
+  existed pre-Phase-1 but was never wired into CI. The `anchor build` job
+  now installs node + pnpm alongside solana/anchor/rust and runs the
+  check, so a drift in ANY of the five pins (solana 3.0.x, anchor 0.32.x,
+  rust 1.91.x, node 24, pnpm 9) fails the build.
+
+### Fixed
+
+- **32 lint violations across 14 files** — all mechanical, zero behavior
+  change; full suite re-verified green (231/231 TS tests, builds,
+  typechecks): unused imports/locals removed (adversary tests, indexer,
+  ops, `sdk/src/client.ts`, `sdk/src/instructions.ts`), `let`→`const`
+  (ops tests), stale `eslint-disable` directives dropped (indexer),
+  `catch (e)`→`catch` (probe scripts), orphaned `b58decode` helper
+  removed (`scripts/fetch_v4_fork_fixtures.mjs`).
+- **`require()` eliminated from indexer sources** (`no-require-imports`):
+  the lazy `require("tweetnacl")` in `indexer/src/config.ts` became a
+  static import backed by a new narrow ambient declaration
+  (`indexer/src/tweetnacl.d.ts` — tweetnacl ships no types and no
+  @types package was fetchable); the `require("@solana/web3.js")`
+  placeholder in `indexer/src/index.ts` became a static import. Module
+  load order effects reviewed: both deps are hard dependencies of the
+  same code paths, only loaded marginally earlier at startup.
+
+### Changed
+
+- **Formatting**: one-time `prettier --write` pass across the TS
+  workspaces (printWidth 100; `.github/`, lockfiles, and prose excluded).
+  Whitespace/line-wrap only — eslint, typecheck, build, and all 231 tests
+  re-run green immediately after.
+
 ## [Unreleased — Phase 12 (security + economic testnet): the adversarial battery — 15 threat classes attacked across four layers, refuses-first proofs, findings ledger for the audit]
 
 > Roadmap Phase 12, verbatim goal: "Prove that GraveYield refuses to
