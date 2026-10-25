@@ -12,7 +12,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { buildAttestationMessage, parseAttestationMessage, ATTESTATION_MSG_LEN } from "@graveyield/sdk";
+import { buildAttestationMessage, parseAttestationMessage } from "@graveyield/sdk";
 import { key, POOL_A, SLOT_HASH, NOW } from "./helpers.js";
 
 describe("ADV-TS — fake timestamps", () => {

@@ -39,9 +39,7 @@ import {
   claimRecordPda,
   protocolTreasuryPda,
   vaultAuthorityPda,
-  vaultSolHoldingPda,
 } from "./pdas.js";
-import { WSOL_MINT, RAYDIUM_V4_PROGRAM_ID, JUPITER_V6_PROGRAM_ID } from "./raydiumV4Constants.js";
 
 /** Helper: convert a PublicKey to an AccountMeta with `isSigner=false, isWritable=false`. */
 function metaReadOnly(pubkey: PublicKey): AccountMeta {
@@ -244,7 +242,9 @@ export function buildInvalidateAnchorIx(opts: {
     programId: opts.scannerProgramId,
     keys: [
       metaReadOnly(scannerProtocolConfigPda(opts.scannerProgramId)),
-      metaWritable(eligibilityAnchorPda(opts.scannerProgramId, opts.ammProgramId, opts.poolAddress)),
+      metaWritable(
+        eligibilityAnchorPda(opts.scannerProgramId, opts.ammProgramId, opts.poolAddress),
+      ),
       metaSigner(opts.authority, false),
     ],
     data: Buffer.from(dataBytes),
@@ -385,7 +385,10 @@ export function buildSweepDustIx(opts: {
   memecoinMint: PublicKey;
   sweeper: PublicKey;
 }): TransactionInstruction {
-  const dataBytes = writer(8 + 32).bytes(VaultIx.sweepDust).bytes(pkBytes(opts.poolAddress)).done();
+  const dataBytes = writer(8 + 32)
+    .bytes(VaultIx.sweepDust)
+    .bytes(pkBytes(opts.poolAddress))
+    .done();
   const vaultAuthority = vaultAuthorityPda(opts.vaultProgramId);
   const treasury = protocolTreasuryPda(opts.vaultProgramId);
   // Derive ATAs (the standard SPL Associated Token layout).

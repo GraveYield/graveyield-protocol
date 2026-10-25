@@ -18,7 +18,7 @@
 // `buildAttestationMessage` + `buildEd25519VerifyInstruction` produce
 // the precompile instruction that the on-chain GraveScanner verifies.
 
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { deriveLastSwapV4, RAYDIUM_V4_PROGRAM_ID } from "@graveyield/sdk";
 import type { ActivityRecord, DiscoveredPool } from "./types.js";
 
@@ -64,12 +64,9 @@ export class ActivityIndexer {
     }
 
     const scanLimit = opts?.scanLimit ?? 1000;
-    const derivation = await deriveLastSwapV4(
-      connection,
-      RAYDIUM_V4_PROGRAM_ID,
-      pool.poolAddress,
-      { scanLimit },
-    );
+    const derivation = await deriveLastSwapV4(connection, RAYDIUM_V4_PROGRAM_ID, pool.poolAddress, {
+      scanLimit,
+    });
 
     const record: ActivityRecord = derivation
       ? {

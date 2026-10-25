@@ -11,7 +11,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { SnapshotMerkleTree, type HolderEntry, type SnapshotResult } from "@graveyield/sdk";
 
@@ -42,7 +41,10 @@ function fakeSnapshotResult(): SnapshotResult {
       poolAddress: pool,
       lpMint: key(0x51),
       totalSupply: new BN(1000),
-      holders: entries.map((entry) => ({ holder: entry.owner, balance: new BN(entry.lpBalance.toString(10)) })),
+      holders: entries.map((entry) => ({
+        holder: entry.owner,
+        balance: new BN(entry.lpBalance.toString(10)),
+      })),
       merkleRoot: tree.root(),
     },
     proofs: tree.proofs(),
@@ -91,7 +93,9 @@ describe("MerkleService — artifacts", () => {
     const artifact = buildArtifact(key(0x50), fakeSnapshotResult());
     const tampered: MerkleArtifact = {
       ...artifact,
-      holders: artifact.holders.map((h) => (h.owner === key(0x02).toBase58() ? { ...h, lpBalance: "999999" } : h)),
+      holders: artifact.holders.map((h) =>
+        h.owner === key(0x02).toBase58() ? { ...h, lpBalance: "999999" } : h,
+      ),
     };
     assert.throws(() => verifyArtifactInternally(tampered), /integrity mismatch/);
   });

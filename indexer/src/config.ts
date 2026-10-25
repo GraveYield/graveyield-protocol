@@ -18,6 +18,7 @@
 
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
+import nacl from "tweetnacl";
 
 /** Devnet GraveScanner program ID (handoff §3.2). */
 export const DEVNET_SCANNER_PROGRAM_ID = new PublicKey(
@@ -115,20 +116,15 @@ export function loadConfig(): IndexerConfig {
       if (decoded.length === 32) {
         activityOracleSecretKey = new Uint8Array(decoded);
         // Derive the public key from the secret key using tweetnacl.
-        const nacl = require("tweetnacl");
         const kp = nacl.sign.keyPair.fromSecretKey(activityOracleSecretKey);
         activityOraclePublicKey = new PublicKey(kp.publicKey);
       } else {
-        // eslint-disable-next-line no-console
         console.warn(
           `ACTIVITY_ORACLE_KEY is ${decoded.length} bytes (expected 32); running in discovery-only mode`,
         );
       }
     } catch {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "ACTIVITY_ORACLE_KEY is not valid base58; running in discovery-only mode",
-      );
+      console.warn("ACTIVITY_ORACLE_KEY is not valid base58; running in discovery-only mode");
     }
   }
 

@@ -43,9 +43,7 @@ const RAYDIUM_V4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
 // CPI-009's named example pool is a CLMM account (owner LBUZKh...), not V4;
 // the canonical Raydium SOL/USDC V4 pool is used instead and the checklist
 // example is corrected in the CPI-009 retirement entry.
-const POOL_CANDIDATES = [
-  "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
-];
+const POOL_CANDIDATES = ["58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"];
 
 // ---------------------------------------------------------------- base58
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -65,28 +63,10 @@ function b58encode(bytes) {
     }
   }
   for (let i = 0; bytes[i] === 0 && i < bytes.length - 1; i++) digits.push(0);
-  return digits.reverse().map((d) => B58[d]).join("");
-}
-function b58decode(s) {
-  const bytes = [];
-  let zeros = 0;
-  for (let i = 0; i < s.length && s[i] === "1"; i++) zeros++;
-  for (const ch of s) {
-    const val = B58.indexOf(ch);
-    if (val < 0) throw new Error(`bad base58 char ${ch}`);
-    let carry = val;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  for (let i = 0; i < zeros; i++) bytes.push(0);
-  return Buffer.from(bytes.reverse());
+  return digits
+    .reverse()
+    .map((d) => B58[d])
+    .join("");
 }
 
 // ---------------------------------------------------------------- rpc
@@ -136,9 +116,6 @@ function u64le(buf, off) {
 function pk(buf, off) {
   return b58encode(buf.subarray(off, off + 32));
 }
-function locate(hay, pubkeyStr) {
-  return hay.indexOf(b58decode(pubkeyStr));
-}
 
 // ---------------------------------------------------------------- program ELF
 async function getProgramElf(programId, label) {
@@ -148,25 +125,45 @@ async function getProgramElf(programId, label) {
     console.log(`  ${label}: direct ELF ${prog.data.length} bytes`);
     return prog.data;
   }
-  if (prog.data.length < 36) throw new Error(`${label}: program account too small (${prog.data.length})`);
+  if (prog.data.length < 36)
+    throw new Error(`${label}: program account too small (${prog.data.length})`);
   // Upgradeable loader Program layout: [u32 variant][programdata pubkey] = 36 bytes.
   const dataAddr = pk(prog.data, 4);
   const dataAcct = await getAccount(dataAddr);
   if (!dataAcct) throw new Error(`${label}: programdata ${dataAddr} not found`);
   let off = -1;
   for (let i = 0; i < 256; i++) {
-    if (dataAcct.data[i] === 0x7f && dataAcct.data[i + 1] === 0x45 && dataAcct.data[i + 2] === 0x4c && dataAcct.data[i + 3] === 0x46) { off = i; break; }
+    if (
+      dataAcct.data[i] === 0x7f &&
+      dataAcct.data[i + 1] === 0x45 &&
+      dataAcct.data[i + 2] === 0x4c &&
+      dataAcct.data[i + 3] === 0x46
+    ) {
+      off = i;
+      break;
+    }
   }
   if (off < 0) throw new Error(`${label}: no ELF magic in programdata`);
-  console.log(`  ${label}: ELF @ programdata+${off} (${dataAcct.data.length - off} bytes, programdata ${dataAddr})`);
+  console.log(
+    `  ${label}: ELF @ programdata+${off} (${dataAcct.data.length - off} bytes, programdata ${dataAddr})`,
+  );
   return dataAcct.data.subarray(off);
 }
 
 // ---------------------------------------------------------------- AmmInfo
 const AMM = {
-  STATUS: 0, STATE: 48, LP_AMOUNT: 720,
-  COIN_VAULT: 336, PC_VAULT: 368, COIN_MINT: 400, PC_MINT: 432, LP_MINT: 464,
-  OPEN_ORDERS: 496, MARKET: 528, MARKET_PROGRAM: 560, TARGET_ORDERS: 592,
+  STATUS: 0,
+  STATE: 48,
+  LP_AMOUNT: 720,
+  COIN_VAULT: 336,
+  PC_VAULT: 368,
+  COIN_MINT: 400,
+  PC_MINT: 432,
+  LP_MINT: 464,
+  OPEN_ORDERS: 496,
+  MARKET: 528,
+  MARKET_PROGRAM: 560,
+  TARGET_ORDERS: 592,
 };
 
 async function loadPool(poolAddr, fileSuffix = "") {
@@ -189,18 +186,30 @@ async function loadPool(poolAddr, fileSuffix = "") {
   const marketProgram = pk(pool.data, AMM.MARKET_PROGRAM);
   const targetOrders = pk(pool.data, AMM.TARGET_ORDERS);
   console.log(`  status=${status} state=${state} lpAmount=${lpAmount}`);
-  console.log(`  coinVault=${coinVault}\n  pcVault=${pcVault}\n  coinMint=${coinMint}\n  pcMint=${pcMint}\n  lpMint=${lpMint}`);
-  console.log(`  openOrders=${openOrders}\n  market=${market}\n  marketProgram=${marketProgram}\n  targetOrders=${targetOrders}`);
+  console.log(
+    `  coinVault=${coinVault}\n  pcVault=${pcVault}\n  coinMint=${coinMint}\n  pcMint=${pcMint}\n  lpMint=${lpMint}`,
+  );
+  console.log(
+    `  openOrders=${openOrders}\n  market=${market}\n  marketProgram=${marketProgram}\n  targetOrders=${targetOrders}`,
+  );
 
   const [coinVaultA, pcVaultA, coinMintA, pcMintA, lpMintA, openOrdersA, marketA, targetOrdersA] =
-    await Promise.all([coinVault, pcVault, coinMint, pcMint, lpMint, openOrders, market, targetOrders].map(getAccount));
+    await Promise.all(
+      [coinVault, pcVault, coinMint, pcMint, lpMint, openOrders, market, targetOrders].map(
+        getAccount,
+      ),
+    );
 
   // ---- AmmInfo cross-proofs
   if (coinVaultA.owner !== TOKEN_PROGRAM || pcVaultA.owner !== TOKEN_PROGRAM)
     throw new Error("pool vaults not owned by SPL token program (offsets 336/368 wrong?)");
   if (pk(coinVaultA.data, 0) !== coinMint) throw new Error("coinVault.mint != pool.coinMint");
   if (pk(pcVaultA.data, 0) !== pcMint) throw new Error("pcVault.mint != pool.pcMint");
-  for (const [n, a] of [["coinMint", coinMintA], ["pcMint", pcMintA], ["lpMint", lpMintA]]) {
+  for (const [n, a] of [
+    ["coinMint", coinMintA],
+    ["pcMint", pcMintA],
+    ["lpMint", lpMintA],
+  ]) {
     if (a.owner !== TOKEN_PROGRAM) throw new Error(`${n} not owned by SPL token program`);
   }
   if (lpMintA.data.length !== 82) throw new Error(`lpMint size ${lpMintA.data.length} != 82`);
@@ -212,13 +221,25 @@ async function loadPool(poolAddr, fileSuffix = "") {
 
   // ---- serum market cross-proofs (market_program stored in AmmInfo@560 must
   // own the market account; open orders + target orders owners follow suit)
-  if (marketA.owner !== marketProgram) throw new Error(`market.owner ${marketA.owner} != pool.marketProgram (offset 528/560 wrong?)`);
-  if (openOrdersA.owner !== marketProgram) throw new Error(`openOrders.owner != marketProgram (offset 496 wrong?)`);
-  if (targetOrdersA.owner !== RAYDIUM_V4) throw new Error(`targetOrders.owner ${targetOrdersA.owner} != Raydium V4 (offset 592 wrong?)`);
+  if (marketA.owner !== marketProgram)
+    throw new Error(`market.owner ${marketA.owner} != pool.marketProgram (offset 528/560 wrong?)`);
+  if (openOrdersA.owner !== marketProgram)
+    throw new Error(`openOrders.owner != marketProgram (offset 496 wrong?)`);
+  if (targetOrdersA.owner !== RAYDIUM_V4)
+    throw new Error(`targetOrders.owner ${targetOrdersA.owner} != Raydium V4 (offset 592 wrong?)`);
 
   // ---- Serum MarketState parse (5-byte "serum" head padding)
-  if (marketA.data.subarray(0, 5).toString() !== "serum") throw new Error("market account missing 'serum' head padding");
-  const M = { COIN_MINT: 53, PC_MINT: 85, COIN_VAULT: 117, PC_VAULT: 165, EVENT_Q: 253, BIDS: 285, ASKS: 317 };
+  if (marketA.data.subarray(0, 5).toString() !== "serum")
+    throw new Error("market account missing 'serum' head padding");
+  const M = {
+    COIN_MINT: 53,
+    PC_MINT: 85,
+    COIN_VAULT: 117,
+    PC_VAULT: 165,
+    EVENT_Q: 253,
+    BIDS: 285,
+    ASKS: 317,
+  };
   const mCoinMint = pk(marketA.data, M.COIN_MINT);
   const mPcMint = pk(marketA.data, M.PC_MINT);
   const mCoinVault = pk(marketA.data, M.COIN_VAULT);
@@ -226,22 +247,35 @@ async function loadPool(poolAddr, fileSuffix = "") {
   const eventQueue = pk(marketA.data, M.EVENT_Q);
   const bids = pk(marketA.data, M.BIDS);
   const asks = pk(marketA.data, M.ASKS);
-  console.log(`  serum market: coinMint=${mCoinMint} pcMint=${mPcMint}\n  serum coinVault=${mCoinVault} pcVault=${mPcVault}\n  eventQ=${eventQueue} bids=${bids} asks=${asks}`);
+  console.log(
+    `  serum market: coinMint=${mCoinMint} pcMint=${mPcMint}\n  serum coinVault=${mCoinVault} pcVault=${mPcVault}\n  eventQ=${eventQueue} bids=${bids} asks=${asks}`,
+  );
   const mintsSet = new Set([coinMint, pcMint]);
-  if (!mintsSet.has(mCoinMint) || !mintsSet.has(mPcMint)) throw new Error("serum market mints != pool mints (market layout wrong?)");
+  if (!mintsSet.has(mCoinMint) || !mintsSet.has(mPcMint))
+    throw new Error("serum market mints != pool mints (market layout wrong?)");
 
   const [mCoinVaultA, mPcVaultA, eventQueueA, bidsA, asksA] = await Promise.all(
-    [mCoinVault, mPcVault, eventQueue, bids, asks].map(getAccount));
-  for (const [n, a] of [["serum coinVault", mCoinVaultA], ["serum pcVault", mPcVaultA]]) {
+    [mCoinVault, mPcVault, eventQueue, bids, asks].map(getAccount),
+  );
+  for (const [n, a] of [
+    ["serum coinVault", mCoinVaultA],
+    ["serum pcVault", mPcVaultA],
+  ]) {
     if (a.owner !== TOKEN_PROGRAM) throw new Error(`${n} not a token account`);
   }
   if (pk(mCoinVaultA.data, 0) !== mCoinMint) throw new Error("serum coinVault.mint mismatch");
   if (pk(mPcVaultA.data, 0) !== mPcMint) throw new Error("serum pcVault.mint mismatch");
   const vaultSigner = pk(mCoinVaultA.data, 32);
-  if (pk(mPcVaultA.data, 32) !== vaultSigner) throw new Error("serum vault owners disagree (vault signer derivation failed)");
+  if (pk(mPcVaultA.data, 32) !== vaultSigner)
+    throw new Error("serum vault owners disagree (vault signer derivation failed)");
   console.log(`  marketVaultSigner=${vaultSigner} (read from vault owner fields)`);
-  for (const [n, a] of [["eventQueue", eventQueueA], ["bids", bidsA], ["asks", asksA]]) {
-    if (a.owner !== marketProgram) throw new Error(`${n}.owner != marketProgram (serum layout wrong?)`);
+  for (const [n, a] of [
+    ["eventQueue", eventQueueA],
+    ["bids", bidsA],
+    ["asks", asksA],
+  ]) {
+    if (a.owner !== marketProgram)
+      throw new Error(`${n}.owner != marketProgram (serum layout wrong?)`);
   }
 
   // CPI mapping by mint (orientation-agnostic): the vault's remaining
@@ -268,19 +302,53 @@ async function loadPool(poolAddr, fileSuffix = "") {
   console.log(`  planned LP burn = ${lpAmountPlan}; expected coinOut=${coinOut} pcOut=${pcOut}`);
   const baseOut = baseIsCoinSide ? coinOut : pcOut;
   const memecoinOut = baseIsCoinSide ? pcOut : coinOut;
-  if (baseOut === 0n || memecoinOut === 0n) throw new Error("expected withdraw rounds to 0 on one side — V4 rejects zero outputs");
+  if (baseOut === 0n || memecoinOut === 0n)
+    throw new Error("expected withdraw rounds to 0 on one side — V4 rejects zero outputs");
 
   return {
-    pool, coinVaultA, pcVaultA, coinMintA, pcMintA, lpMintA, openOrdersA, marketA,
-    targetOrdersA, mCoinVaultA, mPcVaultA, eventQueueA, bidsA, asksA,
+    pool,
+    coinVaultA,
+    pcVaultA,
+    coinMintA,
+    pcMintA,
+    lpMintA,
+    openOrdersA,
+    marketA,
+    targetOrdersA,
+    mCoinVaultA,
+    mPcVaultA,
+    eventQueueA,
+    bidsA,
+    asksA,
     parsed: {
-      status: status.toString(), state: state.toString(), amm_lp_amount: lpAmount.toString(),
-      coinVault, pcVault, coinMint, pcMint, lpMint, openOrders, market, marketProgram,
-      targetOrders, marketCoinVault, marketPcVault, vaultSigner, eventQueue, bids, asks,
-      baseIsCoinSide, coinReserve: coinReserve.toString(), pcReserve: pcReserve.toString(),
-      lpSupply: lpSupply.toString(), coinDecimals: coinMintA.data[44], pcDecimals: pcMintA.data[44],
-      lpDecimals: lpMintA.data[44], lpAmountPlan: lpAmountPlan.toString(),
-      expectedCoinOut: coinOut.toString(), expectedPcOut: pcOut.toString(),
+      status: status.toString(),
+      state: state.toString(),
+      amm_lp_amount: lpAmount.toString(),
+      coinVault,
+      pcVault,
+      coinMint,
+      pcMint,
+      lpMint,
+      openOrders,
+      market,
+      marketProgram,
+      targetOrders,
+      marketCoinVault,
+      marketPcVault,
+      vaultSigner,
+      eventQueue,
+      bids,
+      asks,
+      baseIsCoinSide,
+      coinReserve: coinReserve.toString(),
+      pcReserve: pcReserve.toString(),
+      lpSupply: lpSupply.toString(),
+      coinDecimals: coinMintA.data[44],
+      pcDecimals: pcMintA.data[44],
+      lpDecimals: lpMintA.data[44],
+      lpAmountPlan: lpAmountPlan.toString(),
+      expectedCoinOut: coinOut.toString(),
+      expectedPcOut: pcOut.toString(),
     },
   };
 }
@@ -313,8 +381,21 @@ async function main() {
   }
   if (!loaded) throw new Error("no candidate pool passed validation");
   const {
-    pool, coinVaultA, pcVaultA, coinMintA, pcMintA, lpMintA, openOrdersA, marketA,
-    targetOrdersA, mCoinVaultA, mPcVaultA, eventQueueA, bidsA, asksA, parsed,
+    pool,
+    coinVaultA,
+    pcVaultA,
+    coinMintA,
+    pcMintA,
+    lpMintA,
+    openOrdersA,
+    marketA,
+    targetOrdersA,
+    mCoinVaultA,
+    mPcVaultA,
+    eventQueueA,
+    bidsA,
+    asksA,
+    parsed,
   } = loaded;
 
   // ---- Phase 3 orientation pool (pc = WSOL). Best-effort: a failure here
@@ -354,21 +435,34 @@ async function main() {
     // 0-lamport system account (empty file).
     let oVaultSignerA = await getAccount(o.parsed.vaultSigner);
     if (!oVaultSignerA) {
-      console.log("  orientation pool vault signer not funded on mainnet — recording empty account");
-      oVaultSignerA = { pubkey: o.parsed.vaultSigner, lamports: 0, owner: "11111111111111111111111111111111", data: Buffer.alloc(0) };
+      console.log(
+        "  orientation pool vault signer not funded on mainnet — recording empty account",
+      );
+      oVaultSignerA = {
+        pubkey: o.parsed.vaultSigner,
+        lamports: 0,
+        owner: "11111111111111111111111111111111",
+        data: Buffer.alloc(0),
+      };
     }
     const serumElf2 = await getProgramElf(o.parsed.marketProgram, "serum_dex2");
     orientationFiles["serum_dex2.so"] = serumElf2;
     const oFiles = {
-      "pool2.bin": o.pool.data, "coin_vault2.bin": o.coinVaultA.data,
-      "pc_vault2.bin": o.pcVaultA.data, "coin_mint2.bin": o.coinMintA.data,
-      "pc_mint2.bin": o.pcMintA.data, "lp_mint2.bin": o.lpMintA.data,
-      "open_orders2.bin": o.openOrdersA.data, "market2.bin": o.marketA.data,
+      "pool2.bin": o.pool.data,
+      "coin_vault2.bin": o.coinVaultA.data,
+      "pc_vault2.bin": o.pcVaultA.data,
+      "coin_mint2.bin": o.coinMintA.data,
+      "pc_mint2.bin": o.pcMintA.data,
+      "lp_mint2.bin": o.lpMintA.data,
+      "open_orders2.bin": o.openOrdersA.data,
+      "market2.bin": o.marketA.data,
       "target_orders2.bin": o.targetOrdersA.data,
       "market_coin_vault2.bin": o.mCoinVaultA.data,
       "market_pc_vault2.bin": o.mPcVaultA.data,
-      "event_queue2.bin": o.eventQueueA.data, "bids2.bin": o.bidsA.data,
-      "asks2.bin": o.asksA.data, "vault_signer2.bin": oVaultSignerA.data,
+      "event_queue2.bin": o.eventQueueA.data,
+      "bids2.bin": o.bidsA.data,
+      "asks2.bin": o.asksA.data,
+      "vault_signer2.bin": oVaultSignerA.data,
     };
     Object.assign(orientationFiles, oFiles);
     orientationSection = {
@@ -376,27 +470,111 @@ async function main() {
       market_program: o.parsed.marketProgram,
       base_is_coin_side: o.parsed.baseIsCoinSide,
       accounts: {
-        pool: { pubkey: o.pool.pubkey, lamports: o.pool.lamports, owner: o.pool.owner, file: "pool2.bin" },
-        coin_vault: { pubkey: o.parsed.coinVault, lamports: o.coinVaultA.lamports, owner: o.coinVaultA.owner, file: "coin_vault2.bin" },
-        pc_vault: { pubkey: o.parsed.pcVault, lamports: o.pcVaultA.lamports, owner: o.pcVaultA.owner, file: "pc_vault2.bin" },
-        coin_mint: { pubkey: o.parsed.coinMint, lamports: o.coinMintA.lamports, owner: o.coinMintA.owner, file: "coin_mint2.bin" },
-        pc_mint: { pubkey: o.parsed.pcMint, lamports: o.pcMintA.lamports, owner: o.pcMintA.owner, file: "pc_mint2.bin" },
-        lp_mint: { pubkey: o.parsed.lpMint, lamports: o.lpMintA.lamports, owner: o.lpMintA.owner, file: "lp_mint2.bin" },
-        open_orders: { pubkey: o.parsed.openOrders, lamports: o.openOrdersA.lamports, owner: o.openOrdersA.owner, file: "open_orders2.bin" },
-        market: { pubkey: o.parsed.market, lamports: o.marketA.lamports, owner: o.marketA.owner, file: "market2.bin" },
-        target_orders: { pubkey: o.parsed.targetOrders, lamports: o.targetOrdersA.lamports, owner: o.targetOrdersA.owner, file: "target_orders2.bin" },
-        market_coin_vault: { pubkey: o.parsed.marketCoinVault, lamports: o.mCoinVaultA.lamports, owner: o.mCoinVaultA.owner, file: "market_coin_vault2.bin" },
-        market_pc_vault: { pubkey: o.parsed.marketPcVault, lamports: o.mPcVaultA.lamports, owner: o.mPcVaultA.owner, file: "market_pc_vault2.bin" },
-        event_queue: { pubkey: o.parsed.eventQueue, lamports: o.eventQueueA.lamports, owner: o.eventQueueA.owner, file: "event_queue2.bin" },
-        bids: { pubkey: o.parsed.bids, lamports: o.bidsA.lamports, owner: o.bidsA.owner, file: "bids2.bin" },
-        asks: { pubkey: o.parsed.asks, lamports: o.asksA.lamports, owner: o.asksA.owner, file: "asks2.bin" },
-        vault_signer: { pubkey: o.parsed.vaultSigner, lamports: oVaultSignerA.lamports, owner: oVaultSignerA.owner, file: "vault_signer2.bin" },
+        pool: {
+          pubkey: o.pool.pubkey,
+          lamports: o.pool.lamports,
+          owner: o.pool.owner,
+          file: "pool2.bin",
+        },
+        coin_vault: {
+          pubkey: o.parsed.coinVault,
+          lamports: o.coinVaultA.lamports,
+          owner: o.coinVaultA.owner,
+          file: "coin_vault2.bin",
+        },
+        pc_vault: {
+          pubkey: o.parsed.pcVault,
+          lamports: o.pcVaultA.lamports,
+          owner: o.pcVaultA.owner,
+          file: "pc_vault2.bin",
+        },
+        coin_mint: {
+          pubkey: o.parsed.coinMint,
+          lamports: o.coinMintA.lamports,
+          owner: o.coinMintA.owner,
+          file: "coin_mint2.bin",
+        },
+        pc_mint: {
+          pubkey: o.parsed.pcMint,
+          lamports: o.pcMintA.lamports,
+          owner: o.pcMintA.owner,
+          file: "pc_mint2.bin",
+        },
+        lp_mint: {
+          pubkey: o.parsed.lpMint,
+          lamports: o.lpMintA.lamports,
+          owner: o.lpMintA.owner,
+          file: "lp_mint2.bin",
+        },
+        open_orders: {
+          pubkey: o.parsed.openOrders,
+          lamports: o.openOrdersA.lamports,
+          owner: o.openOrdersA.owner,
+          file: "open_orders2.bin",
+        },
+        market: {
+          pubkey: o.parsed.market,
+          lamports: o.marketA.lamports,
+          owner: o.marketA.owner,
+          file: "market2.bin",
+        },
+        target_orders: {
+          pubkey: o.parsed.targetOrders,
+          lamports: o.targetOrdersA.lamports,
+          owner: o.targetOrdersA.owner,
+          file: "target_orders2.bin",
+        },
+        market_coin_vault: {
+          pubkey: o.parsed.marketCoinVault,
+          lamports: o.mCoinVaultA.lamports,
+          owner: o.mCoinVaultA.owner,
+          file: "market_coin_vault2.bin",
+        },
+        market_pc_vault: {
+          pubkey: o.parsed.marketPcVault,
+          lamports: o.mPcVaultA.lamports,
+          owner: o.mPcVaultA.owner,
+          file: "market_pc_vault2.bin",
+        },
+        event_queue: {
+          pubkey: o.parsed.eventQueue,
+          lamports: o.eventQueueA.lamports,
+          owner: o.eventQueueA.owner,
+          file: "event_queue2.bin",
+        },
+        bids: {
+          pubkey: o.parsed.bids,
+          lamports: o.bidsA.lamports,
+          owner: o.bidsA.owner,
+          file: "bids2.bin",
+        },
+        asks: {
+          pubkey: o.parsed.asks,
+          lamports: o.asksA.lamports,
+          owner: o.asksA.owner,
+          file: "asks2.bin",
+        },
+        vault_signer: {
+          pubkey: o.parsed.vaultSigner,
+          lamports: oVaultSignerA.lamports,
+          owner: oVaultSignerA.owner,
+          file: "vault_signer2.bin",
+        },
       },
       parsed: o.parsed,
       v4_remaining_accounts: [
-        o.parsed.openOrders, o.parsed.targetOrders, o.parsed.coinVault, o.parsed.pcVault,
-        o.parsed.marketProgram, o.parsed.market, o.parsed.marketCoinVault, o.parsed.marketPcVault,
-        o.parsed.vaultSigner, o.parsed.eventQueue, o.parsed.bids, o.parsed.asks,
+        o.parsed.openOrders,
+        o.parsed.targetOrders,
+        o.parsed.coinVault,
+        o.parsed.pcVault,
+        o.parsed.marketProgram,
+        o.parsed.market,
+        o.parsed.marketCoinVault,
+        o.parsed.marketPcVault,
+        o.parsed.vaultSigner,
+        o.parsed.eventQueue,
+        o.parsed.bids,
+        o.parsed.asks,
       ],
     };
     if (o.parsed.baseIsCoinSide !== false) {
@@ -405,13 +583,26 @@ async function main() {
   }
 
   const files = {
-    "raydium_v4.so": v4Elf, "serum_dex.so": serumElf, "spl_token.so": tokenElf, "spl_ata.so": ataElf,
-    "pool.bin": pool.data, "coin_vault.bin": coinVaultA.data, "pc_vault.bin": pcVaultA.data,
-    "coin_mint.bin": coinMintA.data, "pc_mint.bin": pcMintA.data, "lp_mint.bin": lpMintA.data,
-    "wsol_mint.bin": wsolMintA.data, "open_orders.bin": openOrdersA.data, "market.bin": marketA.data,
-    "target_orders.bin": targetOrdersA.data, "market_coin_vault.bin": mCoinVaultA.data,
-    "market_pc_vault.bin": mPcVaultA.data, "event_queue.bin": eventQueueA.data,
-    "bids.bin": bidsA.data, "asks.bin": asksA.data, "vault_signer.bin": vaultSignerA.data,
+    "raydium_v4.so": v4Elf,
+    "serum_dex.so": serumElf,
+    "spl_token.so": tokenElf,
+    "spl_ata.so": ataElf,
+    "pool.bin": pool.data,
+    "coin_vault.bin": coinVaultA.data,
+    "pc_vault.bin": pcVaultA.data,
+    "coin_mint.bin": coinMintA.data,
+    "pc_mint.bin": pcMintA.data,
+    "lp_mint.bin": lpMintA.data,
+    "wsol_mint.bin": wsolMintA.data,
+    "open_orders.bin": openOrdersA.data,
+    "market.bin": marketA.data,
+    "target_orders.bin": targetOrdersA.data,
+    "market_coin_vault.bin": mCoinVaultA.data,
+    "market_pc_vault.bin": mPcVaultA.data,
+    "event_queue.bin": eventQueueA.data,
+    "bids.bin": bidsA.data,
+    "asks.bin": asksA.data,
+    "vault_signer.bin": vaultSignerA.data,
   };
 
   const manifest = {
@@ -425,29 +616,103 @@ async function main() {
     wsol_mint: WSOL,
     accounts: {
       pool: { pubkey: pool.pubkey, lamports: pool.lamports, owner: pool.owner, file: "pool.bin" },
-      coin_vault: { pubkey: parsed.coinVault, lamports: coinVaultA.lamports, owner: coinVaultA.owner, file: "coin_vault.bin" },
-      pc_vault: { pubkey: parsed.pcVault, lamports: pcVaultA.lamports, owner: pcVaultA.owner, file: "pc_vault.bin" },
-      coin_mint: { pubkey: parsed.coinMint, lamports: coinMintA.lamports, owner: coinMintA.owner, file: "coin_mint.bin" },
-      pc_mint: { pubkey: parsed.pcMint, lamports: pcMintA.lamports, owner: pcMintA.owner, file: "pc_mint.bin" },
-      lp_mint: { pubkey: parsed.lpMint, lamports: lpMintA.lamports, owner: lpMintA.owner, file: "lp_mint.bin" },
-      wsol_mint: { pubkey: WSOL, lamports: wsolMintA.lamports, owner: wsolMintA.owner, file: "wsol_mint.bin" },
-      open_orders: { pubkey: parsed.openOrders, lamports: openOrdersA.lamports, owner: openOrdersA.owner, file: "open_orders.bin" },
-      market: { pubkey: parsed.market, lamports: marketA.lamports, owner: marketA.owner, file: "market.bin" },
-      target_orders: { pubkey: parsed.targetOrders, lamports: targetOrdersA.lamports, owner: targetOrdersA.owner, file: "target_orders.bin" },
-      market_coin_vault: { pubkey: parsed.marketCoinVault, lamports: mCoinVaultA.lamports, owner: mCoinVaultA.owner, file: "market_coin_vault.bin" },
-      market_pc_vault: { pubkey: parsed.marketPcVault, lamports: mPcVaultA.lamports, owner: mPcVaultA.owner, file: "market_pc_vault.bin" },
-      event_queue: { pubkey: parsed.eventQueue, lamports: eventQueueA.lamports, owner: eventQueueA.owner, file: "event_queue.bin" },
+      coin_vault: {
+        pubkey: parsed.coinVault,
+        lamports: coinVaultA.lamports,
+        owner: coinVaultA.owner,
+        file: "coin_vault.bin",
+      },
+      pc_vault: {
+        pubkey: parsed.pcVault,
+        lamports: pcVaultA.lamports,
+        owner: pcVaultA.owner,
+        file: "pc_vault.bin",
+      },
+      coin_mint: {
+        pubkey: parsed.coinMint,
+        lamports: coinMintA.lamports,
+        owner: coinMintA.owner,
+        file: "coin_mint.bin",
+      },
+      pc_mint: {
+        pubkey: parsed.pcMint,
+        lamports: pcMintA.lamports,
+        owner: pcMintA.owner,
+        file: "pc_mint.bin",
+      },
+      lp_mint: {
+        pubkey: parsed.lpMint,
+        lamports: lpMintA.lamports,
+        owner: lpMintA.owner,
+        file: "lp_mint.bin",
+      },
+      wsol_mint: {
+        pubkey: WSOL,
+        lamports: wsolMintA.lamports,
+        owner: wsolMintA.owner,
+        file: "wsol_mint.bin",
+      },
+      open_orders: {
+        pubkey: parsed.openOrders,
+        lamports: openOrdersA.lamports,
+        owner: openOrdersA.owner,
+        file: "open_orders.bin",
+      },
+      market: {
+        pubkey: parsed.market,
+        lamports: marketA.lamports,
+        owner: marketA.owner,
+        file: "market.bin",
+      },
+      target_orders: {
+        pubkey: parsed.targetOrders,
+        lamports: targetOrdersA.lamports,
+        owner: targetOrdersA.owner,
+        file: "target_orders.bin",
+      },
+      market_coin_vault: {
+        pubkey: parsed.marketCoinVault,
+        lamports: mCoinVaultA.lamports,
+        owner: mCoinVaultA.owner,
+        file: "market_coin_vault.bin",
+      },
+      market_pc_vault: {
+        pubkey: parsed.marketPcVault,
+        lamports: mPcVaultA.lamports,
+        owner: mPcVaultA.owner,
+        file: "market_pc_vault.bin",
+      },
+      event_queue: {
+        pubkey: parsed.eventQueue,
+        lamports: eventQueueA.lamports,
+        owner: eventQueueA.owner,
+        file: "event_queue.bin",
+      },
       bids: { pubkey: parsed.bids, lamports: bidsA.lamports, owner: bidsA.owner, file: "bids.bin" },
       asks: { pubkey: parsed.asks, lamports: asksA.lamports, owner: asksA.owner, file: "asks.bin" },
-      vault_signer: { pubkey: parsed.vaultSigner, lamports: vaultSignerA.lamports, owner: vaultSignerA.owner, file: "vault_signer.bin" },
+      vault_signer: {
+        pubkey: parsed.vaultSigner,
+        lamports: vaultSignerA.lamports,
+        owner: vaultSignerA.owner,
+        file: "vault_signer.bin",
+      },
     },
     parsed,
     // The 12 pool-derived remaining accounts in vault CPI order (ra_idx 1..12).
     // Index 0 (amm_authority) is the hardcoded constant, not fetched.
     v4_remaining_accounts: [
-      parsed.openOrders, parsed.targetOrders, parsed.coinVault, parsed.pcVault,
-      parsed.marketProgram, parsed.market, parsed.marketCoinVault, parsed.marketPcVault,
-      parsed.vaultSigner, parsed.eventQueue, parsed.bids, parsed.asks,
+      parsed.openOrders,
+      parsed.targetOrders,
+      parsed.coinVault,
+      parsed.pcVault,
+      parsed.marketProgram,
+      parsed.market,
+      parsed.marketCoinVault,
+      parsed.marketPcVault,
+      parsed.vaultSigner,
+      parsed.eventQueue,
+      parsed.bids,
+      parsed.asks,
     ],
   };
 

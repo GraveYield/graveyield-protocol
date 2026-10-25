@@ -9,7 +9,6 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { PublicKey } from "@solana/web3.js";
 
 import {
   buildAttestationMessage,
@@ -20,7 +19,16 @@ import {
   LAUNCH_PRICE_MSG_LEN,
 } from "@graveyield/sdk";
 import { preFilterPool, type PreFilterThresholds } from "@graveyield/indexer";
-import { key, synthAmmInfo, readPubkeyAt, POOL_A, POOL_B, MEME_MINT, SLOT_HASH, NOW } from "./helpers.js";
+import {
+  key,
+  synthAmmInfo,
+  readPubkeyAt,
+  POOL_A,
+  POOL_B,
+  MEME_MINT,
+  SLOT_HASH,
+  NOW,
+} from "./helpers.js";
 
 const THRESHOLDS: PreFilterThresholds = {
   inactivitySeconds: 7_776_000n,

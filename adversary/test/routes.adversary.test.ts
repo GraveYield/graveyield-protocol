@@ -7,7 +7,7 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { PublicKey, type AccountMeta } from "@solana/web3.js";
+import { type AccountMeta } from "@solana/web3.js";
 
 import {
   buildSalvagePoolIx,

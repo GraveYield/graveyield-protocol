@@ -12,7 +12,7 @@
 // batch-fetch pattern (three `getAccountInfo` calls per pool — one
 // per mint).
 
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { unpackMint } from "@solana/spl-token";
 import type { DiscoveredPool, TokenMetadata } from "./types.js";
 

@@ -24,7 +24,7 @@ function collectingSink(): { sink: AlertSink; alerts: Alert[] } {
 
 describe("AlertManager", () => {
   test("first raise is delivered unsuppressed", () => {
-    let now = 1_000;
+    const now = 1_000;
     const { sink, alerts } = collectingSink();
     const manager = new AlertManager(sink, 30 * 60 * 1000, () => now);
     const raised = manager.raise("receipt-sum-mismatch", "critical", "bad math", { total: "3" });
@@ -59,7 +59,7 @@ describe("AlertManager", () => {
 
   test("different codes do not suppress each other", () => {
     const { sink, alerts } = collectingSink();
-    let now = 1_000;
+    const now = 1_000;
     const manager = new AlertManager(sink, 30 * 60 * 1000, () => now);
     manager.raise("code-a", "warn", "a");
     manager.raise("code-b", "warn", "b");
@@ -118,8 +118,22 @@ describe("sinks", () => {
       }
       throw new Error("disk full");
     });
-    sink.deliver({ code: "a", severity: "info", message: "one", atMs: 1, context: {}, suppressed: false });
-    sink.deliver({ code: "b", severity: "info", message: "two", atMs: 2, context: {}, suppressed: true });
+    sink.deliver({
+      code: "a",
+      severity: "info",
+      message: "one",
+      atMs: 1,
+      context: {},
+      suppressed: false,
+    });
+    sink.deliver({
+      code: "b",
+      severity: "info",
+      message: "two",
+      atMs: 2,
+      context: {},
+      suppressed: true,
+    });
     assert.equal(written.length, 1);
     const parsed = JSON.parse(written[0] ?? "{}") as Alert;
     assert.equal(parsed.code, "a");
@@ -132,7 +146,14 @@ describe("sinks", () => {
       posts.push({ url, init: init ?? {} });
       return new Response(null, { status: 200 });
     });
-    await sink.deliver({ code: "a", severity: "critical", message: "m", atMs: 1, context: {}, suppressed: false });
+    await sink.deliver({
+      code: "a",
+      severity: "critical",
+      message: "m",
+      atMs: 1,
+      context: {},
+      suppressed: false,
+    });
     assert.equal(sink.lastDeliveryError(), null);
     assert.equal(posts.length, 1);
     assert.equal(posts[0]?.url, "https://hooks.example/graveyield");
@@ -140,7 +161,14 @@ describe("sinks", () => {
     const failing = new WebhookAlertSink("https://hooks.example/graveyield", async () => {
       throw new Error("DNS is a lie");
     });
-    await failing.deliver({ code: "a", severity: "critical", message: "m", atMs: 1, context: {}, suppressed: false });
+    await failing.deliver({
+      code: "a",
+      severity: "critical",
+      message: "m",
+      atMs: 1,
+      context: {},
+      suppressed: false,
+    });
     assert.equal(failing.lastDeliveryError(), "DNS is a lie");
   });
 

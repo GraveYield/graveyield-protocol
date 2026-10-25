@@ -10,7 +10,7 @@ import { HealthRegistry } from "../src/index.js";
 
 describe("HealthRegistry", () => {
   test("never-reported components report never-reported and degrade the service", () => {
-    let now = 1_000;
+    const now = 1_000;
     const registry = new HealthRegistry("svc", () => now);
     registry.register("indexer", 60_000);
     const snap = registry.snapshot();
@@ -48,7 +48,7 @@ describe("HealthRegistry", () => {
   });
 
   test("down beats stale beats degraded beats ok for overall status", () => {
-    let now = 1_000;
+    const now = 1_000;
     const registry = new HealthRegistry("svc", () => now);
     registry.register("a", 60_000);
     registry.register("b", 60_000);

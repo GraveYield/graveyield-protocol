@@ -29,7 +29,16 @@
 // expires.
 
 export * from "./scanner.js";
-export { preFilterPool, CRITERION_INACTIVITY, CRITERION_PRICE_COLLAPSE, CRITERION_MIN_TVL, CRITERION_LP_NOT_BURNED, CRITERION_NO_LOCK, CRITERION_EPOCH_CONFIRMED, ALL_CRITERIA_MASK } from "./eligibility.js";
+export {
+  preFilterPool,
+  CRITERION_INACTIVITY,
+  CRITERION_PRICE_COLLAPSE,
+  CRITERION_MIN_TVL,
+  CRITERION_LP_NOT_BURNED,
+  CRITERION_NO_LOCK,
+  CRITERION_EPOCH_CONFIRMED,
+  ALL_CRITERIA_MASK,
+} from "./eligibility.js";
 export type { PreFilterThresholds } from "./eligibility.js";
 export * from "./types.js";
 export * from "./config.js";
@@ -42,7 +51,7 @@ export * from "./queue.js";
 export * from "./submit.js";
 export * from "./tracking.js";
 
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { loadConfig, type IndexerConfig } from "./config.js";
 import { RaydiumV4Source } from "./sources/raydiumV4.js";
 import { ActivityIndexer } from "./activity.js";
@@ -53,7 +62,7 @@ import { scoreCandidate } from "./scoring.js";
 import { CandidateQueue } from "./queue.js";
 import { submitCandidate } from "./submit.js";
 import { trackSubmission } from "./tracking.js";
-import type { Candidate, DiscoveredPool, ScoredCandidate, SubmissionResult } from "./types.js";
+import type { Candidate, SubmissionResult } from "./types.js";
 import type { ScannerOptions } from "./scanner.js";
 
 /**
@@ -97,11 +106,9 @@ export class GraveScannerV2 {
         discoveredCount++;
 
         // 2. Index activity (cached).
-        const activity = await this.activityIndexer.indexActivity(
-          this.opts.connection,
-          pool,
-          { scanLimit: this.opts.signatureScanLimit ?? 1000 },
-        );
+        const activity = await this.activityIndexer.indexActivity(this.opts.connection, pool, {
+          scanLimit: this.opts.signatureScanLimit ?? 1000,
+        });
 
         // 3. Read reserves + TVL.
         const reserves = await readReserves(this.opts.connection, pool);
@@ -136,7 +143,6 @@ export class GraveScannerV2 {
         candidateCount++;
       }
 
-      // eslint-disable-next-line no-console
       console.log(
         `[${source.name}] discovered ${discoveredCount} pools, ${candidateCount} passed pre-filter, queue size ${this.queue.size()}`,
       );
@@ -146,7 +152,10 @@ export class GraveScannerV2 {
     const maxSubmit = this.opts.maxCandidatesPerCycle ?? 5;
     const top = this.queue.drain(maxSubmit);
     for (const scored of top) {
-      const submitOpts: { writer?: import("@solana/web3.js").Keypair; oracleKeypair?: import("@solana/web3.js").Keypair } = {};
+      const submitOpts: {
+        writer?: import("@solana/web3.js").Keypair;
+        oracleKeypair?: import("@solana/web3.js").Keypair;
+      } = {};
       if (this.opts.writerKeypair) submitOpts.writer = this.opts.writerKeypair;
       if (this.opts.oracleKeypair) submitOpts.oracleKeypair = this.opts.oracleKeypair;
       const result = await submitCandidate(
@@ -172,7 +181,6 @@ export class GraveScannerV2 {
       );
       results.push(result);
 
-      // eslint-disable-next-line no-console
       console.log(
         `[submit] ${scored.candidate.poolAddress.toBase58()} score=${scored.score.toFixed(2)} status=${result.status}${result.signature ? ` sig=${result.signature.slice(0, 16)}...` : ""}${result.error ? ` err=${result.error}` : ""}`,
       );
@@ -184,11 +192,11 @@ export class GraveScannerV2 {
           this.opts.scannerProgramId,
           scored.candidate.poolAddress,
         );
-        // eslint-disable-next-line no-console
+
         console.log(
           `[track] ${scored.candidate.poolAddress.toBase58()} status=${tracking.status}` +
-          `${tracking.anchorFirstEligibleEpoch ? ` epoch=${tracking.anchorFirstEligibleEpoch}` : ""}` +
-          `${tracking.certExpiresAt ? ` cert_expires=${tracking.certExpiresAt}` : ""}`,
+            `${tracking.anchorFirstEligibleEpoch ? ` epoch=${tracking.anchorFirstEligibleEpoch}` : ""}` +
+            `${tracking.certExpiresAt ? ` cert_expires=${tracking.certExpiresAt}` : ""}`,
         );
       }
     }
@@ -203,14 +211,13 @@ export class GraveScannerV2 {
   async start(): Promise<void> {
     this.running = true;
     const intervalMs = this.opts.intervalMs ?? 300_000;
-    // eslint-disable-next-line no-console
+
     console.log(`graveyield-indexer: starting scan loop (interval ${intervalMs}ms)`);
 
     while (this.running) {
       try {
         await this.runOnce();
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error("scan cycle failed:", err);
       }
       await sleep(intervalMs);
@@ -234,7 +241,6 @@ function sleep(ms: number): Promise<void> {
 
 /** Default PublicKey placeholder (for discovery-only mode without an oracle key). */
 function PublicKey_default(): import("@solana/web3.js").PublicKey {
-  const { PublicKey } = require("@solana/web3.js");
   return new PublicKey("11111111111111111111111111111111");
 }
 
@@ -265,12 +271,11 @@ export function buildScanner(config: IndexerConfig): GraveScannerV2 {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  // eslint-disable-next-line no-console
+
   console.log(
     `graveyield-indexer: cluster=${config.cluster} rpc=${config.rpcUrl} scanner=${config.scannerProgramId.toBase58()}`,
   );
   if (!config.activityOracleSecretKey) {
-    // eslint-disable-next-line no-console
     console.log("  running in discovery-only mode (no ACTIVITY_ORACLE_KEY set)");
   }
 
@@ -280,7 +285,6 @@ async function main(): Promise<void> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
   });
