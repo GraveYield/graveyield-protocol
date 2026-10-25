@@ -110,7 +110,7 @@ function owned(pubkey: PublicKey, data: Uint8Array): OwnedAccount {
     pubkey,
     data,
     owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-    lamports: 1_000_000,
+    lamports: 1_000_000n,
   };
 }
 

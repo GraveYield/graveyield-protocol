@@ -264,7 +264,7 @@ export async function deriveLaunchPriceV4(
   // --- Phase 2: walk forward to the first swap ------------------------
   for (const info of chronological) {
     if (info.err !== null) continue;
-    const blockTime: number | null | undefined = info.blockTime;
+    const blockTime = info.blockTime;
     if (blockTime === null || blockTime === undefined) {
       throw new Error("launch-price history incomplete: first-swap candidate has no block time");
     }
@@ -326,8 +326,8 @@ export async function deriveLaunchPriceV4(
     }
     return {
       launchPriceQ64x64: (pcPre << 64n) / coinPre,
-      firstSwapSlot: info.slot,
-      firstSwapUnixTs: blockTime,
+      firstSwapSlot: Number(info.slot),
+      firstSwapUnixTs: Number(blockTime),
       baseMint,
       quoteMint,
       signature: info.signature,

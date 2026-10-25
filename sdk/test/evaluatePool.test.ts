@@ -16,6 +16,7 @@
 //
 // Everything runs against an in-memory account map; no network.
 
+import { createHash } from "node:crypto";
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
@@ -41,7 +42,17 @@ import {
   encodeLaunchPriceAccount,
 } from "./fakeRpc.js";
 
-const AUTHORITY = PublicKey.unique();
+// web3.js 3.x removed the 1.x `PublicKey.unique()` test helper. A counter-
+// seeded sha256 replacement keeps the fixtures deterministic, synchronous,
+// and collision-free within the suite.
+let uniqueKeyCounter = 0;
+function uniquePublicKey(): PublicKey {
+  return new PublicKey(
+    createHash("sha256").update(`evaluatePool-fixture-${uniqueKeyCounter++}`).digest(),
+  );
+}
+
+const AUTHORITY = uniquePublicKey();
 const SCANNER_ID = new PublicKey(DEVNET_SCANNER_PROGRAM_ID);
 const VAULT_ID = new PublicKey(DEVNET_VAULT_PROGRAM_ID);
 
@@ -72,10 +83,10 @@ function memecoinSortedAfterWsol(): PublicKey {
  */
 function buildPool(opts: { coinMint: PublicKey; pcMint: PublicKey; currentPriceInt: number }) {
   const rpc = new EvaluatePoolFakeRpc();
-  const poolAddress = PublicKey.unique();
-  const coinVault = PublicKey.unique();
-  const pcVault = PublicKey.unique();
-  const lpMint = PublicKey.unique();
+  const poolAddress = uniquePublicKey();
+  const coinVault = uniquePublicKey();
+  const pcVault = uniquePublicKey();
+  const lpMint = uniquePublicKey();
   const coinReserve = 1_000_000n;
   const pcReserve = BigInt(opts.currentPriceInt) * 1_000_000n;
 

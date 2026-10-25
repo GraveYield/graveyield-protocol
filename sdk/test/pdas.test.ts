@@ -36,7 +36,7 @@ const POOL = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const HOLDER = new PublicKey("11111111111111111111111111111111");
 
 describe("PDA derivation — deterministic, canonical seeds", () => {
-  test("scannerProtocolConfigPda is stable under [protocol_config] seeds", () => {
+  test("scannerProtocolConfigPda is stable under [protocol_config] seeds", async () => {
     const pda = scannerProtocolConfigPda(SCANNER);
     assert.equal(
       pda.toBase58(),
@@ -45,7 +45,7 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     );
   });
 
-  test("vaultProtocolConfigPda is stable under [protocol_config] seeds", () => {
+  test("vaultProtocolConfigPda is stable under [protocol_config] seeds", async () => {
     const pda = vaultProtocolConfigPda(VAULT);
     assert.equal(
       pda.toBase58(),
@@ -54,88 +54,91 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     );
   });
 
-  test("eligibilityAnchorPda uses [eligibility_anchor, amm, pool] seeds", () => {
+  test("eligibilityAnchorPda uses [eligibility_anchor, amm, pool] seeds", async () => {
     const pda = eligibilityAnchorPda(SCANNER, AMM, POOL);
     // Re-derive with the same seeds for cross-check
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("eligibility_anchor"), AMM.toBuffer(), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("eligibility_anchor"), AMM.toBytes(), POOL.toBytes()],
       SCANNER,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("eligibilityCertPda uses [eligibility_cert, amm, pool] seeds", () => {
+  test("eligibilityCertPda uses [eligibility_cert, amm, pool] seeds", async () => {
     const pda = eligibilityCertPda(SCANNER, AMM, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("eligibility_cert"), AMM.toBuffer(), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("eligibility_cert"), AMM.toBytes(), POOL.toBytes()],
       SCANNER,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("launchPricePda uses [launch_price, amm, pool] seeds", () => {
+  test("launchPricePda uses [launch_price, amm, pool] seeds", async () => {
     const pda = launchPricePda(SCANNER, AMM, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("launch_price"), AMM.toBuffer(), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("launch_price"), AMM.toBytes(), POOL.toBytes()],
       SCANNER,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("poolRegistryPda uses [pool_registry, pool] seeds", () => {
+  test("poolRegistryPda uses [pool_registry, pool] seeds", async () => {
     const pda = poolRegistryPda(VAULT, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("pool_registry"), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("pool_registry"), POOL.toBytes()],
       VAULT,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("salvageReceiptPda uses [salvage_receipt, pool] seeds", () => {
+  test("salvageReceiptPda uses [salvage_receipt, pool] seeds", async () => {
     const pda = salvageReceiptPda(VAULT, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("salvage_receipt"), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("salvage_receipt"), POOL.toBytes()],
       VAULT,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("lpHolderPoolVaultPda uses [lp_holder_pool, pool] seeds", () => {
+  test("lpHolderPoolVaultPda uses [lp_holder_pool, pool] seeds", async () => {
     const pda = lpHolderPoolVaultPda(VAULT, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lp_holder_pool"), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("lp_holder_pool"), POOL.toBytes()],
       VAULT,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("claimRecordPda uses [claim_record, pool, holder] seeds", () => {
+  test("claimRecordPda uses [claim_record, pool, holder] seeds", async () => {
     const pda = claimRecordPda(VAULT, POOL, HOLDER);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("claim_record"), POOL.toBuffer(), HOLDER.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("claim_record"), POOL.toBytes(), HOLDER.toBytes()],
       VAULT,
     );
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("protocolTreasuryPda is a singleton under [protocol_treasury]", () => {
+  test("protocolTreasuryPda is a singleton under [protocol_treasury]", async () => {
     const a = protocolTreasuryPda(VAULT);
     const b = protocolTreasuryPda(VAULT);
     assert.deepEqual(a.toBase58(), b.toBase58());
-    const [expected] = PublicKey.findProgramAddressSync([Buffer.from("protocol_treasury")], VAULT);
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("protocol_treasury")],
+      VAULT,
+    );
     assert.equal(a.toBase58(), expected.toBase58());
   });
 
-  test("vaultAuthorityPda is a singleton under [vault_authority]", () => {
+  test("vaultAuthorityPda is a singleton under [vault_authority]", async () => {
     const pda = vaultAuthorityPda(VAULT);
-    const [expected] = PublicKey.findProgramAddressSync([Buffer.from("vault_authority")], VAULT);
+    const [expected] = await PublicKey.findProgramAddress([Buffer.from("vault_authority")], VAULT);
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 
-  test("vaultSolHoldingPda uses [vault_sol_holding, pool] seeds", () => {
+  test("vaultSolHoldingPda uses [vault_sol_holding, pool] seeds", async () => {
     const pda = vaultSolHoldingPda(VAULT, POOL);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault_sol_holding"), POOL.toBuffer()],
+    const [expected] = await PublicKey.findProgramAddress(
+      [Buffer.from("vault_sol_holding"), POOL.toBytes()],
       VAULT,
     );
     assert.equal(pda.toBase58(), expected.toBase58());

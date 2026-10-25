@@ -29,10 +29,10 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
 }
 
 /** Search for a pair whose base58-string order OPPOSES byte order. */
-function findDivergentPair(): { smallByBytes: PublicKey; largeByBytes: PublicKey } {
+async function findDivergentPair(): Promise<{ smallByBytes: PublicKey; largeByBytes: PublicKey }> {
   for (let attempt = 0; attempt < 200_000; attempt++) {
-    const a = Keypair.generate().publicKey;
-    const b = Keypair.generate().publicKey;
+    const a = (await Keypair.generate()).publicKey;
+    const b = (await Keypair.generate()).publicKey;
     const bytesCmp = compareBytes(a.toBytes(), b.toBytes());
     if (bytesCmp === 0) continue;
     const strCmp = a.toBase58() < b.toBase58() ? -1 : 1;
@@ -89,17 +89,17 @@ class SnapshotFakeRpc {
 
 describe("snapshotLpHolders canonical ordering (F7 regression)", () => {
   test("provably divergent pair: snapshot sorts by BYTES, tree accepts", async () => {
-    const { smallByBytes, largeByBytes } = findDivergentPair();
+    const { smallByBytes, largeByBytes } = await findDivergentPair();
     // Sanity: this pair REALLY diverges (string order opposite to bytes).
     assert.ok(smallByBytes.toBase58() > largeByBytes.toBase58());
 
     const rpc = new SnapshotFakeRpc();
-    const poolAddress = Keypair.generate().publicKey;
-    const lpMint = Keypair.generate().publicKey;
-    const coinVault = Keypair.generate().publicKey;
-    const pcVault = Keypair.generate().publicKey;
-    const coinMint = Keypair.generate().publicKey;
-    const pcMint = Keypair.generate().publicKey;
+    const poolAddress = (await Keypair.generate()).publicKey;
+    const lpMint = (await Keypair.generate()).publicKey;
+    const coinVault = (await Keypair.generate()).publicKey;
+    const pcVault = (await Keypair.generate()).publicKey;
+    const coinMint = (await Keypair.generate()).publicKey;
+    const pcMint = (await Keypair.generate()).publicKey;
 
     rpc.setAccount(
       poolAddress,
@@ -117,8 +117,16 @@ describe("snapshotLpHolders canonical ordering (F7 regression)", () => {
       view.setUint8(108, 1);
       return buf;
     };
-    rpc.setAccount(Keypair.generate().publicKey, acctFor(smallByBytes, 300n), SPL_TOKEN_PROGRAM_ID);
-    rpc.setAccount(Keypair.generate().publicKey, acctFor(largeByBytes, 700n), SPL_TOKEN_PROGRAM_ID);
+    rpc.setAccount(
+      (await Keypair.generate()).publicKey,
+      acctFor(smallByBytes, 300n),
+      SPL_TOKEN_PROGRAM_ID,
+    );
+    rpc.setAccount(
+      (await Keypair.generate()).publicKey,
+      acctFor(largeByBytes, 700n),
+      SPL_TOKEN_PROGRAM_ID,
+    );
 
     const result = await snapshotLpHolders(rpc.asConnection(), poolAddress);
     // Canonical (byte) order — smallByBytes first even though its base58

@@ -145,7 +145,7 @@ describe("SC-01 lifecycle sweep", () => {
           totalProceedsLamports: total,
         }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
     ];
     const report = await w.runner.sc01LifecycleSweep();
@@ -175,7 +175,7 @@ describe("SC-02 vault audit", () => {
         pubkey: key(0xa1),
         data: encodeReceipt({ pool, salvor: key(0x11), ...split, totalProceedsLamports: total }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
       {
         pubkey: key(0xa2),
@@ -185,13 +185,13 @@ describe("SC-02 vault audit", () => {
           lpHolderPoolClaimedLamports: 0n,
         }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
       {
         pubkey: key(0xa3),
         data: encodeVaultConfig(),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
     ];
     const report = await w.runner.sc02VaultAudit();
@@ -222,7 +222,7 @@ describe("SC-02 vault audit", () => {
         pubkey: key(0xa1),
         data: encodeReceipt({ pool, salvor: key(0x11), ...split, totalProceedsLamports: total }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
       {
         pubkey: key(0xa2),
@@ -232,7 +232,7 @@ describe("SC-02 vault audit", () => {
           lpHolderPoolClaimedLamports: 0n,
         }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
-        lamports: 1,
+        lamports: 1n,
       },
     ];
     const report = await w.runner.sc02VaultAudit();

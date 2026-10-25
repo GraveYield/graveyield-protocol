@@ -17,7 +17,8 @@ export interface OwnedAccount {
   /** Raw account data (the SDK decoders take the full buffer). */
   data: Uint8Array;
   owner: PublicKey;
-  lamports: number;
+  /** web3.js 3.x reports lamports as u64 bigint — kept bigint (no 2^53 precision loss). */
+  lamports: bigint;
 }
 
 /** A signature-status entry (failed-tx monitoring). */
@@ -41,7 +42,7 @@ export interface ChainView {
   /** Current slot (best effort; null when unavailable). */
   getSlot(): Promise<number | null>;
   /** Raw account info (null when absent). */
-  getAccountInfo(address: PublicKey): Promise<AccountInfo<Buffer> | null>;
+  getAccountInfo(address: PublicKey): Promise<AccountInfo<Uint8Array> | null>;
 }
 
 /** Production adapter over a real web3 Connection. */
@@ -67,13 +68,15 @@ export function connectionChainView(connection: Connection): ChainView {
       return signatures.map((entry) => ({
         signature: entry.signature,
         err: entry.err ?? null,
-        slot: entry.slot ?? null,
+        // 3.x reports slot as u64 bigint; the domain type stays number
+        // (safe: slots are far below 2^53 for the foreseeable future).
+        slot: entry.slot == null ? null : Number(entry.slot),
         confirmationStatus: entry.confirmationStatus ?? null,
       }));
     },
     async getSlot() {
       try {
-        return await connection.getSlot();
+        return Number(await connection.getSlot());
       } catch {
         return null;
       }
