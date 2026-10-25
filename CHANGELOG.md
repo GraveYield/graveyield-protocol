@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased — NS-2 devnet refresh executed (DR-001)]
+
+### Changed
+
+- **Fresh devnet deployment** — both programs deployed under the new
+  program IDs (scanner `CuQZes…Ao54`, vault `Bd5smh…s7rg`) from the
+  CI-built ELFs (run 40178764437, commit `d4661b4`) via
+  `deploy_devnet.sh --skip-build`; both ProtocolConfigs initialized at
+  spec defaults with the deployer as authority; both config PDAs landed
+  at bump 255, byte-exact matches of the pre-deployment derivation. The
+  2026-10-09 deployment (dead upgrade-authority key) is retained on-chain
+  as the frozen static reference per DR-001 and is documented as such in
+  `docs/DEVNET.md`.
+- **Emergency-control drill passed on live devnet for both programs** —
+  authority pause, intruder rejection (`GraveScanner 6000` /
+  `GraveVault 7000`), unpause, readback-verified at every step. The SDK
+  read-only devnet smoke suite passes against the new deployment
+  (sdk 122/122 with `DEVNET_RPC_URL` set; full workspace battery green).
+
+### Fixed
+
+- **`deploy_devnet.sh` funding guard** — the ≥ 6 SOL check digit-stripped
+  the human SOL display, so a decimal balance was mis-read (`0.5` → `05`;
+  `5.9` → `59` would have PASSED the guard). The guard now compares
+  lamports exactly against 6 000 000 000.
+- **`deploy_devnet.sh` toolchain scoping** — `cargo-build-sbf` was
+  required even with `--skip-build`, blocking the CI-artifact deployment
+  path on toolchain-less hosts; the check now applies only when the
+  script actually builds.
+- **Runbook correction** — `docs/DEVNET.md` now documents that the drill's
+  intruder keypair needs fee dust (it pays its own probe fee), the
+  lamport-exact funding gate, and the `--skip-build` path. The stale
+  "deployer balance ≥ 2 SOL" line was corrected to ≥ 6 SOL.
+
 ## [Unreleased — web3.js 3.x migration (issue #54): @solana/web3.js 1.99.0 → 3.1.1]
 
 > Migration charter: zero economics drift. PDA derivation, instruction
