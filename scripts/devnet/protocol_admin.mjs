@@ -185,8 +185,36 @@ function buildPauseIx(programId, authority, paused) {
 
 /** ['protocol_config'] PDA under a program ID. */
 export function configPda(programId) {
-  const [pda] = PublicKey.findProgramAddressSync([PROTOCOL_CONFIG_SEED], programId);
+  const [pda] = findProgramAddressSync([PROTOCOL_CONFIG_SEED], programId);
   return pda;
+}
+
+/**
+ * Byte-exact sync PDA derivation — web3.js 3.x removed the 1.x
+ * `PublicKey.findProgramAddressSync` static, and this script derives PDAs
+ * in synchronous instruction-builder contexts. Mirrors the algorithm in
+ * `sdk/src/web3compat.ts` (normative, do not drift): hash preimage
+ * `seeds || bump || program_id || "ProgramDerivedAddress"`, on-curve
+ * rejection via the 3.x public `PublicKey.isOnCurve`, bump searched
+ * 255→0.
+ */
+function findProgramAddressSync(seeds, programId) {
+  for (let bump = 255; bump >= 0; bump--) {
+    const digest = createHash("sha256")
+      .update(
+        Buffer.concat([
+          ...seeds,
+          Buffer.from([bump]),
+          programId.toBytes(),
+          Buffer.from("ProgramDerivedAddress", "utf8"),
+        ]),
+      )
+      .digest();
+    if (!PublicKey.isOnCurve(digest)) {
+      return [new PublicKey(digest), bump];
+    }
+  }
+  throw new Error("unable to find program address: no off-curve bump found");
 }
 
 // ------------------------------------------------------------- readback map
