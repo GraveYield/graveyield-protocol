@@ -1,5 +1,62 @@
 # Changelog
 
+## [Unreleased — web3.js 3.x migration (issue #54): @solana/web3.js 1.99.0 → 3.1.1]
+
+> Migration charter: zero economics drift. PDA derivation, instruction
+> wire formats, and attestation message layouts are byte-identical —
+> pinned by the existing test batteries (231 protocol / 354 salvor,
+> including the devnet-deployed PDA address vectors). The `UnixTimestamp`,
+> slot, and epoch conversions use `Number()` only where values are far
+> below 2^53; `OwnedAccount.lamports` is kept bigint to preserve u64
+> precision. Dry-run defaults and security gating are untouched.
+
+### Changed
+
+- **Dependency bump** — `@solana/web3.js` `^1.95.0` → `^3.1.1` across all
+  five TS workspaces (sdk, indexer, ops, adversary, scripts/devnet) plus
+  the lockfile. The pnpm override block now also pins the
+  `@solana/spl-token` web3 peer to 3.1.1, so a single `PublicKey` class
+  identity rules the dependency tree (3.x's removal of the 1.x surface
+  had pnpm auto-installing an isolated 1.99 peer copy for spl-token).
+- **Dead dependency removed** — `@coral-xyz/anchor` (sdk) had zero source
+  references and was the last 1.x pin in the tree.
+
+### Added
+
+- **`sdk/src/web3compat.ts`** — the web3.js 3.x compatibility layer:
+  - byte-exact synchronous mirrors of the runtime's
+    `create_program_address` / `find_program_address` (3.x exposes only
+    async derivation; consumers derive PDAs in synchronous module-load
+    contexts). Hash preimage `seeds || bump || program_id ||
+    "ProgramDerivedAddress"`, on-curve rejection via the 3.x public
+    `PublicKey.isOnCurve`, bump searched 255→0. Byte parity is proven by
+    the devnet-deployed address vectors and cross-checked against the
+    official 3.x async `findProgramAddress` in `sdk/test/pdas.test.ts`.
+  - spl-token 0.4.x interop bridge: guarded restoration of
+    `PublicKey.prototype.toBuffer` and the sync PDA statics (spl-token's
+    `getAssociatedTokenAddressSync` calls both internally); inert once
+    upstream ships natives. `asBufferAccount` adapts 3.x
+    `AccountInfo<Uint8Array>` to spl-token's `AccountInfo<Buffer>`-bound
+    `unpack*` helpers.
+- **`sdk` package exports** — `web3compat` is re-exported from the sdk
+  index so indexer/ops/bots share one implementation.
+
+### Fixed
+
+- **The API-migration work the rejected drop-in bump (#52) lacked** — 35
+  typecheck errors across 6 sdk files and their consumers:
+  `PublicKey.findProgramAddressSync`/`.toBuffer` removals, `UnixTimestamp`
+  /slot/epoch bigint boundaries (`Number()` at attestation edges),
+  `AccountInfo<Uint8Array>` shapes, async `Keypair.generate` /
+  `fromSecretKey` / `Transaction.sign` fallout (tests, indexer submit,
+  devnet admin script), and `ChainView` modernization in ops
+  (`lamports` bigint; slot/getSlot stay `number` via boundary
+  conversions).
+- **Audit posture unchanged** — 1 high (bigint-buffer via spl-token →
+  buffer-layout-utils), the same accepted-risk finding as before the
+  migration (no upstream fix exists).
+
+## [Unreleased — Phase 1 (build + reliability): TS lint/format enforcement, toolchain pin verification in CI]
 ## [Unreleased — Phase 1 (build + reliability): TS lint/format enforcement, toolchain pin verification in CI]
 
 > Phase 1 charter: stabilize build and test workflows without changing
