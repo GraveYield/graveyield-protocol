@@ -131,6 +131,17 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
+      # Node + pnpm are installed here (not because anchor needs them) so
+      # that scripts/check-toolchain.sh below can verify ALL five pinned
+      # toolchains — solana, anchor, rust, node, pnpm — in the single job
+      # where the Rust/Solana side is actually present. Without these two
+      # steps the toolchain check would fail on the missing JS side; with
+      # them, a drift in ANY pin (rust-toolchain.toml, packageManager,
+      # NODE_VERSION, SOLANA_VERSION, ANCHOR_VERSION) fails this job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@v6
       - name: Install Solana CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
@@ -168,6 +179,13 @@ jobs:
         run: |
           cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
           anchor --version
+      # Phase 1 (build/reliability): enforce the pinned toolchain. This
+      # script existed pre-Phase-1 but was never wired into CI — it verified
+      # pins only when a developer remembered to run it locally. Here it has
+      # all five tools available (see the setup-node/pnpm steps above) and
+      # fails the job if solana/anchor/rust/node/pnpm drift from their pins.
+      - name: Verify pinned toolchain versions
+        run: bash scripts/check-toolchain.sh
       # Capture anchor build's full output to a file and upload it as a
       # workflow artifact when the job fails — needed because the actual
       # error message is otherwise only visible via the GitHub Actions
@@ -239,6 +257,22 @@ jobs:
       # store cache dominates. Revisit if install times regress.
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
+
+  # Phase 1 (build/reliability): the TS workspaces previously had no lint or
+  # format gate (Rust had cargo fmt/clippy since the baseline). This job makes
+  # the eslint + prettier toolchain merge-blocking for sdk/indexer/ops/adversary.
+  ts-lint:
+    name: ts lint + format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm fmt:ts:check
 
   terminology-lint:
     name: terminology lint
