@@ -10,9 +10,14 @@ import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
-import { preFilterPool, scoreCandidate, CandidateQueue, type PreFilterThresholds } from "@graveyield/indexer";
+import {
+  preFilterPool,
+  scoreCandidate,
+  CandidateQueue,
+  type PreFilterThresholds,
+} from "@graveyield/indexer";
 import { quotePerBaseQ64x64, shouldRejectFee, buildPriorityFeePolicy } from "@graveyield/sdk";
-import { key, POOL_A, POOL_B, MEME_MINT } from "./helpers.js";
+import { key, POOL_A, MEME_MINT } from "./helpers.js";
 
 const THRESHOLDS: PreFilterThresholds = {
   inactivitySeconds: 7_776_000n,
@@ -64,18 +69,33 @@ describe("ADV-DS — dust", () => {
     assert.equal(at.passed, false, "supply == threshold is burned-to-dust");
     assert.ok(at.failedCriteria.includes("C4-lp-not-burned"));
 
-    const above = preFilterPool(activity(), reserves(1_000_000_000n, 1_001n), metadata(), THRESHOLDS);
+    const above = preFilterPool(
+      activity(),
+      reserves(1_000_000_000n, 1_001n),
+      metadata(),
+      THRESHOLDS,
+    );
     assert.equal(above.passed, true);
   });
 });
 
 describe("ADV-EC — extremely low liquidity", () => {
   test("ADV-EC-01: TVL one lamport below the floor is refused; exactly the floor passes", () => {
-    const below = preFilterPool(activity(), reserves(499_999_999n, 1_000_000n), metadata(), THRESHOLDS);
+    const below = preFilterPool(
+      activity(),
+      reserves(499_999_999n, 1_000_000n),
+      metadata(),
+      THRESHOLDS,
+    );
     assert.equal(below.passed, false);
     assert.ok(below.failedCriteria.includes("C3-min-tvl"));
 
-    const at = preFilterPool(activity(), reserves(500_000_000n, 1_000_000n), metadata(), THRESHOLDS);
+    const at = preFilterPool(
+      activity(),
+      reserves(500_000_000n, 1_000_000n),
+      metadata(),
+      THRESHOLDS,
+    );
     assert.equal(at.passed, true);
   });
 });
@@ -160,7 +180,11 @@ describe("ADV-RP — repeated attempts at the funnel level", () => {
     assert.equal(q.peek(1)[0]?.score, 9, "higher score wins");
     const drained = q.drain(1);
     assert.equal(drained.length, 1);
-    assert.equal(q.size(), 0, "drain removes — re-scan re-enqueues (pinned: chain is the replay authority)");
+    assert.equal(
+      q.size(),
+      0,
+      "drain removes — re-scan re-enqueues (pinned: chain is the replay authority)",
+    );
   });
 });
 
@@ -186,14 +210,20 @@ function u64Max(): bigint {
 }
 
 function scoreThresholds() {
-  return { inactivitySeconds: THRESHOLDS.inactivitySeconds, minTvlLamports: THRESHOLDS.minTvlLamports, priceCollapseBps: THRESHOLDS.priceCollapseBps };
+  return {
+    inactivitySeconds: THRESHOLDS.inactivitySeconds,
+    minTvlLamports: THRESHOLDS.minTvlLamports,
+    priceCollapseBps: THRESHOLDS.priceCollapseBps,
+  };
 }
 
 function passedResult() {
   return preFilterPool(activity(), reserves(1_000_000_000n, 1_000_000n), metadata(), THRESHOLDS);
 }
 
-function makeCandidate(pre: ReturnType<typeof passedResult>): import("@graveyield/indexer").Candidate {
+function makeCandidate(
+  pre: ReturnType<typeof passedResult>,
+): import("@graveyield/indexer").Candidate {
   return {
     poolAddress: POOL_A,
     ammProgramId: new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"),

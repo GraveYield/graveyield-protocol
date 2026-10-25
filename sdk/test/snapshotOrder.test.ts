@@ -15,12 +15,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { Keypair, PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
 
-import {
-  snapshotLpHolders,
-  SPL_TOKEN_PROGRAM_ID,
-  RAYDIUM_V4_PROGRAM_ID,
-} from "../src/index.js";
-import { encodeMint, encodeTokenAccount, encodeAmmInfo } from "./fakeRpc.js";
+import { snapshotLpHolders, SPL_TOKEN_PROGRAM_ID, RAYDIUM_V4_PROGRAM_ID } from "../src/index.js";
+import { encodeMint, encodeAmmInfo } from "./fakeRpc.js";
 
 /** Byte comparison — mirrors SnapshotMerkleTree's canonical order. */
 function compareBytes(a: Uint8Array, b: Uint8Array): number {

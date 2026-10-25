@@ -17,18 +17,24 @@
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
+    "lint": "eslint .",
     "test": "pnpm -r test",
     "anchor:build": "anchor build",
     "anchor:test": "anchor test",
     "check:toolchain": "bash ./scripts/check-toolchain.sh",
     "fmt:rust": "cargo fmt --all",
     "fmt:rust:check": "cargo fmt --all -- --check",
-    "lint:rust": "cargo clippy --all-targets -- -D warnings"
+    "lint:rust": "cargo clippy --all-targets -- -D warnings",
+    "fmt:ts": "prettier --write .",
+    "fmt:ts:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.6.0"
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "8.72.0"
   },
   "pnpm": {
     "overrides": {

@@ -1,0 +1,12 @@
+# Build outputs and generated trees — never formatted.
+dist/
+target/
+node_modules/
+.next/
+
+# Lockfiles are machine-generated.
+pnpm-lock.yaml
+
+# Prose is out of scope for the code formatter.
+*.md
+.github/

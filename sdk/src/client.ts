@@ -38,7 +38,6 @@ import {
   type TransactionInstruction,
   SystemProgram,
   ComputeBudgetProgram,
-  Transaction,
 } from "@solana/web3.js";
 import BN from "bn.js";
 
@@ -54,7 +53,6 @@ import {
   fetchScannerProtocolConfig,
   fetchVaultProtocolConfig,
   fetchEligibilityAnchor,
-  fetchEligibilityCert,
   fetchLaunchPrice,
   type ScannerProtocolConfig,
   type VaultProtocolConfig,
@@ -65,7 +63,6 @@ import {
   fetchV4Pool,
   readVaultReserve,
   readLpMintSupply,
-  identifyBaseToken,
   quotePerBaseQ64x64,
 } from "./raydiumV4.js";
 import { snapshotLpHolders as snapshotLpHoldersImpl, type SnapshotResult } from "./snapshot.js";
@@ -82,13 +79,11 @@ import {
   buildAttestationMessage,
   buildEd25519VerifyInstruction,
   deriveLastSwapV4,
-  fetchSlotHash,
   type LastSwapDerivation,
 } from "./lastSwapAttestation.js";
 import {
   buildLaunchPriceMessage,
   buildLaunchPriceEd25519VerifyInstruction,
-  deriveLaunchPriceV4,
   type LaunchPriceDerivation,
 } from "./launchPriceAttestation.js";
 
@@ -299,8 +294,12 @@ export class GraveYieldClient {
   // plus the canonical PDA addresses. Useful for "would this pool pass
   // Phase 1 right now?" checks without spending SOL.
 
-  async evaluatePool(poolAddress: PublicKey, opts?: { ammProgramId?: PublicKey }): Promise<EvaluatePoolOutcome> {
-    const ammProgramId = opts?.ammProgramId ?? (await this.connection.getAccountInfo(poolAddress))?.owner;
+  async evaluatePool(
+    poolAddress: PublicKey,
+    opts?: { ammProgramId?: PublicKey },
+  ): Promise<EvaluatePoolOutcome> {
+    const ammProgramId =
+      opts?.ammProgramId ?? (await this.connection.getAccountInfo(poolAddress))?.owner;
     if (!ammProgramId) {
       throw new Error(`pool ${poolAddress.toBase58()} not found — cannot determine AMM program ID`);
     }
@@ -531,7 +530,10 @@ export class GraveYieldClient {
   //
   // Off-chain snapshot + Merkle root — the input `salvage_pool` consumes.
 
-  async snapshotLpHolders(poolAddress: PublicKey, opts?: { sinkExclusions?: ReadonlyArray<PublicKey> }): Promise<SnapshotResult> {
+  async snapshotLpHolders(
+    poolAddress: PublicKey,
+    opts?: { sinkExclusions?: ReadonlyArray<PublicKey> },
+  ): Promise<SnapshotResult> {
     return snapshotLpHoldersImpl(this.connection, poolAddress, opts);
   }
 
@@ -601,7 +603,11 @@ export class GraveYieldClient {
     if (opts.computeUnitLimit !== undefined) {
       out.push(ComputeBudgetProgram.setComputeUnitLimit({ units: opts.computeUnitLimit }));
     }
-    out.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Number(opts.lamportsPerCu.toString()) }));
+    out.push(
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: Number(opts.lamportsPerCu.toString()),
+      }),
+    );
     return out;
   }
 }
