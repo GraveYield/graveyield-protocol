@@ -26,6 +26,13 @@ canon outside this list is either superseded or unrelated to the project.
 | Liquidity Salvage Visual Deck | — | `published/GraveYield_Liquidity_Salvage.pdf` |
 | GhostPools Research WP-2026-001r4 | [`ghostpools-research.md`](ghostpools-research.md) | [`published/GhostPools_Research_Paper_WP-2026-001r4.pdf`](published/GhostPools_Research_Paper_WP-2026-001r4.pdf) |
 
+## Decision records
+
+| Topic | Document |
+|-------|----------|
+| Binding decisions gating baseline next steps (NS-1 custody answer, path selection) — append-only register | [`DECISIONS.md`](DECISIONS.md) |
+
+
 ## Architecture deep-dives
 
 | Topic | Document |
