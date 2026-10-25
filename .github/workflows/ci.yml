@@ -91,7 +91,11 @@ jobs:
       # against public devnet, no keys required. If devnet itself is
       # degraded the job fails — treat that as a real operational signal,
       # not flake (the SDK refuses to ship untested against the cluster).
+      # The suite self-skips unless DEVNET_RPC_URL is set; the scheduled
+      # devnet-smoke workflow covers the gap between pushes.
       - run: pnpm -r test
+        env:
+          DEVNET_RPC_URL: https://api.devnet.solana.com
 
   # NS-4 (baseline blocker B3): the shared salvor SDK used to live in two
   # copies that drifted silently (FLEET-M0 audit F1/F5/F7 — priority-fee

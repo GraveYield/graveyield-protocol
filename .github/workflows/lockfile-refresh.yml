@@ -1,0 +1,49 @@
+name: lockfile-refresh
+
+# Manual cargo-lockfile maintenance for Dependabot alerts that are fixed
+# by a lockfile-only update. The engineering sandbox has no Rust
+# toolchain, so this job runs `cargo update` where the toolchain exists,
+# captures inverted-tree evidence for the consumers that pin vulnerable
+# majors, and uploads both. The resulting Cargo.lock is committed and
+# validated by the normal CI (fmt, clippy, tests, anchor build) like any
+# other change — no auto-commit from CI.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-lockfile:
+    name: cargo update + dependency evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.91.1
+      # One invocation per crate so a blocked bump (semver-incompatible
+      # consumer) does not prevent the others from landing.
+      - name: cargo update (semver-compatible precise bumps)
+        run: |
+          cargo update -p rustls-webpki --precise 0.103.13 || echo "rustls-webpki update blocked (see evidence)"
+          cargo update -p curve25519-dalek --precise 4.1.3 || echo "curve25519-dalek update blocked (see evidence)"
+      - name: evidence for consumers that pin vulnerable majors
+        run: |
+          {
+            for c in ed25519-dalek rand atty rustls-webpki curve25519-dalek; do
+              echo "=== cargo tree -i $c ==="
+              cargo tree -i "$c" || true
+            done
+          } > cargo-tree-evidence.txt 2>&1
+          cat cargo-tree-evidence.txt
+      - name: lockfile sanity (metadata resolves against the lock)
+        run: cargo metadata --locked --format-version 1 > /dev/null && echo "lockfile consistent"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lockfile-refresh
+          path: |
+            Cargo.lock
+            cargo-tree-evidence.txt
+          if-no-files-found: error
