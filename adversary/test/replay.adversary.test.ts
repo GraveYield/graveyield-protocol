@@ -98,7 +98,7 @@ describe("ADV-RP — Merkle artifacts fail closed", () => {
 });
 
 describe("ADV-RP — the observer flags manipulated books", () => {
-  const VAULT = new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6");
+  const VAULT = new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
 
   function encReceipt(f: {
     pool: PublicKey;

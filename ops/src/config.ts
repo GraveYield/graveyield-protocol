@@ -8,12 +8,12 @@ import { PublicKey } from "@solana/web3.js";
 
 /** Devnet GraveScanner program ID (docs/DEVNET.md). */
 export const DEVNET_SCANNER_PROGRAM_ID = new PublicKey(
-  "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF",
+  "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54",
 );
 
 /** Devnet GraveVault program ID (docs/DEVNET.md). */
 export const DEVNET_VAULT_PROGRAM_ID = new PublicKey(
-  "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6",
+  "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg",
 );
 
 /** Ops configuration. */

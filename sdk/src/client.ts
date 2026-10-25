@@ -87,9 +87,9 @@ import {
   type LaunchPriceDerivation,
 } from "./launchPriceAttestation.js";
 
-/** Default devnet program IDs — see handoff §3.2. */
-export const DEVNET_SCANNER_PROGRAM_ID = "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF";
-export const DEVNET_VAULT_PROGRAM_ID = "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6";
+/** Default devnet program IDs — DR-001/NS-2 fresh devnet deployment (2026-10-25). */
+export const DEVNET_SCANNER_PROGRAM_ID = "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54";
+export const DEVNET_VAULT_PROGRAM_ID = "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg";
 
 /** Result of `evaluatePool` — the criteria bitmap + per-criterion pass/fail + PDAs. */
 export interface EvaluatePoolOutcome {

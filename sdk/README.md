@@ -149,10 +149,10 @@ divergence a CI failure.
 
 | Program | Devnet ID |
 |---|---|
-| GraveScanner | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` |
-| GraveVault | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` |
-| Scanner ProtocolConfig PDA | `GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu` |
-| Vault ProtocolConfig PDA | `2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU` |
+| GraveScanner | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
+| GraveVault | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
+| Scanner ProtocolConfig PDA | `Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD` |
+| Vault ProtocolConfig PDA | `hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS` |
 
 The devnet smoke tests assert these addresses and decode the live
 ProtocolConfigs against the spec default tables

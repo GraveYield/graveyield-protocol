@@ -442,8 +442,14 @@ authority unpause, and state readback on both programs.
 
 | Program | Devnet program ID |
 |---------|-------------------|
-| GraveScanner | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` |
-| GraveVault | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` |
+| GraveScanner | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
+| GraveVault | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
+
+> **Devnet refresh (2026-10-25).** Per `docs/DECISIONS.md` (DR-001, NS-1/NS-2),
+> the protocol was redeployed to devnet with fresh program keypairs; the
+> deployment above is the active one. The original 9 October 2026 deployment
+> (`5JiCVx…` / `HUyoG5…`, drill executed against it the same day) is retained
+> untouched as a frozen static reference — historical record only.
 
 **Deployment qualification.** Devnet is not mainnet. The current devnet
 upgrade authority is the deployer keypair, not the intended production

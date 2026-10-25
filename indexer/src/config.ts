@@ -20,14 +20,14 @@ import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import nacl from "tweetnacl";
 
-/** Devnet GraveScanner program ID (handoff §3.2). */
+/** Devnet GraveScanner program ID (DR-001 fresh deployment, 2026-10-25). */
 export const DEVNET_SCANNER_PROGRAM_ID = new PublicKey(
-  "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF",
+  "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54",
 );
 
-/** Devnet GraveVault program ID (handoff §3.2). */
+/** Devnet GraveVault program ID (DR-001 fresh deployment, 2026-10-25). */
 export const DEVNET_VAULT_PROGRAM_ID = new PublicKey(
-  "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6",
+  "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg",
 );
 
 /** Spec default: minimum TVL in lamports (0.5 SOL). */

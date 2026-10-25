@@ -15,9 +15,9 @@
 //
 //   DEVNET_RPC_URL=https://api.devnet.solana.com pnpm -r test
 //
-// Per the handoff §5.3: "Read-only ops cost nothing; the deployer still
-// holds 5.97 SOL if you need a funded smoke (config is init-once — do NOT
-// try to re-init)."
+// Deployment: DR-001/NS-2 fresh devnet deployment (2026-10-25) — see
+// docs/DECISIONS.md. The pre-refresh deployment is retained as a frozen
+// static reference. Config is init-once — do NOT try to re-init.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -60,8 +60,8 @@ describe("devnet smoke (read-only)", { skip: SKIP }, () => {
     const pda = scannerProtocolConfigPda(client.graveScannerProgramId);
     assert.equal(
       pda.toBase58(),
-      "GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu",
-      "scanner ProtocolConfig PDA must match handoff §3.2",
+      "Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD",
+      "scanner ProtocolConfig PDA must match the deployed value (DR-001 fresh deployment)",
     );
   });
 
@@ -69,8 +69,8 @@ describe("devnet smoke (read-only)", { skip: SKIP }, () => {
     const pda = vaultProtocolConfigPda(client.graveVaultProgramId);
     assert.equal(
       pda.toBase58(),
-      "2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU",
-      "vault ProtocolConfig PDA must match handoff §3.2",
+      "hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS",
+      "vault ProtocolConfig PDA must match the deployed value (DR-001 fresh deployment)",
     );
   });
 

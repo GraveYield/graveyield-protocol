@@ -49,8 +49,8 @@ import {
 // ---------------------------------------------------------------- constants
 
 /** Devnet program IDs — mirrored in Anchor.toml and both declare_id! calls. */
-export const SCANNER_PROGRAM_ID = new PublicKey("5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF");
-export const VAULT_PROGRAM_ID = new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6");
+export const SCANNER_PROGRAM_ID = new PublicKey("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54");
+export const VAULT_PROGRAM_ID = new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
 
 const PROTOCOL_CONFIG_SEED = Buffer.from("protocol_config", "utf8");
 

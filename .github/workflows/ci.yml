@@ -223,6 +223,18 @@ jobs:
         run: |
           set -o pipefail
           anchor build --no-idl 2>&1 | tee /tmp/anchor-build.log
+      - name: Upload program ELFs (deployment-provenance artifacts)
+        # DR-001/NS-2: the fresh devnet deployment consumes the ELFs built by
+        # THIS job, so the deployed bytes come from exactly the CI-pinned
+        # toolchain (the baseline report's "CI-equivalent pinned toolchain"
+        # provenance requirement, made reproducible by uploading the
+        # artifacts instead of rebuilding outside CI).
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-elvs
+          path: target/deploy/*.so
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload anchor build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
