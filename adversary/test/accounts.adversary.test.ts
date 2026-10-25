@@ -88,7 +88,9 @@ describe("ADV-LP — hostile account bytes fail closed", () => {
     assert.ok(receipt.poolAddress.equals(key("pool")), "decode succeeds with trailing bytes");
     // R1 still checks out on the decoded values (books sum to the total).
     assert.equal(
-      receipt.lpHolderAmountLamports + receipt.salvorAmountLamports + receipt.protocolAmountLamports,
+      receipt.lpHolderAmountLamports +
+        receipt.salvorAmountLamports +
+        receipt.protocolAmountLamports,
       receipt.totalProceedsLamports,
     );
     // FLAGGED as finding F8: Anchor accounts may gain reserved space in

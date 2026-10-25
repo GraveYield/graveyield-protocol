@@ -19,11 +19,7 @@ import {
 
 describe("computeOperationalMaxLamportsPerCu", () => {
   test("returns the scaled profit when below the ceiling", () => {
-    const out = computeOperationalMaxLamportsPerCu(
-      new BN(1_000_000),
-      new BN(1_000_000_000),
-      0.25,
-    );
+    const out = computeOperationalMaxLamportsPerCu(new BN(1_000_000), new BN(1_000_000_000), 0.25);
     // 1_000_000 * 0.25 = 250_000 < 1_000_000_000 ceiling
     assert.equal(out.toString(10), "250000");
   });
@@ -38,20 +34,12 @@ describe("computeOperationalMaxLamportsPerCu", () => {
   });
 
   test("marginRatio=0 yields 0", () => {
-    const out = computeOperationalMaxLamportsPerCu(
-      new BN(1_000_000),
-      new BN(1_000_000_000),
-      0,
-    );
+    const out = computeOperationalMaxLamportsPerCu(new BN(1_000_000), new BN(1_000_000_000), 0);
     assert.equal(out.toString(10), "0");
   });
 
   test("marginRatio=1 yields the full profit (capped at ceiling)", () => {
-    const out = computeOperationalMaxLamportsPerCu(
-      new BN(500_000_000),
-      new BN(1_000_000_000),
-      1.0,
-    );
+    const out = computeOperationalMaxLamportsPerCu(new BN(500_000_000), new BN(1_000_000_000), 1.0);
     assert.equal(out.toString(10), "500000000");
   });
 

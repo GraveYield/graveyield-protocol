@@ -126,7 +126,11 @@ export async function snapshotLpHolders(
       continue;
     }
     if (sinkSet.has(ownerKey)) {
-      exclusions.push({ holder: parsed.owner, balance: new BN(amount.toString(10)), reason: "sink" });
+      exclusions.push({
+        holder: parsed.owner,
+        balance: new BN(amount.toString(10)),
+        reason: "sink",
+      });
       continue;
     }
     const prev = byOwner.get(ownerKey) ?? 0n;

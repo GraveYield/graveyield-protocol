@@ -5,11 +5,7 @@
 // tests never import from a workspace package). No network anywhere.
 
 import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
-import {
-  AccountDisc,
-  RAYDIUM_V4_AMM_INFO_SIZE,
-  writer,
-} from "../src/index.js";
+import { AccountDisc, RAYDIUM_V4_AMM_INFO_SIZE, writer } from "../src/index.js";
 
 /** Encode a GraveScanner ProtocolConfig account (layout: accountDecoders.ts). */
 export function encodeScannerConfig(opts: {

@@ -32,7 +32,11 @@ import {
   TransactionInstruction,
   type AccountMeta,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import { writer } from "./borsh.js";
 import { VaultIx } from "./discriminators.js";
 import {
@@ -109,7 +113,9 @@ export interface SalvagePoolIxInput {
  */
 export function buildSalvagePoolIx(opts: SalvagePoolIxInput): TransactionInstruction {
   if (opts.lpSnapshotMerkleRoot.length !== 32) {
-    throw new Error(`lpSnapshotMerkleRoot must be 32 bytes (got ${opts.lpSnapshotMerkleRoot.length})`);
+    throw new Error(
+      `lpSnapshotMerkleRoot must be 32 bytes (got ${opts.lpSnapshotMerkleRoot.length})`,
+    );
   }
   if (opts.raydiumV4RemainingAccounts.length !== 13) {
     throw new Error(
@@ -120,7 +126,16 @@ export function buildSalvagePoolIx(opts: SalvagePoolIxInput): TransactionInstruc
   // salvor_lp_amount(8) + vec<u8>(4 + n) + option<u16>(1 + 2) + jupiter_route_accounts_len(1)
   const routeDataLen = opts.jupiterRouteData.length;
   const dataSize =
-    8 + 32 + 32 + 32 + 8 + 8 + 8 + (4 + routeDataLen) + (opts.maxSlippageBpsOverride != null ? 3 : 1) + 1;
+    8 +
+    32 +
+    32 +
+    32 +
+    8 +
+    8 +
+    8 +
+    (4 + routeDataLen) +
+    (opts.maxSlippageBpsOverride != null ? 3 : 1) +
+    1;
   const w = writer(dataSize)
     .bytes(VaultIx.salvagePool)
     .bytes(opts.ammProgramId.toBytes())
@@ -137,24 +152,48 @@ export function buildSalvagePoolIx(opts: SalvagePoolIxInput): TransactionInstruc
   // --- Derive all the PDAs ---
   const vaultAuthority = vaultAuthorityPda(opts.vaultProgramId);
   const protocolTreasury = protocolTreasuryPda(opts.vaultProgramId);
-  const eligibilityCert = eligibilityCertPda(opts.scannerProgramId, opts.ammProgramId, opts.poolAddress);
+  const eligibilityCert = eligibilityCertPda(
+    opts.scannerProgramId,
+    opts.ammProgramId,
+    opts.poolAddress,
+  );
   const vaultBaseTokenAccount = getAssociatedTokenAddressSync(WSOL_MINT, vaultAuthority, true);
-  const vaultMemecoinTokenAccount = getAssociatedTokenAddressSync(opts.memecoinMint, vaultAuthority, true);
+  const vaultMemecoinTokenAccount = getAssociatedTokenAddressSync(
+    opts.memecoinMint,
+    vaultAuthority,
+    true,
+  );
 
   // --- Named Anchor accounts (order matters — see `Accounts` struct in salvage_pool.rs) ---
   const keys: AccountMeta[] = [
     { pubkey: vaultProtocolConfigPda(opts.vaultProgramId), isSigner: false, isWritable: false },
     { pubkey: eligibilityCert, isSigner: false, isWritable: false },
-    { pubkey: poolRegistryPda(opts.vaultProgramId, opts.poolAddress), isSigner: false, isWritable: true },
-    { pubkey: salvageReceiptPda(opts.vaultProgramId, opts.poolAddress), isSigner: false, isWritable: true },
-    { pubkey: lpHolderPoolVaultPda(opts.vaultProgramId, opts.poolAddress), isSigner: false, isWritable: true },
+    {
+      pubkey: poolRegistryPda(opts.vaultProgramId, opts.poolAddress),
+      isSigner: false,
+      isWritable: true,
+    },
+    {
+      pubkey: salvageReceiptPda(opts.vaultProgramId, opts.poolAddress),
+      isSigner: false,
+      isWritable: true,
+    },
+    {
+      pubkey: lpHolderPoolVaultPda(opts.vaultProgramId, opts.poolAddress),
+      isSigner: false,
+      isWritable: true,
+    },
     { pubkey: protocolTreasury, isSigner: false, isWritable: true },
     { pubkey: opts.salvor, isSigner: true, isWritable: true },
     { pubkey: opts.poolAddress, isSigner: false, isWritable: true },
     { pubkey: opts.ammProgramId, isSigner: false, isWritable: false },
     { pubkey: JUPITER_V6_PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: vaultAuthority, isSigner: false, isWritable: true },
-    { pubkey: vaultSolHoldingPda(opts.vaultProgramId, opts.poolAddress), isSigner: false, isWritable: true },
+    {
+      pubkey: vaultSolHoldingPda(opts.vaultProgramId, opts.poolAddress),
+      isSigner: false,
+      isWritable: true,
+    },
     { pubkey: opts.salvorLpTokenAccount, isSigner: false, isWritable: true },
     { pubkey: vaultBaseTokenAccount, isSigner: false, isWritable: true },
     { pubkey: vaultMemecoinTokenAccount, isSigner: false, isWritable: true },
@@ -172,7 +211,10 @@ export function buildSalvagePoolIx(opts: SalvagePoolIxInput): TransactionInstruc
   }
   for (let i = 0; i < opts.jupiterRouteAccountsLen; i++) {
     const m = opts.jupiterRouteAccounts[i];
-    if (!m) throw new Error(`jupiterRouteAccounts[${i}] missing — needed ${opts.jupiterRouteAccountsLen}`);
+    if (!m)
+      throw new Error(
+        `jupiterRouteAccounts[${i}] missing — needed ${opts.jupiterRouteAccountsLen}`,
+      );
     keys.push({ ...m });
   }
 

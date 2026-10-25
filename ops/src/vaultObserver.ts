@@ -66,7 +66,11 @@ export interface VaultObservation {
   takenAtMs: number;
   slot: number | null;
   vaultConfig: VaultProtocolConfig | null;
-  receipts: Array<{ address: string; receipt: SalvageReceipt; checks: { r1Sum: boolean; r2Shares: boolean } }>;
+  receipts: Array<{
+    address: string;
+    receipt: SalvageReceipt;
+    checks: { r1Sum: boolean; r2Shares: boolean };
+  }>;
   claims: Array<{ address: string; claim: ClaimRecord }>;
   registries: Array<{ address: string; registry: PoolRegistry }>;
   rollups: PoolClaimRollup[];
@@ -130,9 +134,12 @@ export class VaultObserver {
         "down",
         `getProgramAccounts failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-      alerts.raise("vault-accounts-unavailable", "critical",
+      alerts.raise(
+        "vault-accounts-unavailable",
+        "critical",
         "GraveVault account sweep failed — the observer is blind",
-        { program: this.opts.vaultProgramId.toBase58() });
+        { program: this.opts.vaultProgramId.toBase58() },
+      );
       throw error instanceof Error ? error : new Error(String(error));
     }
 
@@ -169,7 +176,9 @@ export class VaultObserver {
       if (!entry.checks.r1Sum || !entry.checks.r2Shares) {
         anomalousReceipts++;
         health.counter("vault-observer.anomalous-receipts");
-        alerts.raise("receipt-sum-mismatch", "critical",
+        alerts.raise(
+          "receipt-sum-mismatch",
+          "critical",
           "SalvageReceipt fails the 40/40/20 accounting invariant",
           {
             receipt: entry.address,
@@ -177,7 +186,8 @@ export class VaultObserver {
             r1Sum: entry.checks.r1Sum,
             r2Shares: entry.checks.r2Shares,
             total: entry.receipt.totalProceedsLamports.toString(10),
-          });
+          },
+        );
       }
     }
 
@@ -185,11 +195,14 @@ export class VaultObserver {
     const rollups = buildClaimRollups(receipts, claims, registries);
     let anomalousRollups = 0;
     for (const rollup of rollups) {
-      const ok = rollup.checks.c1Accounted && rollup.checks.c2WithinCeiling && rollup.checks.c3Agrees;
+      const ok =
+        rollup.checks.c1Accounted && rollup.checks.c2WithinCeiling && rollup.checks.c3Agrees;
       if (!ok) {
         anomalousRollups++;
         health.counter("vault-observer.anomalous-rollups");
-        alerts.raise("claim-accounting-anomaly", "critical",
+        alerts.raise(
+          "claim-accounting-anomaly",
+          "critical",
           "GraveVault claim accounting does not reconcile",
           {
             pool: rollup.poolAddress,
@@ -200,7 +213,8 @@ export class VaultObserver {
             c1Accounted: rollup.checks.c1Accounted,
             c2WithinCeiling: rollup.checks.c2WithinCeiling,
             c3Agrees: rollup.checks.c3Agrees,
-          });
+          },
+        );
       }
     }
 
@@ -226,9 +240,11 @@ export class VaultObserver {
     // Alert on NEW failed signatures only (the dedup window handles the rest).
     for (const failed of failedTransactions) {
       health.counter("vault-observer.failed-transactions");
-      alerts.raise("vault-tx-failed", "warn",
-        "A GraveVault transaction failed on chain",
-        { signature: failed.signature, slot: failed.slot, err: failed.err });
+      alerts.raise("vault-tx-failed", "warn", "A GraveVault transaction failed on chain", {
+        signature: failed.signature,
+        slot: failed.slot,
+        err: failed.err,
+      });
     }
 
     health.counter("vault-observer.receipts-seen", receipts.length);
@@ -297,12 +313,14 @@ export function tryDecodeVaultAccount(data: Uint8Array): DecodedVaultAccount | n
 /** R1 + R2 — the exact monitor semantics (sum; ±1-lamport bps shares). */
 export function checkReceiptSums(receipt: SalvageReceipt): { r1Sum: boolean; r2Shares: boolean } {
   const sum =
-    receipt.lpHolderAmountLamports +
-    receipt.salvorAmountLamports +
-    receipt.protocolAmountLamports;
+    receipt.lpHolderAmountLamports + receipt.salvorAmountLamports + receipt.protocolAmountLamports;
   const r1Sum = sum === receipt.totalProceedsLamports;
   const r2Shares =
-    shareMatches(receipt.lpHolderAmountLamports, receipt.totalProceedsLamports, LP_HOLDER_SHARE_BPS) &&
+    shareMatches(
+      receipt.lpHolderAmountLamports,
+      receipt.totalProceedsLamports,
+      LP_HOLDER_SHARE_BPS,
+    ) &&
     shareMatches(receipt.salvorAmountLamports, receipt.totalProceedsLamports, SALVOR_SHARE_BPS) &&
     shareMatches(receipt.protocolAmountLamports, receipt.totalProceedsLamports, PROTOCOL_SHARE_BPS);
   return { r1Sum, r2Shares };
@@ -327,7 +345,9 @@ export function buildClaimRollups(
   for (const r of registries) pools.add(r.registry.poolAddress.toBase58());
 
   const receiptByPool = new Map(receipts.map((r) => [r.receipt.poolAddress.toBase58(), r.receipt]));
-  const registryByPool = new Map(registries.map((r) => [r.registry.poolAddress.toBase58(), r.registry]));
+  const registryByPool = new Map(
+    registries.map((r) => [r.registry.poolAddress.toBase58(), r.registry]),
+  );
 
   const rollups: PoolClaimRollup[] = [];
   for (const pool of [...pools].sort()) {
@@ -338,8 +358,10 @@ export function buildClaimRollups(
     const receiptLpHolder = receipt?.lpHolderAmountLamports ?? null;
     const registryClaimed = registry?.lpHolderPoolClaimedLamports ?? null;
 
-    const c1Accounted = registryClaimed === null ? poolClaims.length === 0 : registryClaimed === claimedLamports;
-    const c2WithinCeiling = receiptLpHolder === null ? poolClaims.length === 0 : claimedLamports <= receiptLpHolder;
+    const c1Accounted =
+      registryClaimed === null ? poolClaims.length === 0 : registryClaimed === claimedLamports;
+    const c2WithinCeiling =
+      receiptLpHolder === null ? poolClaims.length === 0 : claimedLamports <= receiptLpHolder;
     const c3Agrees = (() => {
       if (!registry || !receipt) return true; // single-sided pools have nothing to disagree with
       return registry.lpHolderPoolTotalLamports === receipt.lpHolderAmountLamports;

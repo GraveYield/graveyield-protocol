@@ -47,9 +47,7 @@ export class ConsoleAlertSink implements AlertSink {
   ) {}
 
   deliver(alert: Alert): void {
-    const ctx = Object.keys(alert.context).length
-      ? ` ${JSON.stringify(alert.context)}`
-      : "";
+    const ctx = Object.keys(alert.context).length ? ` ${JSON.stringify(alert.context)}` : "";
     this.write(
       `[ALERT:${alert.severity}] ${alert.code}${alert.suppressed ? " (suppressed-repeat)" : ""} — ${alert.message}${ctx}`,
     );
@@ -60,9 +58,7 @@ export class ConsoleAlertSink implements AlertSink {
 export class JsonlAlertSink implements AlertSink {
   private readonly lines: string[] = [];
 
-  constructor(
-    private readonly append: (line: string) => void = () => {},
-  ) {}
+  constructor(private readonly append: (line: string) => void = () => {}) {}
 
   /** Wire a real file appender writing to `filePath` (created on demand). */
   static toFile(filePath: string): JsonlAlertSink {

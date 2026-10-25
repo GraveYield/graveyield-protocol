@@ -118,7 +118,8 @@ export const CASES: readonly AdversaryCase[] = [
     title: "pool that never swapped cannot produce attestable inactivity evidence",
     layer: "ts-indexer",
     verdict: "pinned",
-    expected: "noSwapFound counts as maximally dead off-chain; on-chain C2 refuses zero launch price",
+    expected:
+      "noSwapFound counts as maximally dead off-chain; on-chain C2 refuses zero launch price",
     proves:
       "absence-of-swings is treated as dead by the wide funnel, but the narrow authority (chain) refuses any pool without a recorded launch price — defense in depth, not trust",
   },
@@ -243,10 +244,12 @@ export const CASES: readonly AdversaryCase[] = [
   {
     id: "ADV-CPI-05",
     threatClass: "malicious-cpi-accounts",
-    title: "the salvage builder pins the Jupiter v6 program and the real Raydium authority into the account list",
+    title:
+      "the salvage builder pins the Jupiter v6 program and the real Raydium authority into the account list",
     layer: "ts-sdk",
     verdict: "refused",
-    expected: "keys embed JUPITER_V6_PROGRAM_ID and RAYDIUM_V4_AMM_AUTHORITY at their canonical slots",
+    expected:
+      "keys embed JUPITER_V6_PROGRAM_ID and RAYDIUM_V4_AMM_AUTHORITY at their canonical slots",
     proves:
       "a caller cannot re-point the CPI at an impostor program or a fake AMM authority client-side — the substitution refusal (7013) is fork-proven and the wire shape cannot even express it",
   },
@@ -312,7 +315,8 @@ export const CASES: readonly AdversaryCase[] = [
   {
     id: "ADV-CS-03",
     threatClass: "competing-salvors",
-    title: "fleet revalidation does not pre-read the PoolRegistry — a lost race is discovered at simulation, not before",
+    title:
+      "fleet revalidation does not pre-read the PoolRegistry — a lost race is discovered at simulation, not before",
     layer: "fleet",
     verdict: "finding",
     finding: "F3",

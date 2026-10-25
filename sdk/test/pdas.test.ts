@@ -38,14 +38,20 @@ const HOLDER = new PublicKey("11111111111111111111111111111111");
 describe("PDA derivation — deterministic, canonical seeds", () => {
   test("scannerProtocolConfigPda is stable under [protocol_config] seeds", () => {
     const pda = scannerProtocolConfigPda(SCANNER);
-    assert.equal(pda.toBase58(), "GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu",
-      "scanner ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)");
+    assert.equal(
+      pda.toBase58(),
+      "GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu",
+      "scanner ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)",
+    );
   });
 
   test("vaultProtocolConfigPda is stable under [protocol_config] seeds", () => {
     const pda = vaultProtocolConfigPda(VAULT);
-    assert.equal(pda.toBase58(), "2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU",
-      "vault ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)");
+    assert.equal(
+      pda.toBase58(),
+      "2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU",
+      "vault ProtocolConfig PDA must match the devnet-deployed value (handoff §3.2)",
+    );
   });
 
   test("eligibilityAnchorPda uses [eligibility_anchor, amm, pool] seeds", () => {
@@ -116,19 +122,13 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     const a = protocolTreasuryPda(VAULT);
     const b = protocolTreasuryPda(VAULT);
     assert.deepEqual(a.toBase58(), b.toBase58());
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("protocol_treasury")],
-      VAULT,
-    );
+    const [expected] = PublicKey.findProgramAddressSync([Buffer.from("protocol_treasury")], VAULT);
     assert.equal(a.toBase58(), expected.toBase58());
   });
 
   test("vaultAuthorityPda is a singleton under [vault_authority]", () => {
     const pda = vaultAuthorityPda(VAULT);
-    const [expected] = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault_authority")],
-      VAULT,
-    );
+    const [expected] = PublicKey.findProgramAddressSync([Buffer.from("vault_authority")], VAULT);
     assert.equal(pda.toBase58(), expected.toBase58());
   });
 

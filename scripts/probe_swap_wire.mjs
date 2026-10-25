@@ -50,8 +50,13 @@ for (const POOL of POOLS) {
     if (s.err || found) continue;
     let tx;
     try {
-      tx = await rpc("getTransaction", [s.signature, { encoding: "json", maxSupportedTransactionVersion: 255 }]);
-    } catch { continue; }
+      tx = await rpc("getTransaction", [
+        s.signature,
+        { encoding: "json", maxSupportedTransactionVersion: 255 },
+      ]);
+    } catch {
+      continue;
+    }
     if (!tx) continue;
     const keys = [
       ...tx.transaction.message.accountKeys.map((k) => k.pubkey),
@@ -70,8 +75,9 @@ for (const POOL of POOLS) {
     let hit = null;
     const outer = tx.transaction.message.instructions;
     for (let i = 0; i < outer.length && !hit; i++) hit = scan(outer[i], `outer#${i}`);
-    for (const g of (tx.meta?.innerInstructions ?? [])) {
-      for (let i = 0; i < g.instructions.length && !hit; i++) hit = scan(g.instructions[i], `outer#${g.index} inner#${i}`);
+    for (const g of tx.meta?.innerInstructions ?? []) {
+      for (let i = 0; i < g.instructions.length && !hit; i++)
+        hit = scan(g.instructions[i], `outer#${g.index} inner#${i}`);
     }
     if (!hit) continue;
     found = true;
@@ -85,13 +91,34 @@ for (const POOL of POOLS) {
       const writable = ai < numSigned - numRoSigned || (ai >= numSigned && ai < firstRo);
       console.log(`    ${j}: ${keys[ai]} signer=${signer} writable=${writable}`);
     });
-    console.log(`  data: tag=${hit.data[0]} amountIn=${BigInt.asUintN(64, hit.data.readBigUInt64LE(1))} minOut=${BigInt.asUintN(64, hit.data.readBigUInt64LE(9))}`);
-    writeFileSync("/tmp/phase3_swap_wire.json", JSON.stringify({
-      signature: hit.signature, where: hit.where, pool: POOL, keys, accIdxs: hit.accIdxs,
-      tag: hit.data[0], amountIn: BigInt.asUintN(64, hit.data.readBigUInt64LE(1)).toString(),
-      minOut: BigInt.asUintN(64, hit.data.readBigUInt64LE(9)).toString(),
-    }, null, 2));
+    console.log(
+      `  data: tag=${hit.data[0]} amountIn=${BigInt.asUintN(64, hit.data.readBigUInt64LE(1))} minOut=${BigInt.asUintN(64, hit.data.readBigUInt64LE(9))}`,
+    );
+    writeFileSync(
+      "/tmp/phase3_swap_wire.json",
+      JSON.stringify(
+        {
+          signature: hit.signature,
+          where: hit.where,
+          pool: POOL,
+          keys,
+          accIdxs: hit.accIdxs,
+          tag: hit.data[0],
+          amountIn: BigInt.asUintN(64, hit.data.readBigUInt64LE(1)).toString(),
+          minOut: BigInt.asUintN(64, hit.data.readBigUInt64LE(9)).toString(),
+        },
+        null,
+        2,
+      ),
+    );
   }
-  console.log(`  V4 tags seen: ${[...tagStats.entries()].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}x${n}`).join(", ") || "none"}`);
+  console.log(
+    `  V4 tags seen: ${
+      [...tagStats.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${t}x${n}`)
+        .join(", ") || "none"
+    }`,
+  );
 }
 console.log(`\ndone (${calls} RPC calls)`);

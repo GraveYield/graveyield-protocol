@@ -27,12 +27,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PublicKey } from "@solana/web3.js";
 
-import {
-  SnapshotMerkleTree,
-  HolderEntry,
-  computeLeaf,
-  verifyMerkleProof,
-} from "../src/index.js";
+import { SnapshotMerkleTree, HolderEntry, computeLeaf, verifyMerkleProof } from "../src/index.js";
 
 // ----------------------------------------------------------- helpers
 
@@ -132,10 +127,7 @@ describe("SnapshotMerkleTree — single leaf", () => {
 
 describe("SnapshotMerkleTree — two leaves", () => {
   test("root is the sorted-pair hash of the two leaves", () => {
-    const tree = SnapshotMerkleTree.fromEntries([
-      entry(0x10, 5_000n),
-      entry(0x20, 7_000n),
-    ]);
+    const tree = SnapshotMerkleTree.fromEntries([entry(0x10, 5_000n), entry(0x20, 7_000n)]);
     const la = computeLeaf(pk(0x10), 5_000n);
     const lb = computeLeaf(pk(0x20), 7_000n);
     assert.deepEqual(Buffer.from(tree.root()), Buffer.from(sortedPair(la, lb)));
@@ -190,12 +182,7 @@ describe("SnapshotMerkleTree — three leaves (fork-proven vector)", () => {
 
 describe("SnapshotMerkleTree — four leaves (balanced)", () => {
   test("every honest proof verifies; tampering fails", () => {
-    const entries = [
-      entry(0x10, 100n),
-      entry(0x20, 200n),
-      entry(0x30, 300n),
-      entry(0x40, 400n),
-    ];
+    const entries = [entry(0x10, 100n), entry(0x20, 200n), entry(0x30, 300n), entry(0x40, 400n)];
     const tree = SnapshotMerkleTree.fromEntries(entries);
     const leaves = entries.map((e) => computeLeaf(e.owner, e.lpBalance));
     for (let i = 0; i < 4; i++) {
@@ -239,7 +226,10 @@ describe("SnapshotMerkleTree — depth + proof length bound", () => {
       assert.equal(tree.leafCount(), n);
       for (let i = 0; i < n; i++) {
         const proof = tree.proof(i)!;
-        assert.ok(proof.length <= tree.treeDepth(), `n=${n} idx=${i}: proof length ${proof.length} > depth ${tree.treeDepth()}`);
+        assert.ok(
+          proof.length <= tree.treeDepth(),
+          `n=${n} idx=${i}: proof length ${proof.length} > depth ${tree.treeDepth()}`,
+        );
       }
     });
   }
@@ -267,10 +257,7 @@ describe("SnapshotMerkleTree — canonical ordering enforcement", () => {
     );
   });
   test("rejects empty set", () => {
-    assert.throws(
-      () => SnapshotMerkleTree.fromEntries([]),
-      /empty entry set/,
-    );
+    assert.throws(() => SnapshotMerkleTree.fromEntries([]), /empty entry set/);
   });
 });
 

@@ -93,7 +93,11 @@ export class ScenarioRunner {
 
     const observer = this.opts.observer;
     if (!observer) {
-      checks.push({ id: "observer-present", ok: false, detail: "no vault observer wired into the runner" });
+      checks.push({
+        id: "observer-present",
+        ok: false,
+        detail: "no vault observer wired into the runner",
+      });
     } else {
       try {
         const observation = await observer.runOnce();
@@ -135,7 +139,11 @@ export class ScenarioRunner {
     const checks: ScenarioCheck[] = [];
     const observer = this.opts.observer;
     if (!observer) {
-      checks.push({ id: "observer-present", ok: false, detail: "no vault observer wired into the runner" });
+      checks.push({
+        id: "observer-present",
+        ok: false,
+        detail: "no vault observer wired into the runner",
+      });
       return this.finish("SC-02", "vault-audit", startedAtMs, checks);
     }
     try {
@@ -154,7 +162,10 @@ export class ScenarioRunner {
       checks.push({
         id: "c1-claim-accounting",
         ok: observation.rollups.every((r) => r.checks.c1Accounted),
-        detail: observation.rollups.map((r) => `${r.poolAddress.slice(0, 8)}… Σclaims=${r.claimedLamports}`).join("; ") || "no pools with receipts/claims",
+        detail:
+          observation.rollups
+            .map((r) => `${r.poolAddress.slice(0, 8)}… Σclaims=${r.claimedLamports}`)
+            .join("; ") || "no pools with receipts/claims",
       });
       checks.push({
         id: "c2-claim-ceiling",
@@ -199,8 +210,8 @@ export class ScenarioRunner {
     const repoRoot = this.opts.repoRoot ?? process.cwd();
     const script = join(repoRoot, "scripts", "devnet", "local_rehearsal.sh");
 
-    const validatorOnPath = existsSync("/usr/bin/solana-test-validator") ||
-      hasOnPath("solana-test-validator");
+    const validatorOnPath =
+      existsSync("/usr/bin/solana-test-validator") || hasOnPath("solana-test-validator");
     checks.push({
       id: "solana-test-validator",
       ok: validatorOnPath,

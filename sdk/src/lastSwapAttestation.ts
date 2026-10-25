@@ -23,16 +23,10 @@
 // The byte layout below is NORMATIVE and mirrored byte-for-byte by
 // programs/grave-scanner/src/attestation.rs. Do not reorder fields.
 
-import {
-  PublicKey,
-  TransactionInstruction,
-  type Connection,
-} from "@solana/web3.js";
+import { PublicKey, TransactionInstruction, type Connection } from "@solana/web3.js";
 
 /** Ed25519 signature-verification native program (precompile). */
-export const ED25519_PROGRAM_ID = new PublicKey(
-  "Ed25519SigVerify111111111111111111111111111",
-);
+export const ED25519_PROGRAM_ID = new PublicKey("Ed25519SigVerify111111111111111111111111111");
 
 /** Canonical attestation message length in bytes. */
 export const ATTESTATION_MSG_LEN = 112;
@@ -165,13 +159,10 @@ export function buildEd25519VerifyInstruction(opts: {
   // spans: C1 (72, 112) or C2 (152, 168 — see launchPriceAttestation.ts).
   // Anything else would sign bytes the scanner will not read as `params.msg`.
   const canonicalSpan =
-    (messageAddressOffset === IX_DATA_MSG_OFFSET &&
-      opts.message.length === ATTESTATION_MSG_LEN) ||
+    (messageAddressOffset === IX_DATA_MSG_OFFSET && opts.message.length === ATTESTATION_MSG_LEN) ||
     (messageAddressOffset === 152 && opts.message.length === 168);
   if (!canonicalSpan) {
-    throw new Error(
-      "message length must match the canonical span for messageAddressOffset",
-    );
+    throw new Error("message length must match the canonical span for messageAddressOffset");
   }
   const data = Buffer.alloc(PRECOMPILE_MIN_LEN);
   data[0] = 1; // num_signatures
@@ -240,13 +231,9 @@ export async function deriveLastSwapV4(
       ...(tx.meta?.loadedAddresses?.readonly ?? []),
     ];
     const keyAt = (idx: number): PublicKey | undefined => keyList[idx];
-    const indexOf = (k: PublicKey): number =>
-      keyList.findIndex((x) => x.equals(k));
+    const indexOf = (k: PublicKey): number => keyList.findIndex((x) => x.equals(k));
 
-    const touchesPool = (
-      programIdIndex: number,
-      accounts: Array<PublicKey | number>,
-    ): boolean => {
+    const touchesPool = (programIdIndex: number, accounts: Array<PublicKey | number>): boolean => {
       const pid = keyAt(programIdIndex);
       if (pid === undefined || !pid.equals(ammProgramId)) return false;
       return accounts.some((a) => {
@@ -259,9 +246,7 @@ export async function deriveLastSwapV4(
       touchesPool(ci.programIdIndex, ci.accountKeyIndexes),
     );
     const inner = (tx.meta?.innerInstructions ?? []).some((set) =>
-      set.instructions.some((ci) =>
-        touchesPool(ci.programIdIndex, ci.accounts),
-      ),
+      set.instructions.some((ci) => touchesPool(ci.programIdIndex, ci.accounts)),
     );
     if (topLevel || inner) {
       return {

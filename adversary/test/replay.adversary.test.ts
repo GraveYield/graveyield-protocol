@@ -15,7 +15,13 @@ import {
   computeLeaf,
   decodeGraveYieldErrorCode,
 } from "@graveyield/sdk";
-import { VaultObserver, HealthRegistry, AlertManager, type ChainView, type OwnedAccount } from "@graveyield/ops";
+import {
+  VaultObserver,
+  HealthRegistry,
+  AlertManager,
+  type ChainView,
+  type OwnedAccount,
+} from "@graveyield/ops";
 import { ByteWriter, key, MEME_MINT } from "./helpers.js";
 
 describe("ADV-RP — Merkle artifacts fail closed", () => {
@@ -29,7 +35,9 @@ describe("ADV-RP — Merkle artifacts fail closed", () => {
   function canonical(): Array<{ owner: PublicKey; lpBalance: bigint }> {
     return holders
       .map((h) => ({ owner: h.holder, lpBalance: h.lpBalance }))
-      .sort((a, b) => Buffer.compare(Buffer.from(a.owner.toBytes()), Buffer.from(b.owner.toBytes())));
+      .sort((a, b) =>
+        Buffer.compare(Buffer.from(a.owner.toBytes()), Buffer.from(b.owner.toBytes())),
+      );
   }
 
   function buildTree() {
@@ -78,7 +86,14 @@ describe("ADV-RP — Merkle artifacts fail closed", () => {
     assert.notDeepEqual(Buffer.from(t1.root()), Buffer.from(doctored.root()));
     // ...and the honest proof no longer verifies against it.
     const proof = t1.proof(0)!;
-    assert.equal(verifyMerkleProof(doctored.root(), computeLeaf(canonical()[0]!.owner, canonical()[0]!.lpBalance), proof), false);
+    assert.equal(
+      verifyMerkleProof(
+        doctored.root(),
+        computeLeaf(canonical()[0]!.owner, canonical()[0]!.lpBalance),
+        proof,
+      ),
+      false,
+    );
   });
 });
 
@@ -93,31 +108,56 @@ describe("ADV-RP — the observer flags manipulated books", () => {
     protocolAmt: bigint;
     total: bigint;
   }): Uint8Array {
-    return prefixDisc(AccountDiscBytes.SalvageReceipt, new ByteWriter()
-      .pubkey(f.pool).pubkey(f.salvor)
-      .u64(f.lpAmt).u64(f.salvorAmt).u64(f.protocolAmt).u64(f.total)
-      .u64(28_000_000n).i64(1_700_000_000n)
-      .pubkey(MEME_MINT).u64(0n).i64(0n).u8(254)
-      .done());
+    return prefixDisc(
+      AccountDiscBytes.SalvageReceipt,
+      new ByteWriter()
+        .pubkey(f.pool)
+        .pubkey(f.salvor)
+        .u64(f.lpAmt)
+        .u64(f.salvorAmt)
+        .u64(f.protocolAmt)
+        .u64(f.total)
+        .u64(28_000_000n)
+        .i64(1_700_000_000n)
+        .pubkey(MEME_MINT)
+        .u64(0n)
+        .i64(0n)
+        .u8(254)
+        .done(),
+    );
   }
 
   function encRegistry(f: { pool: PublicKey; total: bigint; claimed: bigint }): Uint8Array {
-    return prefixDisc(AccountDiscBytes.PoolRegistry, new ByteWriter()
-      .pubkey(new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"))
-      .pubkey(f.pool).pubkey(key("salvor"))
-      .bytes(new Uint8Array(32).fill(0x11))
-      .u64(1_000_000n)
-      .u64(f.total).u64(f.claimed)
-      .u64(300n).i64(3_000n).u8(252)
-      .done());
+    return prefixDisc(
+      AccountDiscBytes.PoolRegistry,
+      new ByteWriter()
+        .pubkey(new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"))
+        .pubkey(f.pool)
+        .pubkey(key("salvor"))
+        .bytes(new Uint8Array(32).fill(0x11))
+        .u64(1_000_000n)
+        .u64(f.total)
+        .u64(f.claimed)
+        .u64(300n)
+        .i64(3_000n)
+        .u8(252)
+        .done(),
+    );
   }
 
   function encClaim(f: { pool: PublicKey; holder: PublicKey; amount: bigint }): Uint8Array {
-    return prefixDisc(AccountDiscBytes.ClaimRecord, new ByteWriter()
-      .pubkey(f.pool).pubkey(f.holder)
-      .u64(f.amount).u64(5_000n)
-      .u64(200n).i64(2_000n).u8(253)
-      .done());
+    return prefixDisc(
+      AccountDiscBytes.ClaimRecord,
+      new ByteWriter()
+        .pubkey(f.pool)
+        .pubkey(f.holder)
+        .u64(f.amount)
+        .u64(5_000n)
+        .u64(200n)
+        .i64(2_000n)
+        .u8(253)
+        .done(),
+    );
   }
 
   function makeObserver(accounts: OwnedAccount[]) {
@@ -154,15 +194,39 @@ describe("ADV-RP — the observer flags manipulated books", () => {
     const pool = key("pool-c2");
     const total = 10_000n;
     const accounts = [
-      { pubkey: key("acct-receipt"), owner: VAULT, lamports: 1n, data: encReceipt({ pool, salvor: key("s"), lpAmt: 4_000n, salvorAmt: 4_000n, protocolAmt: 2_000n, total }) },
-      { pubkey: key("acct-registry"), owner: VAULT, lamports: 1n, data: encRegistry({ pool, total: 4_000n, claimed: 4_001n }) },
-      { pubkey: key("acct-claim"), owner: VAULT, lamports: 1n, data: encClaim({ pool, holder: key("h"), amount: 4_001n }) },
+      {
+        pubkey: key("acct-receipt"),
+        owner: VAULT,
+        lamports: 1n,
+        data: encReceipt({
+          pool,
+          salvor: key("s"),
+          lpAmt: 4_000n,
+          salvorAmt: 4_000n,
+          protocolAmt: 2_000n,
+          total,
+        }),
+      },
+      {
+        pubkey: key("acct-registry"),
+        owner: VAULT,
+        lamports: 1n,
+        data: encRegistry({ pool, total: 4_000n, claimed: 4_001n }),
+      },
+      {
+        pubkey: key("acct-claim"),
+        owner: VAULT,
+        lamports: 1n,
+        data: encClaim({ pool, holder: key("h"), amount: 4_001n }),
+      },
     ];
     const { observer, alertLog } = makeObserver(accounts);
     const observation = await observer.runOnce();
     assert.equal(observation.anomalousReceipts + observation.anomalousRollups > 0, true);
     assert.ok(
-      alertLog.some((a) => a.code === "receipt-sum-mismatch" || a.code === "claim-accounting-anomaly"),
+      alertLog.some(
+        (a) => a.code === "receipt-sum-mismatch" || a.code === "claim-accounting-anomaly",
+      ),
       "manipulated books must page the operator",
     );
   });
@@ -170,8 +234,25 @@ describe("ADV-RP — the observer flags manipulated books", () => {
   test("ADV-RP-02b: clean books page nobody (positive control)", async () => {
     const pool = key("pool-ok");
     const accounts = [
-      { pubkey: key("acct-receipt"), owner: VAULT, lamports: 1n, data: encReceipt({ pool, salvor: key("s"), lpAmt: 4_000n, salvorAmt: 4_000n, protocolAmt: 2_000n, total: 10_000n }) },
-      { pubkey: key("acct-registry"), owner: VAULT, lamports: 1n, data: encRegistry({ pool, total: 4_000n, claimed: 0n }) },
+      {
+        pubkey: key("acct-receipt"),
+        owner: VAULT,
+        lamports: 1n,
+        data: encReceipt({
+          pool,
+          salvor: key("s"),
+          lpAmt: 4_000n,
+          salvorAmt: 4_000n,
+          protocolAmt: 2_000n,
+          total: 10_000n,
+        }),
+      },
+      {
+        pubkey: key("acct-registry"),
+        owner: VAULT,
+        lamports: 1n,
+        data: encRegistry({ pool, total: 4_000n, claimed: 0n }),
+      },
     ];
     const { observer, alertLog } = makeObserver(accounts);
     const observation = await observer.runOnce();

@@ -20,9 +20,4 @@ export * from "./merkleService.js";
 export * from "./indexerService.js";
 export * from "./scenarios.js";
 export * from "./config.js";
-export {
-  main as opsMain,
-  parseArgs as opsParseArgs,
-  wireOps,
-  type OpsWiring,
-} from "./cli.js";
+export { main as opsMain, parseArgs as opsParseArgs, wireOps, type OpsWiring } from "./cli.js";

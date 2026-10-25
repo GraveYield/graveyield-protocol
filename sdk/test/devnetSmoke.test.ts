@@ -81,7 +81,10 @@ describe("devnet smoke (read-only)", { skip: SKIP }, () => {
     assert.equal(cfg.inactivitySeconds, SCANNER_PROTOCOL_CONFIG_DEFAULTS.inactivitySeconds);
     assert.equal(cfg.priceCollapseBps, SCANNER_PROTOCOL_CONFIG_DEFAULTS.priceCollapseBps);
     assert.equal(cfg.minTvlLamports, SCANNER_PROTOCOL_CONFIG_DEFAULTS.minTvlLamports);
-    assert.equal(cfg.anchorStalenessSeconds, SCANNER_PROTOCOL_CONFIG_DEFAULTS.anchorStalenessSeconds);
+    assert.equal(
+      cfg.anchorStalenessSeconds,
+      SCANNER_PROTOCOL_CONFIG_DEFAULTS.anchorStalenessSeconds,
+    );
     assert.equal(cfg.lpBurnDustThreshold, SCANNER_PROTOCOL_CONFIG_DEFAULTS.lpBurnDustThreshold);
     assert.equal(cfg.certTtlSeconds, SCANNER_PROTOCOL_CONFIG_DEFAULTS.certTtlSeconds);
     assert.equal(cfg.paused, false, "scanner must not be paused at rest");
@@ -94,51 +97,63 @@ describe("devnet smoke (read-only)", { skip: SKIP }, () => {
     assert.equal(cfg.lpHolderShareBps, VAULT_PROTOCOL_CONFIG_DEFAULTS.lpHolderShareBps);
     assert.equal(cfg.salvorShareBps, VAULT_PROTOCOL_CONFIG_DEFAULTS.salvorShareBps);
     assert.equal(cfg.protocolShareBps, VAULT_PROTOCOL_CONFIG_DEFAULTS.protocolShareBps);
-    assert.equal(cfg.maxPriorityFeeCeilingLamports, VAULT_PROTOCOL_CONFIG_DEFAULTS.maxPriorityFeeCeilingLamports);
+    assert.equal(
+      cfg.maxPriorityFeeCeilingLamports,
+      VAULT_PROTOCOL_CONFIG_DEFAULTS.maxPriorityFeeCeilingLamports,
+    );
     assert.equal(cfg.maxSlippageBps, VAULT_PROTOCOL_CONFIG_DEFAULTS.maxSlippageBps);
-    assert.equal(cfg.jupiterDustThresholdLamports, VAULT_PROTOCOL_CONFIG_DEFAULTS.jupiterDustThresholdLamports);
+    assert.equal(
+      cfg.jupiterDustThresholdLamports,
+      VAULT_PROTOCOL_CONFIG_DEFAULTS.jupiterDustThresholdLamports,
+    );
     assert.equal(cfg.timelockSeconds, VAULT_PROTOCOL_CONFIG_DEFAULTS.timelockSeconds);
     assert.equal(cfg.emergencyPaused, false, "vault must not be emergency-paused at rest");
   });
 
-  skipIf("evaluatePool walks all six criteria against a real Raydium V4 pool (read-only)", async () => {
-    // A real mainnet Raydium V4 pool that exists on devnet? No — devnet
-    // has no Raydium V4 pools. So we use a hardcoded test pool address
-    // and just assert that evaluatePool throws a recoverable error
-    // (typically "pool account not found" since devnet has no V4 pools),
-    // OR returns a result with `eligible === false`. The point is that
-    // the SDK's wiring is correct, not that the pool is real.
-    //
-    // The "owner" trick below — passing a fake pool owned by the V4
-    // program — keeps the call from throwing on the AMM program ID
-    // lookup; instead it surfaces the not-found path cleanly.
-    const fakePool = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
-    try {
-      const result = await client.evaluatePool(fakePool);
-      // If the pool somehow resolves, eligible must be false on devnet.
-      assert.equal(result.eligible, false);
-    } catch (err) {
-      // The expected case on devnet: the pool account doesn't exist
-      // (or the RPC refused to enumerate V4 pools). The SDK surfaced
-      // a clear error, not a stack trace.
-      const msg = String((err as { message?: string }).message ?? err);
-      assert.ok(
-        /not found|not a canonical|owned by|No Signers|Raydium V4/i.test(msg),
-        `unexpected error from evaluatePool: ${msg}`,
-      );
-    }
-  });
+  skipIf(
+    "evaluatePool walks all six criteria against a real Raydium V4 pool (read-only)",
+    async () => {
+      // A real mainnet Raydium V4 pool that exists on devnet? No — devnet
+      // has no Raydium V4 pools. So we use a hardcoded test pool address
+      // and just assert that evaluatePool throws a recoverable error
+      // (typically "pool account not found" since devnet has no V4 pools),
+      // OR returns a result with `eligible === false`. The point is that
+      // the SDK's wiring is correct, not that the pool is real.
+      //
+      // The "owner" trick below — passing a fake pool owned by the V4
+      // program — keeps the call from throwing on the AMM program ID
+      // lookup; instead it surfaces the not-found path cleanly.
+      const fakePool = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+      try {
+        const result = await client.evaluatePool(fakePool);
+        // If the pool somehow resolves, eligible must be false on devnet.
+        assert.equal(result.eligible, false);
+      } catch (err) {
+        // The expected case on devnet: the pool account doesn't exist
+        // (or the RPC refused to enumerate V4 pools). The SDK surfaced
+        // a clear error, not a stack trace.
+        const msg = String((err as { message?: string }).message ?? err);
+        assert.ok(
+          /not found|not a canonical|owned by|No Signers|Raydium V4/i.test(msg),
+          `unexpected error from evaluatePool: ${msg}`,
+        );
+      }
+    },
+  );
 
-  skipIf("error decoder maps 6000 (GraveScanner::Unauthorized) and 7000 (GraveVault::Unauthorized)", () => {
-    const scanner = decodeGraveYieldError(new Error("custom program error: 0x1770"));
-    assert.ok(scanner);
-    assert.equal(scanner!.code, 6000);
-    assert.equal(scanner!.program, "GraveScanner");
-    assert.equal(scanner!.name, "Unauthorized");
-    const vault = decodeGraveYieldError(new Error("custom program error: 0x1b58"));
-    assert.ok(vault);
-    assert.equal(vault!.code, 7000);
-    assert.equal(vault!.program, "GraveVault");
-    assert.equal(vault!.name, "Unauthorized");
-  });
+  skipIf(
+    "error decoder maps 6000 (GraveScanner::Unauthorized) and 7000 (GraveVault::Unauthorized)",
+    () => {
+      const scanner = decodeGraveYieldError(new Error("custom program error: 0x1770"));
+      assert.ok(scanner);
+      assert.equal(scanner!.code, 6000);
+      assert.equal(scanner!.program, "GraveScanner");
+      assert.equal(scanner!.name, "Unauthorized");
+      const vault = decodeGraveYieldError(new Error("custom program error: 0x1b58"));
+      assert.ok(vault);
+      assert.equal(vault!.code, 7000);
+      assert.equal(vault!.program, "GraveVault");
+      assert.equal(vault!.name, "Unauthorized");
+    },
+  );
 });

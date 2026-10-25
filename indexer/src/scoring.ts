@@ -69,12 +69,10 @@ export function scoreCandidate(
   const elapsedSeconds: bigint = candidate.activity.noSwapFound
     ? thresholds.inactivitySeconds * 10n // very old if no swap found at all
     : BigInt(Math.floor(Date.now() / 1000)) - BigInt(candidate.activity.lastSwapUnixTs);
-  const inactivityMargin =
-    Number(elapsedSeconds) / Number(thresholds.inactivitySeconds);
+  const inactivityMargin = Number(elapsedSeconds) / Number(thresholds.inactivitySeconds);
 
   // C3 TVL margin.
-  const tvlMargin =
-    Number(candidate.reserves.tvlLamports) / Number(thresholds.minTvlLamports);
+  const tvlMargin = Number(candidate.reserves.tvlLamports) / Number(thresholds.minTvlLamports);
 
   // C2 price collapse margin. If launch/current prices are supplied,
   // compute the actual drop; otherwise estimate from the reserve ratio

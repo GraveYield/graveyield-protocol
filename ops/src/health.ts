@@ -172,10 +172,7 @@ export class HealthRegistry {
 }
 
 /** Apply the freshness window to a component's self-reported status. */
-function deriveReportedStatus(
-  component: HealthComponent,
-  nowMs: number,
-): ReportedStatus {
+function deriveReportedStatus(component: HealthComponent, nowMs: number): ReportedStatus {
   if (component.lastHeartbeatAtMs === null) return "never-reported";
   const age = nowMs - component.lastHeartbeatAtMs;
   if (age > component.freshnessWindowMs) return "stale";
