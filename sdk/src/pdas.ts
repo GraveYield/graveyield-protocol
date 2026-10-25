@@ -13,6 +13,8 @@
 
 import { PublicKey } from "@solana/web3.js";
 
+import { findProgramAddressSync } from "./web3compat.js";
+
 // ----------------------------------------------------------------- scanner
 
 const SCANNER_PROTOCOL_CONFIG_SEED = Buffer.from("protocol_config", "utf8");
@@ -35,7 +37,7 @@ const VAULT_SOL_HOLDING_SEED = Buffer.from("vault_sol_holding", "utf8");
 
 /** GraveScanner ProtocolConfig PDA — singleton under `["protocol_config"]`. */
 export function scannerProtocolConfigPda(scannerProgramId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync([SCANNER_PROTOCOL_CONFIG_SEED], scannerProgramId);
+  const [pda] = findProgramAddressSync([SCANNER_PROTOCOL_CONFIG_SEED], scannerProgramId);
   return pda;
 }
 
@@ -45,8 +47,8 @@ export function eligibilityAnchorPda(
   ammProgramId: PublicKey,
   poolAddress: PublicKey,
 ): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [ELIGIBILITY_ANCHOR_SEED, ammProgramId.toBuffer(), poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [ELIGIBILITY_ANCHOR_SEED, ammProgramId.toBytes(), poolAddress.toBytes()],
     scannerProgramId,
   );
   return pda;
@@ -58,8 +60,8 @@ export function eligibilityCertPda(
   ammProgramId: PublicKey,
   poolAddress: PublicKey,
 ): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [ELIGIBILITY_CERT_SEED, ammProgramId.toBuffer(), poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [ELIGIBILITY_CERT_SEED, ammProgramId.toBytes(), poolAddress.toBytes()],
     scannerProgramId,
   );
   return pda;
@@ -71,8 +73,8 @@ export function launchPricePda(
   ammProgramId: PublicKey,
   poolAddress: PublicKey,
 ): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [LAUNCH_PRICE_SEED, ammProgramId.toBuffer(), poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [LAUNCH_PRICE_SEED, ammProgramId.toBytes(), poolAddress.toBytes()],
     scannerProgramId,
   );
   return pda;
@@ -82,23 +84,20 @@ export function launchPricePda(
 
 /** GraveVault ProtocolConfig PDA — singleton under `["protocol_config"]`. */
 export function vaultProtocolConfigPda(vaultProgramId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync([VAULT_PROTOCOL_CONFIG_SEED], vaultProgramId);
+  const [pda] = findProgramAddressSync([VAULT_PROTOCOL_CONFIG_SEED], vaultProgramId);
   return pda;
 }
 
 /** PoolRegistry PDA — `["pool_registry", pool]` under GraveVault. Init-once at salvage. */
 export function poolRegistryPda(vaultProgramId: PublicKey, poolAddress: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [POOL_REGISTRY_SEED, poolAddress.toBuffer()],
-    vaultProgramId,
-  );
+  const [pda] = findProgramAddressSync([POOL_REGISTRY_SEED, poolAddress.toBytes()], vaultProgramId);
   return pda;
 }
 
 /** SalvageReceipt PDA — `["salvage_receipt", pool]` under GraveVault. Init-once at salvage. */
 export function salvageReceiptPda(vaultProgramId: PublicKey, poolAddress: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [SALVAGE_RECEIPT_SEED, poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [SALVAGE_RECEIPT_SEED, poolAddress.toBytes()],
     vaultProgramId,
   );
   return pda;
@@ -106,8 +105,8 @@ export function salvageReceiptPda(vaultProgramId: PublicKey, poolAddress: Public
 
 /** LpHolderPoolVault PDA — `["lp_holder_pool", pool]` under GraveVault. Native-SOL system account. */
 export function lpHolderPoolVaultPda(vaultProgramId: PublicKey, poolAddress: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [LP_HOLDER_POOL_SEED, poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [LP_HOLDER_POOL_SEED, poolAddress.toBytes()],
     vaultProgramId,
   );
   return pda;
@@ -119,8 +118,8 @@ export function claimRecordPda(
   poolAddress: PublicKey,
   lpHolder: PublicKey,
 ): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [CLAIM_RECORD_SEED, poolAddress.toBuffer(), lpHolder.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [CLAIM_RECORD_SEED, poolAddress.toBytes(), lpHolder.toBytes()],
     vaultProgramId,
   );
   return pda;
@@ -128,20 +127,20 @@ export function claimRecordPda(
 
 /** ProtocolTreasury PDA — singleton under `["protocol_treasury"]` under GraveVault. */
 export function protocolTreasuryPda(vaultProgramId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync([PROTOCOL_TREASURY_SEED], vaultProgramId);
+  const [pda] = findProgramAddressSync([PROTOCOL_TREASURY_SEED], vaultProgramId);
   return pda;
 }
 
 /** VaultAuthority PDA — singleton under `["vault_authority"]` under GraveVault. Inner-CPI signer. */
 export function vaultAuthorityPda(vaultProgramId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync([VAULT_AUTHORITY_SEED], vaultProgramId);
+  const [pda] = findProgramAddressSync([VAULT_AUTHORITY_SEED], vaultProgramId);
   return pda;
 }
 
 /** VaultSolHoldingAccount PDA — `["vault_sol_holding", pool]` under GraveVault. Lazy-init at salvage. */
 export function vaultSolHoldingPda(vaultProgramId: PublicKey, poolAddress: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [VAULT_SOL_HOLDING_SEED, poolAddress.toBuffer()],
+  const [pda] = findProgramAddressSync(
+    [VAULT_SOL_HOLDING_SEED, poolAddress.toBytes()],
     vaultProgramId,
   );
   return pda;

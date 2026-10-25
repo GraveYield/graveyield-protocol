@@ -28,8 +28,10 @@
 // on-chain verifier (`salvage_pool`'s supply pin against the live mint
 // supply, `InvalidSnapshotData` 7018) is the final integrity anchor.
 
-import { Connection, PublicKey, type AccountInfo } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { unpackAccount, unpackMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+
+import { asBufferAccount } from "./web3compat.js";
 import type { LpSnapshot } from "./types.js";
 import { SnapshotMerkleTree, type HolderEntry } from "./merkle.js";
 import BN from "bn.js";
@@ -85,7 +87,7 @@ export async function snapshotLpHolders(
   if (!supplyInfo) {
     throw new Error(`LP mint ${lpMint.toBase58()} not found`);
   }
-  const mint = unpackMint(lpMint, supplyInfo);
+  const mint = unpackMint(lpMint, asBufferAccount(supplyInfo));
   const totalSupply = BigInt(mint.supply.toString());
 
   // 2. Enumerate every SPL token account holding the LP mint via
@@ -107,13 +109,13 @@ export async function snapshotLpHolders(
   const exclusions: SnapshotResult["exclusions"] = [];
 
   for (const entry of accountsResponse) {
-    const info: AccountInfo<Buffer> = entry.account;
+    const info = entry.account;
     if (!info.data) continue;
     const data = Buffer.isBuffer(info.data) ? info.data : Buffer.from(info.data);
     if (data.length !== SPL_TOKEN_ACCOUNT_SIZE) continue;
     let parsed: ReturnType<typeof unpackAccount>;
     try {
-      parsed = unpackAccount(entry.pubkey, info);
+      parsed = unpackAccount(entry.pubkey, asBufferAccount(info));
     } catch {
       continue;
     }
@@ -198,7 +200,7 @@ export async function snapshotLpHolders(
   //    "SNAPSHOT POINT" doc).
   let snapshotSlot = 0;
   try {
-    snapshotSlot = await connection.getSlot();
+    snapshotSlot = Number(await connection.getSlot());
   } catch {
     /* best-effort; default to 0 */
   }

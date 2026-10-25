@@ -291,7 +291,7 @@ export function decodeProgramError(err) {
 
 // ------------------------------------------------------------------ actions
 
-function loadKeypair(path) {
+async function loadKeypair(path) {
   return Keypair.fromSecretKey(new Uint8Array(JSON.parse(readFileSync(path, "utf8"))));
 }
 
@@ -377,7 +377,7 @@ function requireOpt(args, name) {
 
 async function cmdInit(args, programs) {
   const url = requireOpt(args, "url");
-  const deployer = loadKeypair(requireOpt(args, "deployer"));
+  const deployer = await loadKeypair(requireOpt(args, "deployer"));
   const authority =
     args.authority !== undefined ? new PublicKey(args.authority) : deployer.publicKey;
   const connection = new Connection(url, "confirmed");
@@ -399,7 +399,7 @@ async function cmdInit(args, programs) {
 
 async function cmdPause(args) {
   const url = requireOpt(args, "url");
-  const authority = loadKeypair(requireOpt(args, "authority"));
+  const authority = await loadKeypair(requireOpt(args, "authority"));
   const program = requireOpt(args, "program");
   const state = requireOpt(args, "state") === "true";
   const connection = new Connection(url, "confirmed");
@@ -429,8 +429,8 @@ async function cmdCheck(args) {
 
 async function cmdDrill(args) {
   const url = requireOpt(args, "url");
-  const authority = loadKeypair(requireOpt(args, "authority"));
-  const intruder = loadKeypair(requireOpt(args, "intruder"));
+  const authority = await loadKeypair(requireOpt(args, "authority"));
+  const intruder = await loadKeypair(requireOpt(args, "intruder"));
   const program = requireOpt(args, "program");
   const pausedField = program === "scanner" ? "paused" : "emergencyPaused";
   const unauthorizedCode = program === "scanner" ? 6000 : 7000;

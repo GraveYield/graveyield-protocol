@@ -33,6 +33,7 @@ export * from "./launchPriceAttestation.js";
 export * from "./borsh.js";
 export * from "./discriminators.js";
 export * from "./pdas.js";
+export * from "./web3compat.js";
 export * from "./errors.js";
 export * from "./accountDecoders.js";
 export * from "./raydiumV4.js";

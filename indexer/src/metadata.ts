@@ -14,6 +14,7 @@
 
 import { Connection } from "@solana/web3.js";
 import { unpackMint } from "@solana/spl-token";
+import { asBufferAccount } from "@graveyield/sdk";
 import type { DiscoveredPool, TokenMetadata } from "./types.js";
 
 /**
@@ -33,9 +34,9 @@ export async function readTokenMetadata(
 
     if (!baseInfo || !quoteInfo || !lpInfo) return null;
 
-    const baseMint = unpackMint(pool.pool.baseMint, baseInfo);
-    const quoteMint = unpackMint(pool.pool.quoteMint, quoteInfo);
-    const lpMint = unpackMint(pool.pool.lpMint, lpInfo);
+    const baseMint = unpackMint(pool.pool.baseMint, asBufferAccount(baseInfo));
+    const quoteMint = unpackMint(pool.pool.quoteMint, asBufferAccount(quoteInfo));
+    const lpMint = unpackMint(pool.pool.lpMint, asBufferAccount(lpInfo));
 
     if (!baseMint.isInitialized || !quoteMint.isInitialized || !lpMint.isInitialized) {
       return null;

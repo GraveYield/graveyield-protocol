@@ -339,7 +339,9 @@ export function buildClaimRollups(
   claims: VaultObservation["claims"],
   registries: VaultObservation["registries"],
 ): PoolClaimRollup[] {
-  const pools = new Set<string>();
+  // toBase58() returns web3.js 3.x's branded `Address` string; keep the
+  // set in that domain so the Map lookups below type-match exactly.
+  const pools = new Set<ReturnType<PublicKey["toBase58"]>>();
   for (const r of receipts) pools.add(r.receipt.poolAddress.toBase58());
   for (const c of claims) pools.add(c.claim.poolAddress.toBase58());
   for (const r of registries) pools.add(r.registry.poolAddress.toBase58());

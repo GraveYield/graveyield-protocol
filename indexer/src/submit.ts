@@ -34,6 +34,7 @@ import {
   GraveYieldClient,
   buildAttestationMessage,
   fetchSlotHash,
+  findProgramAddressSync,
   type Phase1Input,
 } from "@graveyield/sdk";
 import { RAYDIUM_V4_PROGRAM_ID } from "@graveyield/sdk";
@@ -86,7 +87,7 @@ export async function submitCandidate(
 
   try {
     // 1. Build the C1 attestation message.
-    const issuedSlot = await connection.getSlot();
+    const issuedSlot = Number(await connection.getSlot());
     const slotHash = await fetchSlotHash(connection, issuedSlot);
     if (!slotHash) {
       return {
@@ -107,7 +108,8 @@ export async function submitCandidate(
     const msg = buildAttestationMessage(att);
 
     // 2. Sign the message with the oracle key (Ed25519 via tweetnacl).
-    const oracleKp = oracleKeypair ?? Keypair.fromSecretKey(config.activityOracleSecretKey!);
+    const oracleKp =
+      oracleKeypair ?? (await Keypair.fromSecretKey(config.activityOracleSecretKey!));
     const signature = nacl.sign.detached(Buffer.from(msg), oracleKp.secretKey);
 
     // 3. Build the SDK client + phase1 instruction pair.
@@ -156,11 +158,11 @@ export async function submitCandidate(
 
 /** Derive the EligibilityAnchor PDA for a candidate. */
 function deriveAnchorPda(scannerProgramId: PublicKey, candidate: Candidate): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
+  const [pda] = findProgramAddressSync(
     [
       Buffer.from("eligibility_anchor"),
-      RAYDIUM_V4_PROGRAM_ID.toBuffer(),
-      candidate.poolAddress.toBuffer(),
+      RAYDIUM_V4_PROGRAM_ID.toBytes(),
+      candidate.poolAddress.toBytes(),
     ],
     scannerProgramId,
   );

@@ -22,6 +22,8 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { unpackAccount, unpackMint } from "@solana/spl-token";
 
+import { asBufferAccount } from "./web3compat.js";
+
 // Re-export the network constants so SDK consumers can import everything
 // from a single module if they prefer.
 export {
@@ -114,7 +116,7 @@ export async function readVaultReserve(connection: Connection, vault: PublicKey)
       `vault account ${vault.toBase58()} is owned by ${info.owner.toBase58()}, not SPL token`,
     );
   }
-  const acct = unpackAccount(vault, info);
+  const acct = unpackAccount(vault, asBufferAccount(info));
   return BigInt(acct.amount.toString());
 }
 
@@ -129,7 +131,7 @@ export async function readLpMintSupply(connection: Connection, lpMint: PublicKey
       `LP mint ${lpMint.toBase58()} is owned by ${info.owner.toBase58()}, not SPL token`,
     );
   }
-  const mint = unpackMint(lpMint, info);
+  const mint = unpackMint(lpMint, asBufferAccount(info));
   return BigInt(mint.supply.toString());
 }
 

@@ -320,7 +320,7 @@ export class GraveYieldClient {
       if (lastSwap) {
         const slot = await this.connection.getSlot();
         const block = await this.connection.getBlock(slot, { maxSupportedTransactionVersion: 0 });
-        const now = block?.blockTime ?? Math.floor(Date.now() / 1000);
+        const now = Number(block?.blockTime ?? Math.floor(Date.now() / 1000));
         const elapsed = now - lastSwap.lastSwapUnixTs;
         c1Inactivity = elapsed >= Number(scanner.inactivitySeconds);
       }
@@ -373,7 +373,7 @@ export class GraveYieldClient {
     let c6EpochConfirmed = false;
     if (anchor) {
       const currentEpoch = await this.connection.getEpochInfo().then((e) => e.epoch);
-      const elapsed = currentEpoch - Number(anchor.firstEligibleEpoch);
+      const elapsed = Number(currentEpoch) - Number(anchor.firstEligibleEpoch);
       c6EpochConfirmed = elapsed >= 2; // MIN_EPOCH_CONFIRMATION = 2
     }
 

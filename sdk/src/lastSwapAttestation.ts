@@ -217,7 +217,7 @@ export async function deriveLastSwapV4(
   });
   for (const info of sigInfos) {
     if (info.err !== null) continue;
-    const blockTime: number | null | undefined = info.blockTime;
+    const blockTime = info.blockTime;
     if (blockTime === null || blockTime === undefined) continue;
     const tx = await connection.getTransaction(info.signature, {
       maxSupportedTransactionVersion: 0,
@@ -250,8 +250,8 @@ export async function deriveLastSwapV4(
     );
     if (topLevel || inner) {
       return {
-        lastSwapUnixTs: blockTime,
-        slot: info.slot,
+        lastSwapUnixTs: Number(blockTime),
+        slot: Number(info.slot),
         signature: info.signature,
       };
     }
