@@ -57,12 +57,12 @@ export interface ScannerProtocolConfig {
 
 /** Spec defaults for GraveScanner ProtocolConfig (Charter-locked at launch). */
 export const SCANNER_PROTOCOL_CONFIG_DEFAULTS = {
-  inactivitySeconds: 7_776_000n,         // 90 d
+  inactivitySeconds: 7_776_000n, // 90 d
   priceCollapseBps: 9_900,
-  minTvlLamports: 500_000_000n,          // 0.5 SOL
-  anchorStalenessSeconds: 1_209_600n,    // 14 d
+  minTvlLamports: 500_000_000n, // 0.5 SOL
+  anchorStalenessSeconds: 1_209_600n, // 14 d
   lpBurnDustThreshold: 1_000n,
-  certTtlSeconds: 3_600n,                // 1 h
+  certTtlSeconds: 3_600n, // 1 h
 } as const;
 
 /** Decode a GraveScanner ProtocolConfig account. */
@@ -127,7 +127,16 @@ export function decodeEligibilityAnchor(data: Uint8Array): EligibilityAnchor {
   const invalidated = r.bool();
   const criteriaBitmap = r.u8();
   const bump = r.u8();
-  return { ammProgramId, poolAddress, writer, firstEligibleEpoch, writtenAt, invalidated, criteriaBitmap, bump };
+  return {
+    ammProgramId,
+    poolAddress,
+    writer,
+    firstEligibleEpoch,
+    writtenAt,
+    invalidated,
+    criteriaBitmap,
+    bump,
+  };
 }
 
 /** Decoded EligibilityCert. */
@@ -160,8 +169,16 @@ export function decodeEligibilityCert(data: Uint8Array): EligibilityCert {
   const reissueGeneration = r.u64();
   const bump = r.u8();
   return {
-    ammProgramId, poolAddress, writer, anchorEpoch, certEpoch, issuedAt,
-    expiresAt, criteriaBitmap, reissueGeneration, bump,
+    ammProgramId,
+    poolAddress,
+    writer,
+    anchorEpoch,
+    certEpoch,
+    issuedAt,
+    expiresAt,
+    criteriaBitmap,
+    reissueGeneration,
+    bump,
   };
 }
 
@@ -195,8 +212,16 @@ export function decodeLaunchPrice(data: Uint8Array): LaunchPriceAccount {
   const recordedAt = r.i64();
   const bump = r.u8();
   return {
-    ammProgramId, poolAddress, baseMint, quoteMint, launchPriceQ64x64,
-    firstSwapSlot, firstSwapUnixTs, recordedSlot, recordedAt, bump,
+    ammProgramId,
+    poolAddress,
+    baseMint,
+    quoteMint,
+    launchPriceQ64x64,
+    firstSwapSlot,
+    firstSwapUnixTs,
+    recordedSlot,
+    recordedAt,
+    bump,
   };
 }
 
@@ -296,9 +321,16 @@ export function decodePoolRegistry(data: Uint8Array): PoolRegistry {
   const salvagedAtTs = r.i64();
   const bump = r.u8();
   return {
-    ammProgramId, poolAddress, salvor, lpSnapshotMerkleRoot,
-    lpTotalSupplyAtSnapshot, lpHolderPoolTotalLamports,
-    lpHolderPoolClaimedLamports, salvagedAtSlot, salvagedAtTs, bump,
+    ammProgramId,
+    poolAddress,
+    salvor,
+    lpSnapshotMerkleRoot,
+    lpTotalSupplyAtSnapshot,
+    lpHolderPoolTotalLamports,
+    lpHolderPoolClaimedLamports,
+    salvagedAtSlot,
+    salvagedAtTs,
+    bump,
   };
 }
 
@@ -336,9 +368,18 @@ export function decodeSalvageReceipt(data: Uint8Array): SalvageReceipt {
   const dustSweptAtTs = r.i64();
   const bump = r.u8();
   return {
-    poolAddress, salvor, lpHolderAmountLamports, salvorAmountLamports,
-    protocolAmountLamports, totalProceedsLamports, issuedAtSlot, issuedAtTs,
-    memecoinMint, dustMemecoinLamports, dustSweptAtTs, bump,
+    poolAddress,
+    salvor,
+    lpHolderAmountLamports,
+    salvorAmountLamports,
+    protocolAmountLamports,
+    totalProceedsLamports,
+    issuedAtSlot,
+    issuedAtTs,
+    memecoinMint,
+    dustMemecoinLamports,
+    dustSweptAtTs,
+    bump,
   };
 }
 
@@ -365,7 +406,15 @@ export function decodeClaimRecord(data: Uint8Array): ClaimRecord {
   const claimedAtSlot = r.u64();
   const claimedAtTs = r.i64();
   const bump = r.u8();
-  return { poolAddress, lpHolder, amountLamports, lpBalanceAtSnapshot, claimedAtSlot, claimedAtTs, bump };
+  return {
+    poolAddress,
+    lpHolder,
+    amountLamports,
+    lpBalanceAtSnapshot,
+    claimedAtSlot,
+    claimedAtTs,
+    bump,
+  };
 }
 
 // ------------------------------------------------------ live-RPC fetchers

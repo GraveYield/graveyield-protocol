@@ -46,11 +46,12 @@ export interface OpsConfig {
 
 /** Read the ops configuration from the environment. */
 export function loadOpsConfig(env: NodeJS.ProcessEnv = process.env): OpsConfig {
-  const cluster = env.CLUSTER === "mainnet-beta"
-    ? "mainnet-beta"
-    : env.CLUSTER === "localnet"
-      ? "localnet"
-      : "devnet";
+  const cluster =
+    env.CLUSTER === "mainnet-beta"
+      ? "mainnet-beta"
+      : env.CLUSTER === "localnet"
+        ? "localnet"
+        : "devnet";
   return {
     rpcUrl: env.RPC_URL ?? "https://api.devnet.solana.com",
     cluster,

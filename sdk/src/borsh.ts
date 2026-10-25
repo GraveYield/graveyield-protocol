@@ -53,7 +53,9 @@ export function writer(size: number): BorshWriter {
 
   const assertRemaining = (n: number) => {
     if (at + n > buf.length) {
-      throw new RangeError(`borsh writer overflow at offset ${at}: need ${n} more bytes, have ${buf.length - at}`);
+      throw new RangeError(
+        `borsh writer overflow at offset ${at}: need ${n} more bytes, have ${buf.length - at}`,
+      );
     }
   };
 
@@ -113,7 +115,7 @@ export function writer(size: number): BorshWriter {
     },
     u128(v) {
       const big = BigInt(v);
-      if (big < 0n || big > ((1n << 128n) - 1n)) {
+      if (big < 0n || big > (1n << 128n) - 1n) {
         throw new RangeError(`u128 out of range: ${big}`);
       }
       assertRemaining(16);
@@ -159,7 +161,9 @@ export function writer(size: number): BorshWriter {
     },
     done() {
       if (at !== buf.length) {
-        throw new Error(`borsh writer filled ${at}/${buf.length} bytes — instruction data length is wrong`);
+        throw new Error(
+          `borsh writer filled ${at}/${buf.length} bytes — instruction data length is wrong`,
+        );
       }
       return buf;
     },
@@ -196,7 +200,9 @@ export function reader(buf: Uint8Array): BorshReader {
 
   const assertRemaining = (n: number) => {
     if (at + n > buf.length) {
-      throw new RangeError(`borsh reader underflow at offset ${at}: need ${n} more bytes, have ${buf.length - at}`);
+      throw new RangeError(
+        `borsh reader underflow at offset ${at}: need ${n} more bytes, have ${buf.length - at}`,
+      );
     }
   };
 

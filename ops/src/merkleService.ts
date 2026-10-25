@@ -80,7 +80,10 @@ export class DirectoryArtifactStore implements ArtifactStore {
   }
 
   async save(artifact: MerkleArtifact): Promise<void> {
-    writeFileSync(this.pathFor(artifact.pool, artifact.snapshotSlot), `${JSON.stringify(artifact, null, 2)}\n`);
+    writeFileSync(
+      this.pathFor(artifact.pool, artifact.snapshotSlot),
+      `${JSON.stringify(artifact, null, 2)}\n`,
+    );
   }
 
   async load(pool: string, snapshotSlot: number): Promise<MerkleArtifact | null> {
@@ -137,9 +140,12 @@ export class MerkleService {
     verifyArtifactInternally(artifact);
     this.opts.health.counter("merkle.snapshots-built");
     if (result.uncxMarkerPresent) {
-      this.opts.alerts.raise("uncx-marker-present", "warn",
+      this.opts.alerts.raise(
+        "uncx-marker-present",
+        "warn",
         "UNCX marker PDA present at snapshot time — LOCKER-002 cross-check required before claims",
-        { pool: pool.toBase58() });
+        { pool: pool.toBase58() },
+      );
     }
     if (this.opts.store) {
       await this.opts.store.save(artifact);
@@ -163,7 +169,11 @@ export class MerkleService {
   }
 
   /** Run every `intervalMs` for `pools` (pass pool list from the scenario/CLI). */
-  start(pools: ReadonlyArray<PublicKey>, connection: Parameters<typeof snapshotLpHolders>[0], intervalMs: number): () => void {
+  start(
+    pools: ReadonlyArray<PublicKey>,
+    connection: Parameters<typeof snapshotLpHolders>[0],
+    intervalMs: number,
+  ): () => void {
     if (this.timer) return () => this.stop();
     const tick = (): void => {
       for (const pool of pools) {
@@ -174,9 +184,10 @@ export class MerkleService {
             "degraded",
             `snapshot failed for ${pool.toBase58()}: ${error instanceof Error ? error.message : String(error)}`,
           );
-          this.opts.alerts.raise("merkle-snapshot-failed", "warn",
-            "Merkle snapshot build failed",
-            { pool: pool.toBase58(), error: error instanceof Error ? error.message : String(error) });
+          this.opts.alerts.raise("merkle-snapshot-failed", "warn", "Merkle snapshot build failed", {
+            pool: pool.toBase58(),
+            error: error instanceof Error ? error.message : String(error),
+          });
         });
       }
     };
@@ -255,7 +266,9 @@ export function artifactIntegrity(artifact: Omit<MerkleArtifact, "integrity">): 
 export function verifyArtifactInternally(artifact: MerkleArtifact): void {
   const { integrity, ...rest } = artifact;
   if (artifactIntegrity(rest) !== integrity) {
-    throw new Error(`merkle artifact integrity mismatch for pool ${artifact.pool} slot ${artifact.snapshotSlot}`);
+    throw new Error(
+      `merkle artifact integrity mismatch for pool ${artifact.pool} slot ${artifact.snapshotSlot}`,
+    );
   }
   const entries = artifact.holders.map((holder) => ({
     owner: new PublicKey(holder.owner),
@@ -264,7 +277,9 @@ export function verifyArtifactInternally(artifact: MerkleArtifact): void {
   const rebuilt = SnapshotMerkleTree.fromEntries(entries);
   const rebuiltRootHex = Buffer.from(rebuilt.root()).toString("hex");
   if (rebuiltRootHex !== artifact.rootHex) {
-    throw new Error(`merkle artifact root mismatch for pool ${artifact.pool}: stored ${artifact.rootHex} rebuilt ${rebuiltRootHex}`);
+    throw new Error(
+      `merkle artifact root mismatch for pool ${artifact.pool}: stored ${artifact.rootHex} rebuilt ${rebuiltRootHex}`,
+    );
   }
   const leaf = rebuilt.leaf(0);
   const proof = rebuilt.proof(0);

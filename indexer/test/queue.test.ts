@@ -28,9 +28,33 @@ function makeCandidate(poolByte: number): Candidate {
       },
       fetchedAtSlot: 0,
     },
-    activity: { poolAddress: pool, lastSwapUnixTs: 0, lastSwapSlot: 0, lastSwapSignature: "", noSwapFound: false },
-    reserves: { poolAddress: pool, coinReserve: 0n, pcReserve: 0n, lpSupply: 0n, wsolSideIdentified: true, tvlLamports: 0n },
-    metadata: { poolAddress: pool, baseMint: PublicKey.default, baseDecimals: 0, baseSupply: 0n, quoteMint: PublicKey.default, quoteDecimals: 0, quoteSupply: 0n, lpMint: PublicKey.default, lpDecimals: 0, lpSupply: 0n },
+    activity: {
+      poolAddress: pool,
+      lastSwapUnixTs: 0,
+      lastSwapSlot: 0,
+      lastSwapSignature: "",
+      noSwapFound: false,
+    },
+    reserves: {
+      poolAddress: pool,
+      coinReserve: 0n,
+      pcReserve: 0n,
+      lpSupply: 0n,
+      wsolSideIdentified: true,
+      tvlLamports: 0n,
+    },
+    metadata: {
+      poolAddress: pool,
+      baseMint: PublicKey.default,
+      baseDecimals: 0,
+      baseSupply: 0n,
+      quoteMint: PublicKey.default,
+      quoteDecimals: 0,
+      quoteSupply: 0n,
+      lpMint: PublicKey.default,
+      lpDecimals: 0,
+      lpSupply: 0n,
+    },
     preFilter: { poolAddress: pool, passed: true, failedCriteria: [], criteriaBitmap: 0x3f },
   };
 }
@@ -56,9 +80,18 @@ describe("CandidateQueue", () => {
     q.enqueue(makeScored(0x20, 3.0));
     q.enqueue(makeScored(0x30, 2.0));
     const drained = q.drain(3);
-    assert.equal(drained[0]!.candidate.poolAddress.toBase58(), new PublicKey(new Uint8Array(32).fill(0x20)).toBase58());
-    assert.equal(drained[1]!.candidate.poolAddress.toBase58(), new PublicKey(new Uint8Array(32).fill(0x30)).toBase58());
-    assert.equal(drained[2]!.candidate.poolAddress.toBase58(), new PublicKey(new Uint8Array(32).fill(0x10)).toBase58());
+    assert.equal(
+      drained[0]!.candidate.poolAddress.toBase58(),
+      new PublicKey(new Uint8Array(32).fill(0x20)).toBase58(),
+    );
+    assert.equal(
+      drained[1]!.candidate.poolAddress.toBase58(),
+      new PublicKey(new Uint8Array(32).fill(0x30)).toBase58(),
+    );
+    assert.equal(
+      drained[2]!.candidate.poolAddress.toBase58(),
+      new PublicKey(new Uint8Array(32).fill(0x10)).toBase58(),
+    );
     assert.equal(q.size(), 0);
   });
 

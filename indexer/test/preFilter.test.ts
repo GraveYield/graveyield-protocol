@@ -44,7 +44,11 @@ function makeActivity(opts: { lastSwapUnixTs?: number; noSwapFound?: boolean }):
   };
 }
 
-function makeReserves(opts: { tvlLamports?: bigint; lpSupply?: bigint; wsolSide?: boolean }): ReserveRecord {
+function makeReserves(opts: {
+  tvlLamports?: bigint;
+  lpSupply?: bigint;
+  wsolSide?: boolean;
+}): ReserveRecord {
   return {
     poolAddress: POOL,
     coinReserve: opts.tvlLamports ?? 1_000_000_000n,
@@ -76,7 +80,11 @@ describe("preFilterPool — six criteria", () => {
 
   test("all six criteria pass → eligible (bitmap 0x3F)", () => {
     const activity = makeActivity({ lastSwapUnixTs: now - ninetyDays - 1 });
-    const reserves = makeReserves({ tvlLamports: 1_000_000_000n, lpSupply: 1_000_000n, wsolSide: true });
+    const reserves = makeReserves({
+      tvlLamports: 1_000_000_000n,
+      lpSupply: 1_000_000n,
+      wsolSide: true,
+    });
     const metadata = makeMetadata();
     const result = preFilterPool(activity, reserves, metadata, DEFAULT_THRESHOLDS);
     assert.equal(result.passed, true);
@@ -103,7 +111,11 @@ describe("preFilterPool — six criteria", () => {
 
   test("C2 price collapse fails when no WSOL side", () => {
     const activity = makeActivity({ lastSwapUnixTs: now - ninetyDays - 1 });
-    const reserves = makeReserves({ tvlLamports: 1_000_000_000n, lpSupply: 1_000_000n, wsolSide: false });
+    const reserves = makeReserves({
+      tvlLamports: 1_000_000_000n,
+      lpSupply: 1_000_000n,
+      wsolSide: false,
+    });
     const result = preFilterPool(activity, reserves, makeMetadata(), DEFAULT_THRESHOLDS);
     assert.equal(result.passed, false);
     assert.ok(result.failedCriteria.includes("C2-price-collapse"));

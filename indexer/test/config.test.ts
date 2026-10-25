@@ -12,9 +12,22 @@ import { loadConfig, DEVNET_SCANNER_PROGRAM_ID, DEFAULT_MIN_TVL_LAMPORTS } from 
 describe("loadConfig", () => {
   test("returns devnet defaults when no env is set", () => {
     // Clear all relevant env vars.
-    const vars = ["RPC_URL", "CLUSTER", "SCANNER_PROGRAM_ID", "ACTIVITY_ORACLE_KEY", "MIN_TVL_LAMPORTS", "MAX_CANDIDATES_PER_CYCLE", "POLL_INTERVAL_MS", "MAX_POOLS_PER_SCAN", "SIGNATURE_SCAN_LIMIT"];
+    const vars = [
+      "RPC_URL",
+      "CLUSTER",
+      "SCANNER_PROGRAM_ID",
+      "ACTIVITY_ORACLE_KEY",
+      "MIN_TVL_LAMPORTS",
+      "MAX_CANDIDATES_PER_CYCLE",
+      "POLL_INTERVAL_MS",
+      "MAX_POOLS_PER_SCAN",
+      "SIGNATURE_SCAN_LIMIT",
+    ];
     const saved: Record<string, string | undefined> = {};
-    for (const v of vars) { saved[v] = process.env[v]; delete process.env[v]; }
+    for (const v of vars) {
+      saved[v] = process.env[v];
+      delete process.env[v];
+    }
 
     const config = loadConfig();
     assert.equal(config.rpcUrl, "https://api.devnet.solana.com");
@@ -28,7 +41,9 @@ describe("loadConfig", () => {
     assert.equal(config.activityOracleSecretKey, null);
 
     // Restore env vars.
-    for (const v of vars) { if (saved[v] !== undefined) process.env[v] = saved[v]; }
+    for (const v of vars) {
+      if (saved[v] !== undefined) process.env[v] = saved[v];
+    }
   });
 
   test("reads RPC_URL from env", () => {

@@ -19,7 +19,10 @@ describe("ADV-FM — manifest integrity", () => {
   test("no case cites a class outside the roadmap taxonomy", () => {
     const known = new Set<string>(THREAT_CLASSES);
     const foreign = CASES.filter((c) => !known.has(c.threatClass));
-    assert.deepEqual(foreign.map((c) => c.id), []);
+    assert.deepEqual(
+      foreign.map((c) => c.id),
+      [],
+    );
   });
 
   test("case ids are unique and well-formed", () => {

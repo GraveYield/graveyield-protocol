@@ -48,9 +48,7 @@ const VAULT_ID = new PublicKey(DEVNET_VAULT_PROGRAM_ID);
 /** A deterministic non-WSOL mint sorting strictly before WSOL_MINT. */
 function memecoinSortedBeforeWsol(): PublicKey {
   for (let i = 1; i < 5000; i++) {
-    const candidate = new PublicKey(
-      Uint8Array.from({ length: 32 }, (_, j) => (i * 7 + j) % 200),
-    );
+    const candidate = new PublicKey(Uint8Array.from({ length: 32 }, (_, j) => (i * 7 + j) % 200));
     if (candidate.toBase58() < WSOL_MINT.toBase58()) return candidate;
   }
   throw new Error("no candidate mint found");
@@ -72,11 +70,7 @@ function memecoinSortedAfterWsol(): PublicKey {
  * price is `currentPriceInt` pc-per-coin (integer parts suffice: with
  * coin = 1e6 base units the Q64.64 ratio is currentPriceInt × 2^64).
  */
-function buildPool(opts: {
-  coinMint: PublicKey;
-  pcMint: PublicKey;
-  currentPriceInt: number;
-}) {
+function buildPool(opts: { coinMint: PublicKey; pcMint: PublicKey; currentPriceInt: number }) {
   const rpc = new EvaluatePoolFakeRpc();
   const poolAddress = PublicKey.unique();
   const coinVault = PublicKey.unique();
@@ -101,7 +95,11 @@ function buildPool(opts: {
   rpc.setAccount(lpMint, encodeMint(9, 1_000_000n), TOKEN_PROGRAM);
   rpc.setAccount(
     scannerProtocolConfigPda(SCANNER_ID),
-    encodeScannerConfig({ authority: AUTHORITY, activityOracle: AUTHORITY, launchPriceOracle: AUTHORITY }),
+    encodeScannerConfig({
+      authority: AUTHORITY,
+      activityOracle: AUTHORITY,
+      launchPriceOracle: AUTHORITY,
+    }),
     SCANNER_ID,
   );
   rpc.setAccount(

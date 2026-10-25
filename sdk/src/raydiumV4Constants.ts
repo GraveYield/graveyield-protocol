@@ -18,7 +18,9 @@ export const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111
 export const RAYDIUM_V4_PROGRAM_ID = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 
 /** Raydium V4 AMM authority PDA. Used to validate `amm_authority` remaining_accounts. */
-export const RAYDIUM_V4_AMM_AUTHORITY = new PublicKey("5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1");
+export const RAYDIUM_V4_AMM_AUTHORITY = new PublicKey(
+  "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
+);
 
 /** Jupiter v6 aggregator program — mainnet. */
 export const JUPITER_V6_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
@@ -27,10 +29,14 @@ export const JUPITER_V6_PROGRAM_ID = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3
 export const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 /** SPL Associated Token program. */
-export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+);
 
 /** System program. */
 export const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
 
 /** Compute budget program (priority fee + compute unit limit instructions). */
-export const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey("ComputeBudget111111111111111111111111111111");
+export const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey(
+  "ComputeBudget111111111111111111111111111111",
+);

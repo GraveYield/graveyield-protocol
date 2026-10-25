@@ -22,7 +22,11 @@ import {
 } from "../src/index.js";
 import { encodeReceipt, encodeRegistry, encodeVaultConfig, key } from "./fixtures.js";
 
-function fairSplit(total: bigint): { lpHolderAmountLamports: bigint; salvorAmountLamports: bigint; protocolAmountLamports: bigint } {
+function fairSplit(total: bigint): {
+  lpHolderAmountLamports: bigint;
+  salvorAmountLamports: bigint;
+  protocolAmountLamports: bigint;
+} {
   return {
     lpHolderAmountLamports: (total * 4_000n) / 10_000n,
     salvorAmountLamports: (total * 4_000n) / 10_000n,
@@ -35,7 +39,11 @@ interface World {
   health: HealthRegistry;
   accounts: OwnedAccount[];
   indexerThrow: { value: boolean };
-  scannerResults: Array<{ poolAddress: PublicKey; status: "submitted" | "confirmed" | "failed" | "skipped"; anchorPda: PublicKey }>;
+  scannerResults: Array<{
+    poolAddress: PublicKey;
+    status: "submitted" | "confirmed" | "failed" | "skipped";
+    anchorPda: PublicKey;
+  }>;
 }
 
 function world(stateDir?: string): World {
@@ -171,7 +179,11 @@ describe("SC-02 vault audit", () => {
       },
       {
         pubkey: key(0xa2),
-        data: encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports, lpHolderPoolClaimedLamports: 0n }),
+        data: encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports,
+          lpHolderPoolClaimedLamports: 0n,
+        }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
         lamports: 1,
       },
@@ -185,7 +197,15 @@ describe("SC-02 vault audit", () => {
     const report = await w.runner.sc02VaultAudit();
     assert.equal(report.id, "SC-02");
     assert.equal(report.ok, true);
-    for (const id of ["r1-receipt-sums", "r2-receipt-shares", "c1-claim-accounting", "c2-claim-ceiling", "c3-registry-receipt-agree", "x1-failed-transactions", "vault-config-readback"]) {
+    for (const id of [
+      "r1-receipt-sums",
+      "r2-receipt-shares",
+      "c1-claim-accounting",
+      "c2-claim-ceiling",
+      "c3-registry-receipt-agree",
+      "x1-failed-transactions",
+      "vault-config-readback",
+    ]) {
       const check = report.checks.find((c) => c.id === id);
       assert.ok(check, `missing check ${id}`);
       assert.equal(check.ok, true, `check ${id} should pass`);
@@ -206,7 +226,11 @@ describe("SC-02 vault audit", () => {
       },
       {
         pubkey: key(0xa2),
-        data: encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports + 5n, lpHolderPoolClaimedLamports: 0n }),
+        data: encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports + 5n,
+          lpHolderPoolClaimedLamports: 0n,
+        }),
         owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
         lamports: 1,
       },

@@ -39,7 +39,9 @@ export class IndexerService {
     health.counter("indexer.cycles");
     try {
       const results = await this.opts.scanner.runOnce();
-      const submitted = results.filter((r) => r.status === "submitted" || r.status === "confirmed").length;
+      const submitted = results.filter(
+        (r) => r.status === "submitted" || r.status === "confirmed",
+      ).length;
       const failed = results.filter((r) => r.status === "failed").length;
       const skipped = results.filter((r) => r.status === "skipped").length;
       health.counter("indexer.submitted", submitted);
@@ -52,18 +54,24 @@ export class IndexerService {
           `mode=${this.opts.submissionMode ? "submission" : "discovery-only"}`,
       );
       if (failed > 0) {
-        alerts.raise("indexer-submission-failed", "warn",
+        alerts.raise(
+          "indexer-submission-failed",
+          "warn",
           "One or more indexer submissions failed",
-          { failed, mode: this.opts.submissionMode ? "submission" : "discovery-only" });
+          { failed, mode: this.opts.submissionMode ? "submission" : "discovery-only" },
+        );
       }
       return results;
     } catch (error) {
       health.counter("indexer.cycle-errors");
       const message = error instanceof Error ? error.message : String(error);
       health.heartbeat("indexer", "down", `cycle failed: ${message}`);
-      alerts.raise("indexer-cycle-failed", "critical",
+      alerts.raise(
+        "indexer-cycle-failed",
+        "critical",
         "Indexer scan cycle threw — the funnel is stalled",
-        { error: message });
+        { error: message },
+      );
       throw error instanceof Error ? error : new Error(String(error));
     }
   }

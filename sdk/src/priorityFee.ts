@@ -45,9 +45,7 @@ export function computeOperationalMaxLamportsPerCu(
   if (expectedProfitLamports.isNeg()) {
     throw new RangeError("expectedProfitLamports must be non-negative");
   }
-  const marginBps = new BN(
-    Math.round(marginRatio * MARGIN_RATIO_PRECISION_BPS),
-  );
+  const marginBps = new BN(Math.round(marginRatio * MARGIN_RATIO_PRECISION_BPS));
   const scaledProfit = expectedProfitLamports
     .mul(marginBps)
     .div(new BN(MARGIN_RATIO_PRECISION_BPS));
@@ -127,7 +125,11 @@ export function derivePriorityFeePlan(opts: {
   if (opts.expectedProfitLamports.isNeg()) {
     throw new RangeError("expectedProfitLamports must be non-negative");
   }
-  if (!Number.isFinite(opts.computeUnitLimit) || !Number.isInteger(opts.computeUnitLimit) || opts.computeUnitLimit <= 0) {
+  if (
+    !Number.isFinite(opts.computeUnitLimit) ||
+    !Number.isInteger(opts.computeUnitLimit) ||
+    opts.computeUnitLimit <= 0
+  ) {
     throw new RangeError("computeUnitLimit must be a positive integer");
   }
   if (opts.protocolCeilingMicroLamportsPerCu.isNeg()) {
@@ -189,10 +191,7 @@ export function buildPriorityFeePolicy(opts: {
  * Hard-fail predicate. The SDK MUST refuse to submit a transaction whose
  * `compute_unit_price` exceeds either operational or protocol ceiling.
  */
-export function shouldRejectFee(
-  feeLamportsPerCu: BN,
-  policy: PriorityFeePolicy,
-): boolean {
+export function shouldRejectFee(feeLamportsPerCu: BN, policy: PriorityFeePolicy): boolean {
   if (feeLamportsPerCu.gt(policy.protocolCeilingLamportsPerCu)) return true;
   if (feeLamportsPerCu.gt(policy.operationalMaxLamportsPerCu)) return true;
   return false;

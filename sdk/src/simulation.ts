@@ -40,7 +40,10 @@ export interface SdkSimulationResult {
 export async function simulateTransaction(
   connection: Connection,
   tx: Transaction,
-  opts?: { commitment?: Commitment; signers?: ReadonlyArray<{ publicKey: import("@solana/web3.js").PublicKey }> },
+  opts?: {
+    commitment?: Commitment;
+    signers?: ReadonlyArray<{ publicKey: import("@solana/web3.js").PublicKey }>;
+  },
 ): Promise<SdkSimulationResult> {
   // web3.js 1.99's `simulateTransaction` has two relevant overloads for
   // a legacy `Transaction`:
@@ -75,7 +78,10 @@ export async function simulateTransaction(
 export async function simulateAndDecode(
   connection: Connection,
   tx: Transaction,
-  opts?: { commitment?: Commitment; signers?: ReadonlyArray<{ publicKey: import("@solana/web3.js").PublicKey }> },
+  opts?: {
+    commitment?: Commitment;
+    signers?: ReadonlyArray<{ publicKey: import("@solana/web3.js").PublicKey }>;
+  },
 ): Promise<DecodedGraveYieldError | null> {
   const result = await simulateTransaction(connection, tx, opts);
   return result.graveYieldError ?? null;

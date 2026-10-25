@@ -20,7 +20,14 @@
 
 import { Connection, PublicKey } from "@solana/web3.js";
 
-import { AlertManager, composeAlertSinks, ConsoleAlertSink, JsonlAlertSink, WebhookAlertSink, type AlertSink } from "./alerts.js";
+import {
+  AlertManager,
+  composeAlertSinks,
+  ConsoleAlertSink,
+  JsonlAlertSink,
+  WebhookAlertSink,
+  type AlertSink,
+} from "./alerts.js";
 import { loadOpsConfig, type OpsConfig } from "./config.js";
 import { HealthRegistry } from "./health.js";
 import { IndexerService } from "./indexerService.js";
@@ -67,7 +74,10 @@ export interface OpsWiring {
 /** Wire the full ops stack (used by every command). */
 export function wireOps(config: OpsConfig): OpsWiring {
   const health = new HealthRegistry("graveyield-ops");
-  const sinks: AlertSink[] = [new ConsoleAlertSink(), JsonlAlertSink.toFile(`${config.stateDir}/alerts.jsonl`)];
+  const sinks: AlertSink[] = [
+    new ConsoleAlertSink(),
+    JsonlAlertSink.toFile(`${config.stateDir}/alerts.jsonl`),
+  ];
   if (config.alertWebhookUrl) sinks.push(new WebhookAlertSink(config.alertWebhookUrl));
   const alerts = new AlertManager(composeAlertSinks(...sinks), config.alertDedupMs);
 
@@ -78,7 +88,8 @@ export function wireOps(config: OpsConfig): OpsWiring {
   // MAX_CANDIDATES_PER_CYCLE, …); ops-level env adds the state dir, alert
   // webhook and schedules on top.
   const scanner = buildScanner(loadConfig());
-  const submissionMode = Boolean(process.env.ACTIVITY_ORACLE_KEY) && process.env.SCOUT_DRY_RUN !== "1";
+  const submissionMode =
+    Boolean(process.env.ACTIVITY_ORACLE_KEY) && process.env.SCOUT_DRY_RUN !== "1";
   const indexerService = new IndexerService({
     scanner,
     health,
@@ -121,7 +132,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         return runForever(wiring, () => wiring.indexerService.start(config.indexerPollMs));
       }
       const results = await wiring.indexerService.runOnce();
-      console.log(JSON.stringify({ indexer: results.map((r) => r.poolAddress.toBase58()) }, null, 2));
+      console.log(
+        JSON.stringify({ indexer: results.map((r) => r.poolAddress.toBase58()) }, null, 2),
+      );
       return 0;
     }
     case "vault-observer": {
@@ -146,7 +159,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       return 0;
     }
     case "scenario": {
-      const id = typeof args.id === "string" ? args.id : positional[1] ?? "";
+      const id = typeof args.id === "string" ? args.id : (positional[1] ?? "");
       const wiring = wireOps(config);
       const runner = new ScenarioRunner({
         indexer: wiring.indexerService,
@@ -180,7 +193,13 @@ export async function main(argv: readonly string[]): Promise<number> {
       if (config.merkleIntervalMs > 0) {
         // The merkle schedule needs pools; wire SC-01's discovery output
         // into it. Until a pool set exists, the schedule is a no-op loop.
-        stops.push(wiring.merkle.start([], new Connection(config.rpcUrl, "confirmed"), config.merkleIntervalMs));
+        stops.push(
+          wiring.merkle.start(
+            [],
+            new Connection(config.rpcUrl, "confirmed"),
+            config.merkleIntervalMs,
+          ),
+        );
       }
       installSignalHandlers(stops);
       process.stdout.write(`${wiring.health.summary()}\n`);
@@ -234,7 +253,9 @@ function installSignalHandlers(stops: Array<() => void>): void {
 }
 
 /** The observation shape is bigint-heavy; render a JSON-safe projection. */
-function observationToJson(observation: Awaited<ReturnType<VaultObserver["runOnce"]>>): Record<string, unknown> {
+function observationToJson(
+  observation: Awaited<ReturnType<VaultObserver["runOnce"]>>,
+): Record<string, unknown> {
   return {
     takenAtMs: observation.takenAtMs,
     slot: observation.slot,

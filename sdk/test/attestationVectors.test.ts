@@ -117,8 +117,14 @@ describe("C1 ed25519 precompile instruction", () => {
     assert.equal(data.readUInt16LE(14), 1); // message_instruction_index = scanner ix idx
 
     // pk@16, sig@48
-    assert.deepEqual(data.slice(PRECOMPILE_PK_OFFSET, PRECOMPILE_PK_OFFSET + 32), Buffer.from(oracle.toBytes()));
-    assert.deepEqual(data.slice(PRECOMPILE_SIG_OFFSET, PRECOMPILE_SIG_OFFSET + 64), Buffer.from(sig));
+    assert.deepEqual(
+      data.slice(PRECOMPILE_PK_OFFSET, PRECOMPILE_PK_OFFSET + 32),
+      Buffer.from(oracle.toBytes()),
+    );
+    assert.deepEqual(
+      data.slice(PRECOMPILE_SIG_OFFSET, PRECOMPILE_SIG_OFFSET + 64),
+      Buffer.from(sig),
+    );
   });
 
   test("rejects a non-canonical (offset, length) pair", () => {

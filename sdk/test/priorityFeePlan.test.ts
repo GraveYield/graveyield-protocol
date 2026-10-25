@@ -42,10 +42,7 @@ describe("derivePriorityFeePlan", () => {
     assert.equal(plan.maxTotalFeeLamports.toString(10), "25000000");
     assert.equal(plan.maxMicroLamportsPerCu.toString(10), "125000000");
     // Exact division: price × cuLimit == budget × 1e6.
-    assert.equal(
-      plan.maxMicroLamportsPerCu.mul(new BN(200_000)).toString(10),
-      "25000000000000",
-    );
+    assert.equal(plan.maxMicroLamportsPerCu.mul(new BN(200_000)).toString(10), "25000000000000");
   });
 
   test("floor rounding: indivisible budgets round the PRICE down, never the budget up", () => {
@@ -67,10 +64,7 @@ describe("derivePriorityFeePlan", () => {
     });
     assert.equal(floored.maxMicroLamportsPerCu.toString(10), "23");
     // 23 × 300_000 = 6.9e6 µL = 6.9 lamports ≤ 7-lamport budget.
-    assert.equal(
-      floored.maxMicroLamportsPerCu.mul(new BN(300_000)).toString(10),
-      "6900000",
-    );
+    assert.equal(floored.maxMicroLamportsPerCu.mul(new BN(300_000)).toString(10), "6900000");
   });
 
   test("charter-ceiling binds: price capped, actual total strictly under budget", () => {
@@ -86,10 +80,7 @@ describe("derivePriorityFeePlan", () => {
     });
     assert.equal(plan.binding, "charter-ceiling");
     assert.equal(plan.maxMicroLamportsPerCu.toString(10), "50000");
-    assert.equal(
-      plan.maxMicroLamportsPerCu.mul(new BN(300_000)).toString(10),
-      "15000000000",
-    );
+    assert.equal(plan.maxMicroLamportsPerCu.mul(new BN(300_000)).toString(10), "15000000000");
     assert.ok(
       plan.maxMicroLamportsPerCu
         .mul(new BN(300_000))
@@ -123,9 +114,7 @@ describe("derivePriorityFeePlan", () => {
             // …and (b) the TOTAL fee the price can produce never exceeds
             // the margin budget (floor rounding only goes down).
             const totalFeeMicro = plan.maxMicroLamportsPerCu.mul(new BN(cu));
-            const budgetMicro = plan.maxTotalFeeLamports.mul(
-              new BN(MICRO_LAMPORTS_PER_LAMPORT),
-            );
+            const budgetMicro = plan.maxTotalFeeLamports.mul(new BN(MICRO_LAMPORTS_PER_LAMPORT));
             assert.ok(
               totalFeeMicro.lte(budgetMicro),
               `budget exceeded: profit=${profit} cu=${cu} ceiling=${ceiling} margin=${margin}`,
@@ -190,13 +179,8 @@ describe("derivePriorityFeePlan", () => {
     assert.equal(plan.maxTotalFeeLamports.toString(10), "500000000");
     assert.equal(plan.maxMicroLamportsPerCu.toString(10), "357142857");
     // price × cuLimit = 499_999_999_800_000 ≤ 5e14 ✓.
-    assert.equal(
-      plan.maxMicroLamportsPerCu.mul(new BN(1_400_000)).toString(10),
-      "499999999800000",
-    );
-    assert.ok(
-      plan.maxMicroLamportsPerCu.mul(new BN(1_400_000)).lte(budgetMicro),
-    );
+    assert.equal(plan.maxMicroLamportsPerCu.mul(new BN(1_400_000)).toString(10), "499999999800000");
+    assert.ok(plan.maxMicroLamportsPerCu.mul(new BN(1_400_000)).lte(budgetMicro));
   });
 
   test("input validation: margins, cuLimit, negative amounts", () => {
@@ -208,14 +192,8 @@ describe("derivePriorityFeePlan", () => {
     assert.throws(() => derivePriorityFeePlan({ ...base, marginRatio: -0.1 }), RangeError);
     assert.throws(() => derivePriorityFeePlan({ ...base, marginRatio: 1.1 }), RangeError);
     assert.throws(() => derivePriorityFeePlan({ ...base, marginRatio: NaN }), RangeError);
-    assert.throws(
-      () => derivePriorityFeePlan({ ...base, computeUnitLimit: 0 }),
-      RangeError,
-    );
-    assert.throws(
-      () => derivePriorityFeePlan({ ...base, computeUnitLimit: 20_000.5 }),
-      RangeError,
-    );
+    assert.throws(() => derivePriorityFeePlan({ ...base, computeUnitLimit: 0 }), RangeError);
+    assert.throws(() => derivePriorityFeePlan({ ...base, computeUnitLimit: 20_000.5 }), RangeError);
     assert.throws(
       () =>
         derivePriorityFeePlan({

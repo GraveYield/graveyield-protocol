@@ -50,9 +50,15 @@ function makeCandidate(opts: {
     },
     metadata: {
       poolAddress: pool,
-      baseMint: PublicKey.default, baseDecimals: 9, baseSupply: 1_000_000_000n,
-      quoteMint: PublicKey.default, quoteDecimals: 6, quoteSupply: 1_000_000_000n,
-      lpMint: PublicKey.default, lpDecimals: 6, lpSupply: 1_000_000n,
+      baseMint: PublicKey.default,
+      baseDecimals: 9,
+      baseSupply: 1_000_000_000n,
+      quoteMint: PublicKey.default,
+      quoteDecimals: 6,
+      quoteSupply: 1_000_000_000n,
+      lpMint: PublicKey.default,
+      lpDecimals: 6,
+      lpSupply: 1_000_000n,
     },
     preFilter: { poolAddress: pool, passed: true, failedCriteria: [], criteriaBitmap: 0x3f },
   };

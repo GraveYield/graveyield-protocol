@@ -31,16 +31,9 @@
 // The byte layout below is NORMATIVE and mirrored byte-for-byte by
 // programs/grave-scanner/src/attestation.rs. Do not reorder fields.
 
-import {
-  Connection,
-  PublicKey,
-  TransactionInstruction,
-  type TokenBalance,
-} from "@solana/web3.js";
+import { Connection, PublicKey, TransactionInstruction, type TokenBalance } from "@solana/web3.js";
 
-import {
-  buildEd25519VerifyInstruction,
-} from "./lastSwapAttestation.js";
+import { buildEd25519VerifyInstruction } from "./lastSwapAttestation.js";
 
 /** Canonical launch-price attestation message length in bytes. */
 export const LAUNCH_PRICE_MSG_LEN = 168;
@@ -103,9 +96,7 @@ function writeU128LE(bytes: Uint8Array, offset: number, value: bigint): void {
 }
 
 /** Serialize an attestation into the canonical 168-byte wire format. */
-export function buildLaunchPriceMessage(
-  att: LaunchPriceAttestation,
-): Uint8Array {
+export function buildLaunchPriceMessage(att: LaunchPriceAttestation): Uint8Array {
   const msg = new Uint8Array(LAUNCH_PRICE_MSG_LEN);
   msg.set(att.ammProgramId.toBytes(), 0);
   msg.set(att.poolAddress.toBytes(), 32);
@@ -120,13 +111,9 @@ export function buildLaunchPriceMessage(
 }
 
 /** Parse and length-check a 168-byte launch-price attestation message. */
-export function parseLaunchPriceMessage(
-  bytes: Uint8Array,
-): LaunchPriceAttestation {
+export function parseLaunchPriceMessage(bytes: Uint8Array): LaunchPriceAttestation {
   if (bytes.length !== LAUNCH_PRICE_MSG_LEN) {
-    throw new Error(
-      `launch-price attestation message must be ${LAUNCH_PRICE_MSG_LEN} bytes`,
-    );
+    throw new Error(`launch-price attestation message must be ${LAUNCH_PRICE_MSG_LEN} bytes`);
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
@@ -197,9 +184,7 @@ export async function readV4PoolPair(
 }> {
   const info = await connection.getAccountInfo(poolAddress);
   if (!info || info.data.length !== AMM_INFO_SIZE) {
-    throw new Error(
-      `pool account is not a canonical ${AMM_INFO_SIZE}-byte Raydium V4 AmmInfo`,
-    );
+    throw new Error(`pool account is not a canonical ${AMM_INFO_SIZE}-byte Raydium V4 AmmInfo`);
   }
   return {
     coinVault: new PublicKey(info.data.slice(COIN_VAULT_OFFSET, COIN_VAULT_OFFSET + 32)),
@@ -241,10 +226,7 @@ export async function deriveLaunchPriceV4(
   const PAGE_SIZE = 1000;
   const maxPages = opts?.maxPages ?? 50;
 
-  const { coinVault, pcVault, baseMint, quoteMint } = await readV4PoolPair(
-    connection,
-    poolAddress,
-  );
+  const { coinVault, pcVault, baseMint, quoteMint } = await readV4PoolPair(connection, poolAddress);
 
   // --- Phase 1: paginate signatures back to genesis -------------------
   const pages: Awaited<ReturnType<Connection["getSignaturesForAddress"]>>[] = [];
@@ -284,9 +266,7 @@ export async function deriveLaunchPriceV4(
     if (info.err !== null) continue;
     const blockTime: number | null | undefined = info.blockTime;
     if (blockTime === null || blockTime === undefined) {
-      throw new Error(
-        "launch-price history incomplete: first-swap candidate has no block time",
-      );
+      throw new Error("launch-price history incomplete: first-swap candidate has no block time");
     }
     const tx = await connection.getTransaction(info.signature, {
       maxSupportedTransactionVersion: 0,
@@ -305,10 +285,7 @@ export async function deriveLaunchPriceV4(
     ];
     const indexOf = (k: PublicKey): number => keyList.findIndex((x) => x.equals(k));
 
-    const touchesPool = (
-      programIdIndex: number,
-      accounts: Array<PublicKey | number>,
-    ): boolean => {
+    const touchesPool = (programIdIndex: number, accounts: Array<PublicKey | number>): boolean => {
       const pid = keyList[programIdIndex];
       if (pid === undefined || !pid.equals(ammProgramId)) return false;
       return accounts.some((a) => {
@@ -326,10 +303,7 @@ export async function deriveLaunchPriceV4(
     if (!topLevel && !inner) continue;
 
     // Vault balance deltas from pre/post token balances.
-    const amountOf = (
-      vault: PublicKey,
-      balances: TokenBalance[] | null | undefined,
-    ): bigint => {
+    const amountOf = (vault: PublicKey, balances: TokenBalance[] | null | undefined): bigint => {
       const idx = indexOf(vault);
       if (idx < 0) return 0n;
       const entry = (balances ?? []).find((e) => e.accountIndex === idx);
@@ -341,19 +315,14 @@ export async function deriveLaunchPriceV4(
     const pcDelta = amountOf(pcVault, post) - amountOf(pcVault, pre);
 
     // A swap moves the two vaults in opposite directions and touches both.
-    const opposite =
-      coinDelta !== 0n &&
-      pcDelta !== 0n &&
-      coinDelta > 0n !== pcDelta > 0n;
+    const opposite = coinDelta !== 0n && pcDelta !== 0n && coinDelta > 0n !== pcDelta > 0n;
     if (!opposite) continue; // initialize / deposit / withdraw / single-sided
 
     // First swap found — launch price is the PRE-swap reserve ratio.
     const coinPre = amountOf(coinVault, pre);
     const pcPre = amountOf(pcVault, pre);
     if (coinPre <= 0n) {
-      throw new Error(
-        "launch-price derivation failed: first swap has no pre-swap base liquidity",
-      );
+      throw new Error("launch-price derivation failed: first swap has no pre-swap base liquidity");
     }
     return {
       launchPriceQ64x64: (pcPre << 64n) / coinPre,

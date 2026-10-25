@@ -86,8 +86,12 @@ describe("borsh writer + reader round-trip", () => {
   });
 
   test("option Some/None round-trip", () => {
-    const some = writer(1 + 8).option(42n, (w, v) => w.u64(v)).done();
-    const none = writer(1).option<bigint>(null, (w, v) => w.u64(v)).done();
+    const some = writer(1 + 8)
+      .option(42n, (w, v) => w.u64(v))
+      .done();
+    const none = writer(1)
+      .option<bigint>(null, (w, v) => w.u64(v))
+      .done();
     assert.equal(reader(some).u8(), 1);
     assert.equal(reader(none).u8(), 0);
   });

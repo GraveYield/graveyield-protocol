@@ -26,7 +26,11 @@ import {
 } from "./fixtures.js";
 
 /** 40/40/20 of `total` — exact (multiple of 10 000). */
-function fairSplit(total: bigint): { lpHolderAmountLamports: bigint; salvorAmountLamports: bigint; protocolAmountLamports: bigint } {
+function fairSplit(total: bigint): {
+  lpHolderAmountLamports: bigint;
+  salvorAmountLamports: bigint;
+  protocolAmountLamports: bigint;
+} {
   return {
     lpHolderAmountLamports: (total * 4_000n) / 10_000n,
     salvorAmountLamports: (total * 4_000n) / 10_000n,
@@ -48,7 +52,11 @@ interface Harness {
 function harness(): Harness {
   const health = new HealthRegistry("test", () => 0);
   const alertLog: Harness["alertLog"] = [];
-  const alerts = new AlertManager({ deliver: (a) => alertLog.push({ code: a.code, severity: a.severity, context: a.context }) }, 30 * 60 * 1000, () => 0);
+  const alerts = new AlertManager(
+    { deliver: (a) => alertLog.push({ code: a.code, severity: a.severity, context: a.context }) },
+    30 * 60 * 1000,
+    () => 0,
+  );
 
   let accounts: OwnedAccount[] = [];
   let signatures: SignatureStatusEntry[] = [];
@@ -98,7 +106,12 @@ function harness(): Harness {
 }
 
 function owned(pubkey: PublicKey, data: Uint8Array): OwnedAccount {
-  return { pubkey, data, owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"), lamports: 1_000_000 };
+  return {
+    pubkey,
+    data,
+    owner: new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6"),
+    lamports: 1_000_000,
+  };
 }
 
 describe("VaultObserver — receipts (R1/R2)", () => {
@@ -107,7 +120,15 @@ describe("VaultObserver — receipts (R1/R2)", () => {
     const total = 3_000_000n;
     const split = fairSplit(total);
     h.setAccounts([
-      owned(key(0xa1), encodeReceipt({ pool: key(0x01), salvor: key(0x02), ...split, totalProceedsLamports: total })),
+      owned(
+        key(0xa1),
+        encodeReceipt({
+          pool: key(0x01),
+          salvor: key(0x02),
+          ...split,
+          totalProceedsLamports: total,
+        }),
+      ),
     ]);
     const observation = await h.observer.runOnce();
     assert.equal(observation.receipts.length, 1);
@@ -136,7 +157,9 @@ describe("VaultObserver — receipts (R1/R2)", () => {
     assert.equal(observation.receipts[0]?.checks.r1Sum, false);
     assert.equal(observation.receipts[0]?.checks.r2Shares, false);
     assert.equal(observation.anomalousReceipts, 1);
-    assert.ok(h.alertLog.some((a) => a.code === "receipt-sum-mismatch" && a.severity === "critical"));
+    assert.ok(
+      h.alertLog.some((a) => a.code === "receipt-sum-mismatch" && a.severity === "critical"),
+    );
   });
 
   test("a receipt with the right sum but a leg off by more than 1 lamport fails R2 only", async () => {
@@ -197,8 +220,18 @@ describe("VaultObserver — claims (C1–C3)", () => {
   test("claims reconcile against the registry and the receipt ceiling", async () => {
     const h = harness();
     h.setAccounts([
-      owned(key(0xa5), encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total })),
-      owned(key(0xa6), encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports, lpHolderPoolClaimedLamports: 700_000n })),
+      owned(
+        key(0xa5),
+        encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total }),
+      ),
+      owned(
+        key(0xa6),
+        encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports,
+          lpHolderPoolClaimedLamports: 700_000n,
+        }),
+      ),
       owned(key(0xa7), encodeClaim({ pool, lpHolder: holderA, amountLamports: 500_000n })),
       owned(key(0xa8), encodeClaim({ pool, lpHolder: holderB, amountLamports: 200_000n })),
     ]);
@@ -215,8 +248,18 @@ describe("VaultObserver — claims (C1–C3)", () => {
   test("claims exceeding the receipt's LP-holder leg raise the ceiling alert (C2)", async () => {
     const h = harness();
     h.setAccounts([
-      owned(key(0xa9), encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total })),
-      owned(key(0xb0), encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports, lpHolderPoolClaimedLamports: 1_300_000n })),
+      owned(
+        key(0xa9),
+        encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total }),
+      ),
+      owned(
+        key(0xb0),
+        encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports,
+          lpHolderPoolClaimedLamports: 1_300_000n,
+        }),
+      ),
       owned(key(0xb1), encodeClaim({ pool, lpHolder: holderA, amountLamports: 700_000n })),
       owned(key(0xb2), encodeClaim({ pool, lpHolder: holderB, amountLamports: 600_000n })),
     ]);
@@ -225,14 +268,26 @@ describe("VaultObserver — claims (C1–C3)", () => {
     assert.ok(rollup);
     assert.equal(rollup.checks.c2WithinCeiling, false);
     assert.equal(observation.anomalousRollups, 1);
-    assert.ok(h.alertLog.some((a) => a.code === "claim-accounting-anomaly" && a.severity === "critical"));
+    assert.ok(
+      h.alertLog.some((a) => a.code === "claim-accounting-anomaly" && a.severity === "critical"),
+    );
   });
 
   test("registry claimed total disagreeing with the claim records fails C1", async () => {
     const h = harness();
     h.setAccounts([
-      owned(key(0xb3), encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total })),
-      owned(key(0xb4), encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports, lpHolderPoolClaimedLamports: 999_999n })),
+      owned(
+        key(0xb3),
+        encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total }),
+      ),
+      owned(
+        key(0xb4),
+        encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports,
+          lpHolderPoolClaimedLamports: 999_999n,
+        }),
+      ),
       owned(key(0xb5), encodeClaim({ pool, lpHolder: holderA, amountLamports: 100_000n })),
     ]);
     const observation = await h.observer.runOnce();
@@ -245,8 +300,18 @@ describe("VaultObserver — claims (C1–C3)", () => {
   test("registry total disagreeing with the receipt leg fails C3", async () => {
     const h = harness();
     h.setAccounts([
-      owned(key(0xb6), encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total })),
-      owned(key(0xb7), encodeRegistry({ pool, lpHolderPoolTotalLamports: split.lpHolderAmountLamports + 1n, lpHolderPoolClaimedLamports: 0n })),
+      owned(
+        key(0xb6),
+        encodeReceipt({ pool, salvor: key(0x02), ...split, totalProceedsLamports: total }),
+      ),
+      owned(
+        key(0xb7),
+        encodeRegistry({
+          pool,
+          lpHolderPoolTotalLamports: split.lpHolderAmountLamports + 1n,
+          lpHolderPoolClaimedLamports: 0n,
+        }),
+      ),
     ]);
     const observation = await h.observer.runOnce();
     const rollup = observation.rollups[0];
@@ -262,7 +327,12 @@ describe("VaultObserver — failed transactions + resilience", () => {
     h.setAccounts([]);
     h.setSignatures([
       { signature: "sig-ok-1", err: null, slot: 100, confirmationStatus: "finalized" },
-      { signature: "sig-bad-1", err: { InstructionError: [1, { Custom: 7009 }] }, slot: 101, confirmationStatus: "failed" },
+      {
+        signature: "sig-bad-1",
+        err: { InstructionError: [1, { Custom: 7009 }] },
+        slot: 101,
+        confirmationStatus: "failed",
+      },
     ]);
     const observation = await h.observer.runOnce();
     assert.equal(observation.failedTransactions.length, 1);
@@ -295,7 +365,9 @@ describe("VaultObserver — failed transactions + resilience", () => {
     const h = harness();
     h.failAccounts.value = true;
     await assert.rejects(() => h.observer.runOnce(), /RPC unreachable/);
-    assert.ok(h.alertLog.some((a) => a.code === "vault-accounts-unavailable" && a.severity === "critical"));
+    assert.ok(
+      h.alertLog.some((a) => a.code === "vault-accounts-unavailable" && a.severity === "critical"),
+    );
     const heartbeat = h.health.snapshot().components.find((c) => c.name === "vault-observer");
     assert.ok(heartbeat);
     assert.equal(heartbeat.status, "down");
@@ -306,7 +378,15 @@ describe("VaultObserver — failed transactions + resilience", () => {
     const total = 3_000_000n;
     const split = fairSplit(total);
     h.setAccounts([
-      owned(key(0xc2), encodeReceipt({ pool: key(0x01), salvor: key(0x02), ...split, totalProceedsLamports: total })),
+      owned(
+        key(0xc2),
+        encodeReceipt({
+          pool: key(0x01),
+          salvor: key(0x02),
+          ...split,
+          totalProceedsLamports: total,
+        }),
+      ),
     ]);
     h.failSignatures.value = true;
     const observation = await h.observer.runOnce();

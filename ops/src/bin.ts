@@ -10,7 +10,9 @@ main(process.argv.slice(2)).then(
     if (code !== 0) process.exitCode = code;
   },
   (error: unknown) => {
-    process.stderr.write(`graveyield-ops: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `graveyield-ops: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   },
 );

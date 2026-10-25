@@ -49,12 +49,8 @@ import {
 // ---------------------------------------------------------------- constants
 
 /** Devnet program IDs — mirrored in Anchor.toml and both declare_id! calls. */
-export const SCANNER_PROGRAM_ID = new PublicKey(
-  "5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF",
-);
-export const VAULT_PROGRAM_ID = new PublicKey(
-  "HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6",
-);
+export const SCANNER_PROGRAM_ID = new PublicKey("5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF");
+export const VAULT_PROGRAM_ID = new PublicKey("HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6");
 
 const PROTOCOL_CONFIG_SEED = Buffer.from("protocol_config", "utf8");
 
@@ -189,10 +185,7 @@ function buildPauseIx(programId, authority, paused) {
 
 /** ['protocol_config'] PDA under a program ID. */
 export function configPda(programId) {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [PROTOCOL_CONFIG_SEED],
-    programId,
-  );
+  const [pda] = PublicKey.findProgramAddressSync([PROTOCOL_CONFIG_SEED], programId);
   return pda;
 }
 
@@ -231,11 +224,7 @@ const VAULT_DEFAULTS = {
  *            emergencyPaused(u8)@112 bump@113
  */
 export function decodeProtocolConfig(program, data) {
-  const view = new DataView(
-    data.buffer,
-    data.byteOffset,
-    data.byteLength,
-  );
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const pkAt = (off) => new PublicKey(data.subarray(off, off + 32));
   const u64At = (off) => view.getBigUint64(off, true);
   const i64At = (off) => view.getBigInt64(off, true);
@@ -333,9 +322,7 @@ async function assertConfig(connection, program, expect) {
     const gotStr = typeof got === "bigint" ? got.toString() : String(got);
     const wantStr = typeof want === "bigint" ? want.toString() : String(want);
     if (gotStr !== wantStr) {
-      throw new Error(
-        `FAIL: ${program}.${field} = ${gotStr}, expected ${wantStr}`,
-      );
+      throw new Error(`FAIL: ${program}.${field} = ${gotStr}, expected ${wantStr}`);
     }
   }
   console.log(`  OK ${program} config: ${Object.keys(expect).join(", ")} as expected`);
@@ -392,19 +379,21 @@ async function cmdInit(args, programs) {
   const url = requireOpt(args, "url");
   const deployer = loadKeypair(requireOpt(args, "deployer"));
   const authority =
-    args.authority !== undefined
-      ? new PublicKey(args.authority)
-      : deployer.publicKey;
+    args.authority !== undefined ? new PublicKey(args.authority) : deployer.publicKey;
   const connection = new Connection(url, "confirmed");
   for (const program of programs) {
-    console.log(`[${program}] initialize — payer ${deployer.publicKey.toBase58()}, authority ${authority.toBase58()}`);
+    console.log(
+      `[${program}] initialize — payer ${deployer.publicKey.toBase58()}, authority ${authority.toBase58()}`,
+    );
     const sig = await sendInitTx(connection, program, deployer, authority);
     console.log(`  tx ${sig}`);
     const cfg = await readConfig(connection, program);
     if (!cfg || !cfg.authority.equals(authority)) {
       throw new Error(`FAIL: ${program} config readback after initialize`);
     }
-    console.log(`  OK ${program} ProtocolConfig live at ${configPda(programIdFor(program)).toBase58()}`);
+    console.log(
+      `  OK ${program} ProtocolConfig live at ${configPda(programIdFor(program)).toBase58()}`,
+    );
   }
 }
 
@@ -415,11 +404,7 @@ async function cmdPause(args) {
   const state = requireOpt(args, "state") === "true";
   const connection = new Connection(url, "confirmed");
   const ix = buildPauseIx(programIdFor(program), authority.publicKey, state);
-  const sig = await sendAndConfirmTransaction(
-    connection,
-    new Transaction().add(ix),
-    [authority],
-  );
+  const sig = await sendAndConfirmTransaction(connection, new Transaction().add(ix), [authority]);
   console.log(`[${program}] paused=${state} — tx ${sig}`);
   await assertConfig(connection, program, {
     [program === "scanner" ? "paused" : "emergencyPaused"]: state,
@@ -476,9 +461,7 @@ async function cmdDrill(args) {
       new Transaction().add(buildPauseIx(programId, intruder.publicKey, true)),
       [intruder],
     );
-    throw new Error(
-      `FAIL: intruder pause LANDED — ${program} accepted a non-authority signer`,
-    );
+    throw new Error(`FAIL: intruder pause LANDED — ${program} accepted a non-authority signer`);
   } catch (err) {
     const decoded = decodeProgramError(err);
     if (!decoded || decoded.code !== unauthorizedCode) {

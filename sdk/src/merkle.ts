@@ -205,7 +205,11 @@ export class SnapshotMerkleTree {
  * byte order, so the off-chain builder doesn't need to track which side
  * of the tree a leaf is on.
  */
-export function verifyMerkleProof(root: Uint8Array, leaf: Uint8Array, proof: ReadonlyArray<Uint8Array>): boolean {
+export function verifyMerkleProof(
+  root: Uint8Array,
+  leaf: Uint8Array,
+  proof: ReadonlyArray<Uint8Array>,
+): boolean {
   let current = leaf;
   for (const sibling of proof) {
     current = hashPair(current, sibling);

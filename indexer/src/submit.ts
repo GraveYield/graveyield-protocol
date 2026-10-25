@@ -22,7 +22,13 @@
 // submission is left to the salvor bot operator who holds the oracle
 // key as a separate responsibility.
 
-import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Keypair,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import nacl from "tweetnacl";
 import {
   GraveYieldClient,
@@ -151,7 +157,11 @@ export async function submitCandidate(
 /** Derive the EligibilityAnchor PDA for a candidate. */
 function deriveAnchorPda(scannerProgramId: PublicKey, candidate: Candidate): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("eligibility_anchor"), RAYDIUM_V4_PROGRAM_ID.toBuffer(), candidate.poolAddress.toBuffer()],
+    [
+      Buffer.from("eligibility_anchor"),
+      RAYDIUM_V4_PROGRAM_ID.toBuffer(),
+      candidate.poolAddress.toBuffer(),
+    ],
     scannerProgramId,
   );
   return pda;
