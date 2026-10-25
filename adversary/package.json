@@ -12,7 +12,7 @@
     "test": "node --test --import tsx/esm --test-reporter=spec --test-name-pattern='.*' 'test/**/*.adversary.test.ts'"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.95.0",
+    "@solana/web3.js": "^3.1.1",
     "@graveyield/sdk": "workspace:*",
     "@graveyield/indexer": "workspace:*",
     "@graveyield/ops": "workspace:*",
