@@ -29,7 +29,7 @@
     "fmt:ts:check": "prettier --check ."
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.19.2",
     "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.9.10",
@@ -38,7 +38,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@types/node": "^24.0.0",
+      "@types/node": "^24.19.2",
       "@types/bn.js": "^5.1.5",
       "toml": ">=5.0.1",
       "uuid": ">=11.1.1",
