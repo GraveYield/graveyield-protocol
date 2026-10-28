@@ -1,0 +1,986 @@
+     1→// SPDX-License-Identifier: Apache-2.0
+     2→//
+     3→// The shared execution pipeline (FLEET-M1).
+     4→//
+     5→// Conservative / Sniper / Experimental ALL submit through this class —
+     6→// there is no second transaction-construction path. What it guarantees
+     7→// for every executor, in every mode:
+     8→//
+     9→//   1. Fresh on-chain revalidation BEFORE anything is built
+    10→//      (`revalidateOpportunity` — the envelope's state is never trusted).
+    11→//   2. A live-derived 13-account Raydium V4 set (`deriveV4CpiAccounts`).
+    12→//   3. A complete LP-holder snapshot via the SDK (completeness-gated),
+    13→//      with the LIVE LP supply re-pinned against the snapshot before a
+    14→//      transaction may be built (the on-chain 7018 check, caught early).
+    15→//   4. A real route quote through the shared RouteAdapter, freshness-
+    16→//      checked, with the min-output floor re-derived by the estimator
+    17→//      (never the adapter's own floor), slippage only ever tightened
+    18→//      below the live config max.
+    19→//   5. The D3 fee plan (`policy.planFees` → SDK `derivePriorityFeePlan`)
+    20→//      with the Charter guard applied again at assembly AND at submit.
+    21→//   6. Dynamically pinned attestation instruction indices: the precompile
+    22→//      is built with the phase-2 instruction's FINAL index (the on-chain
+    23→//      load_instruction_pair validator requires msg_ix_index ==
+    24→//      current_index — compute-budget ixs shift it; FLEET-M0 F3).
+    25→//   7. Full-transaction simulation against current state with GraveYield
+    26→//      error decoding BEFORE any submission.
+    27→//   8. Dry-run / simulation modes NEVER submit; `live` requires explicit
+    28→//      enablement (validated in `validatePolicy`) and a signer.
+    29→//
+    30→// What it deliberately does NOT do: it does not pick strategies (that
+    31→// is the policy), does not track history (the store), and does not
+    32→// observe (the Monitor).
+    33→
+    34→import {
+    35→  Connection,
+    36→  PublicKey,
+    37→  Transaction,
+    38→  ComputeBudgetProgram,
+    39→  type Keypair,
+    40→  type TransactionInstruction,
+    41→} from "@solana/web3.js";
+    42→import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+    43→import BN from "bn.js";
+    44→import {
+    45→  GraveYieldClient,
+    46→  buildAttestationMessage,
+    47→  buildEd25519VerifyInstruction,
+    48→  buildEvaluatePoolPhase2Ix,
+    49→  buildSalvagePoolIx,
+    50→  fetchSlotHash,
+    51→  IX_DATA_MSG_OFFSET,
+    52→  RAYDIUM_V4_PROGRAM_ID,
+    53→  decodeSalvageReceipt,
+    54→  decodeGraveYieldError,
+    55→  decodeGraveYieldErrorCode,
+    56→  simulateTransaction,
+    57→  snapshotLpHolders,
+    58→  salvageReceiptPda,
+    59→  eligibilityCertPda,
+    60→  readLpMintSupply,
+    61→  WSOL_MINT,
+    62→  type SnapshotResult,
+    63→  type SdkSimulationResult,
+    64→} from "@graveyield/sdk";
+    65→
+    66→import { estimateSalvageEconomics, type EconomicEstimate } from "./estimator.js";
+    67→import type { ExecutionPolicy, LiveEnablement } from "./policy.js";
+    68→import { validatePolicy, planFees } from "./policy.js";
+    69→import { makeEvent, type FleetEventSink, type FailureClass } from "./events.js";
+    70→import { revalidateOpportunity, type RevalidatedOpportunity } from "./revalidate.js";
+    71→import {
+    72→  deriveV4CpiAccounts,
+    73→  toRemainingAccounts,
+    74→  MissingAccountsError,
+    75→} from "./raydiumAccounts.js";
+    76→import type { RouteAdapter, RouteQuote } from "./route.js";
+    77→import { RouteError } from "./route.js";
+    78→import type { OpportunityEnvelope } from "./envelope.js";
+    79→
+    80→/** Injectable transaction sender (tests replace the network call). */
+    81→export type TxSender = (
+    82→  connection: Connection,
+    83→  tx: Transaction,
+    84→  signers: Keypair[],
+    85→) => Promise<string>;
+    86→
+    87→/** Default sender — confirm-once via web3.js. */
+    88→export const defaultTxSender: TxSender = (connection, tx, signers) =>
+    89→  import("@solana/web3.js").then(({ sendAndConfirmTransaction }) =>
+    90→    sendAndConfirmTransaction(connection, tx, signers),
+    91→  );
+    92→
+    93→/** A C1 attestation source — the executor NEVER holds the oracle key itself. */
+    94→export interface AttestationSource {
+    95→  /**
+    96→   * Sign the 112-byte last-swap attestation message with the CURRENT
+    97→   * activity oracle. Tests use a local keypair; production points at
+    98→   * the indexer's oracle service. Returns the 64-byte signature and the
+    99→   * oracle's public key (the pipeline does not assume which key it is —
+   100→   * the on-chain validator binds it to ProtocolConfig.activity_oracle).
+   101→   */
+   102→  signAttestation(
+   103→    message: Uint8Array,
+   104→  ): Promise<{ signature: Uint8Array; oraclePublicKey: PublicKey }>;
+   105→}
+   106→
+   107→/** A local oracle keypair source (tests + devnet drill). */
+   108→export class LocalAttestationSource implements AttestationSource {
+   109→  constructor(private readonly oracle: Keypair) {}
+   110→  async signAttestation(message: Uint8Array) {
+   111→    const nacl = (await import("tweetnacl")).default;
+   112→    const signature = nacl.sign.detached(Buffer.from(message), Buffer.from(this.oracle.secretKey));
+   113→    return { signature, oraclePublicKey: this.oracle.publicKey };
+   114→  }
+   115→}
+   116→
+   117→/** The salvage inputs the pipeline assembles from live state. */
+   118→export interface SalvageContext {
+   119→  revalidated: RevalidatedOpportunity;
+   120→  envelope: OpportunityEnvelope;
+   121→  /** Salvor signer's public key (fee payer + LP burn source owner). */
+   122→  salvor: PublicKey;
+   123→  route: RouteQuote;
+   124→  snapshot: SnapshotResult;
+   125→  estimate: EconomicEstimate;
+   126→}
+   127→
+   128→/** A fully prepared transaction, ready for the simulate/submit gates. */
+   129→export interface PreparedTransaction {
+   130→  kind: "certify-and-salvage" | "salvage-only";
+   131→  tx: Transaction;
+   132→  /** Scanner instruction index (precompile pin) — certify path only. */
+   133→  scannerIxIndex: number | null;
+   134→  salvageIxIndex: number;
+   135→  /** Attestation material (certify path only). */
+   136→  attestationMessage: Uint8Array | null;
+   137→  attestationSignature: Uint8Array | null;
+   138→  issuedSlot: number | null;
+   139→  feeMicroLamportsPerCu: BN;
+   140→  computeUnitLimit: number;
+   141→  /** The snapshot material baked into the tx (for the Monitor + restarts). */
+   142→  snapshotSummary: {
+   143→    merkleRoot: Uint8Array;
+   144→    totalSupply: bigint;
+   145→    salvorLpAmount: bigint;
+   146→    holderCount: number;
+   147→    snapshotSlot: number;
+   148→  };
+   149→  minQuoteOutputLamports: bigint;
+   150→  /** The route actually embedded (post-validation). */
+   151→  route: RouteQuote;
+   152→}
+   153→
+   154→/** Pipeline result for one attempted execution. */
+   155→export interface PipelineOutcome {
+   156→  ok: boolean;
+   157→  stage:
+   158→    | "revalidated"
+   159→    | "economic-reject"
+   160→    | "prepared"
+   161→    | "simulated"
+   162→    | "submitted"
+   163→    | "confirmed"
+   164→    | "failed";
+   165→  failureClass?: FailureClass;
+   166→  reason?: string;
+   167→  prepared?: PreparedTransaction;
+   168→  simulation?: SdkSimulationResult;
+   169→  signature?: string;
+   170→  /** The economics verdict computed during preparation (prepared stage). */
+   171→  estimate?: EconomicEstimate;
+   172→  /** Verified on-chain salvage receipt (live mode, post-confirmation). */
+   173→  receipt?: {
+   174→    totalProceedsLamports: bigint;
+   175→    salvorAmountLamports: bigint;
+   176→    lpHolderAmountLamports: bigint;
+   177→    protocolAmountLamports: bigint;
+   178→    slot: bigint;
+   179→  } | null;
+   180→}
+   181→
+   182→/** Pipeline construction options. */
+   183→export interface PipelineOptions {
+   184→  client: GraveYieldClient;
+   185→  policy: ExecutionPolicy;
+   186→  /** Explicit enablement for live mode (required when mode = "live"). */
+   187→  liveEnablement?: LiveEnablement | null;
+   188→  routeAdapter: RouteAdapter;
+   189→  eventSink: FleetEventSink;
+   190→  /** Transaction sender — injectable for tests. */
+   191→  txSender?: TxSender;
+   192→  /** Now (epoch ms) — injectable for deterministic tests. */
+   193→  now?: () => number;
+   194→}
+   195→
+   196→/**
+   197→ * The shared pipeline. One instance per bot; the store/lease layer is
+   198→ * the CALLER's responsibility (the pipeline is stateless between runs).
+   199→ */
+   200→export class ExecutionPipeline {
+   201→  readonly client: GraveYieldClient;
+   202→  readonly policy: ExecutionPolicy;
+   203→  private readonly sender: TxSender;
+   204→  private readonly routes: RouteAdapter;
+   205→  private readonly sink: FleetEventSink;
+   206→  private readonly now: () => number;
+   207→
+   208→  constructor(opts: PipelineOptions) {
+   209→    // validatePolicy throws on any global-invariant breach (live mode
+   210→    // without explicit enablement, bad margins, negative minimums…).
+   211→    this.policy = validatePolicy(opts.policy, opts.liveEnablement ?? null);
+   212→    this.client = opts.client;
+   213→    this.routes = opts.routeAdapter;
+   214→    this.sink = opts.eventSink;
+   215→    this.sender = opts.txSender ?? defaultTxSender;
+   216→    this.now = opts.now ?? Date.now;
+   217→  }
+   218→
+   219→  private emit(
+   220→    type: Parameters<typeof makeEvent>[0]["type"],
+   221→    data: Record<string, unknown>,
+   222→    extra?: Partial<Parameters<typeof makeEvent>[0]>,
+   223→  ): void {
+   224→    this.sink.emit(
+   225→      makeEvent({
+   226→        botId: this.policy.botId,
+   227→        type,
+   228→        data,
+   229→        ...(extra ?? {}),
+   230→      }),
+   231→    );
+   232→  }
+   233→
+   234→  // ------------------------------------------------------------ economics
+   235→
+   236→  /**
+   237→   * Freshly read the pool + run the shared estimator + fetch a route
+   238→   * quote. Shared by both executor paths — economics are computed ONCE,
+   239→   * from current data, with exact integer math.
+   240→   */
+   241→  async estimateCurrent(opts: {
+   242→    revalidated: RevalidatedOpportunity;
+   243→    salvor: PublicKey;
+   244→    salvorLpAmount: bigint;
+   245→    envelope: OpportunityEnvelope;
+   246→  }): Promise<{ estimate: EconomicEstimate; route: RouteQuote; quoteIsFresh: boolean }> {
+   247→    const rv = opts.revalidated;
+   248→    const memecoinMint = rv.memecoinMint;
+   249→
+   250→    // Orientation-correct route quote: memecoin → WSOL.
+   251→    const effectiveSlippage =
+   252→      this.policy.slippageBpsOverride !== undefined && this.policy.slippageBpsOverride !== null
+   253→        ? Math.min(this.policy.slippageBpsOverride, rv.vaultConfig.maxSlippageBps)
+   254→        : rv.vaultConfig.maxSlippageBps;
+   255→    const vaultAuthority = await this.vaultAuthorityPda();
+   256→    const vaultWsolAta = getAssociatedTokenAddressSync(WSOL_MINT, vaultAuthority, true);
+   257→
+   258→    const route = await this.routes.quote({
+   259→      inputMint: memecoinMint,
+   260→      outputMint: WSOL_MINT,
+   261→      // Quote for the FULL memecoin reserve share the pool would pay on
+   262→      // a full-snapshot burn — the estimator scales linearly to the
+   263→      // salvor's actual burn share. Quoting the full reserve keeps one
+   264→      // quote reusable across salvor sizes and matches the pool-implied
+   265→      // reference the on-chain ceiling uses.
+   266→      amount: rv.coinIsWsol ? rv.pcReserve : rv.coinReserve,
+   267→      slippageBps: effectiveSlippage,
+   268→      destinationTokenAccount: vaultWsolAta,
+   269→      authority: vaultAuthority,
+   270→    });
+   271→
+   272→    const quoteAgeMs = this.now() - route.quotedAtMs;
+   273→    const quoteIsFresh = quoteAgeMs <= this.policy.quoteMaxAgeMs;
+   274→
+   275→    // Estimator inputs — pass 1 solves the D3 fee plan from the gross
+   276→    // share (cost-independent), pass 2 prices the costs in exactly.
+   277→    const estimatorPoolInputs = {
+   278→      coinReserve: rv.coinReserve,
+   279→      pcReserve: rv.pcReserve,
+   280→      lpSupply: rv.lpSupply,
+   281→      coinMint: rv.pool.baseMint.toBase58(),
+   282→      pcMint: rv.pool.quoteMint.toBase58(),
+   283→      wsolMint: WSOL_MINT.toBase58(),
+   284→    };
+   285→    const estimatorConfigInputs = {
+   286→      salvorShareBps: rv.vaultConfig.salvorShareBps,
+   287→      maxSlippageBps: rv.vaultConfig.maxSlippageBps,
+   288→      jupiterDustThresholdLamports: rv.vaultConfig.jupiterDustThresholdLamports,
+   289→    };
+   290→    const estimatorCostInputsBase = {
+   291→      // The certify+salvage bundle is ONE atomic transaction — one
+   292→      // signature per attempt (phase-1 costs were sunk by the Scout).
+   293→      signatureCount: 1,
+   294→      frontedRentLamports: this.policy.frontedRentLamports ?? 0n,
+   295→      expectedFailureCostLamports: this.policy.expectedFailureCostLamports ?? 0n,
+   296→    };
+   297→
+   298→    // Pass 1: gross share (fee budget zeroed — the share is cost-free).
+   299→    const grossPass = estimateSalvageEconomics({
+   300→      pool: estimatorPoolInputs,
+   301→      route: { quoteInAmount: route.inAmount, quoteOutLamports: route.outAmount },
+   302→      position: { salvorLpAmount: opts.salvorLpAmount },
+   303→      config: estimatorConfigInputs,
+   304→      costs: { ...estimatorCostInputsBase, priorityFeeBudgetLamports: 0n },
+   305→      slippageBpsOverride: this.policy.slippageBpsOverride ?? null,
+   306→      minNetProfitLamports: 0n,
+   307→    });
+   308→    if (grossPass.status === "reject") {
+   309→      return { estimate: grossPass, route, quoteIsFresh };
+   310→    }
+   311→
+   312→    // D3 fee plan from the expected profit (margin × gross share),
+   313→    // bounded by the LIVE ProtocolConfig ceiling.
+   314→    const plan = planFees({
+   315→      policy: this.policy,
+   316→      expectedProfitLamports: new BN((grossPass.salvorGrossShareLamports ?? 0n).toString(10)),
+   317→      protocolCeilingMicroLamportsPerCu: new BN(
+   318→        rv.vaultConfig.maxPriorityFeeCeilingLamports.toString(10),
+   319→      ),
+   320→    });
+   321→    const priorityFeeBudgetLamports = BigInt(
+   322→      plan.maxMicroLamportsPerCu
+   323→        .mul(new BN(this.policy.computeUnitLimit))
+   324→        .div(new BN(1_000_000))
+   325→        .toString(10),
+   326→    );
+   327→
+   328→    // Pass 2: the full economics with the real fee budget.
+   329→    const estimate = estimateSalvageEconomics({
+   330→      pool: estimatorPoolInputs,
+   331→      route: { quoteInAmount: route.inAmount, quoteOutLamports: route.outAmount },
+   332→      position: { salvorLpAmount: opts.salvorLpAmount },
+   333→      config: estimatorConfigInputs,
+   334→      costs: { ...estimatorCostInputsBase, priorityFeeBudgetLamports },
+   335→      slippageBpsOverride: this.policy.slippageBpsOverride ?? null,
+   336→      minNetProfitLamports: this.policy.minNetProfitLamports,
+   337→    });
+   338→
+   339→    return { estimate, route, quoteIsFresh };
+   340→  }
+   341→
+   342→  private async vaultAuthorityPda(): Promise<PublicKey> {
+   343→    // seeds ["vault_authority"] under the vault program (SDK's pdas.ts).
+   344→    const { vaultAuthorityPda } = await import("@graveyield/sdk");
+   345→    return vaultAuthorityPda(this.client.graveVaultProgramId);
+   346→  }
+   347→
+   348→  // ------------------------------------------------------------ prepare
+   349→
+   350→  /**
+   351→   * Read the salvor's LP token account balance (the burn source).
+   352→   * Rejects when the ATA is missing or empty — fail closed.
+   353→   */
+   354→  async readSalvorLpBalance(salvor: PublicKey, lpMint: PublicKey): Promise<bigint> {
+   355→    const ata = getAssociatedTokenAddressSync(lpMint, salvor);
+   356→    const info = await this.client.connection.getAccountInfo(ata);
+   357→    if (!info) return 0n;
+   358→    // SPL token account: amount @ 64 (u64 LE).
+   359→    const data = info.data;
+   360→    if (data.length < 72) throw new Error(`salvor LP ATA ${ata.toBase58()} too short`);
+   361→    // web3.js 3.x returns AccountInfo<Uint8Array>; Buffer.from copies the
+   362→    // same bytes so the u64 read keeps working.
+   363→    return Buffer.from(data).readBigUInt64LE(64);
+   364→  }
+   365→
+   366→  /**
+   367→   * Revalidate → derive accounts → snapshot → quote → estimate →
+   368→   * assemble. Everything up to (but not including) simulation.
+   369→   */
+   370→  async prepare(opts: {
+   371→    envelope: OpportunityEnvelope;
+   372→    salvor: PublicKey;
+   373→    attestationSource?: AttestationSource;
+   374→  }): Promise<PipelineOutcome> {
+   375→    const { envelope, salvor } = opts;
+   376→    const identity = envelope.identity;
+   377→    const amm = new PublicKey(identity.ammProgramId);
+   378→    const pool = new PublicKey(identity.poolAddress);
+   379→
+   380→    // 1. Revalidate EVERYTHING against the live chain.
+   381→    let rv: RevalidatedOpportunity;
+   382→    try {
+   383→      const outcome = await revalidateOpportunity({
+   384→        client: this.client,
+   385→        ammProgramId: amm,
+   386→        poolAddress: pool,
+   387→        minCertRemainingMs: this.policy.minCertRemainingMs,
+   388→        options: { now: this.now },
+   389→      });
+   390→      if (!outcome.ok) {
+   391→        this.emit(
+   392→          "revalidation-rejected",
+   393→          { reason: outcome.reason },
+   394→          {
+   395→            identity,
+   396→            failureClass: outcome.failureClass,
+   397→          },
+   398→        );
+   399→        return {
+   400→          ok: false,
+   401→          stage: "revalidated",
+   402→          failureClass: outcome.failureClass,
+   403→          reason: outcome.reason,
+   404→        };
+   405→      }
+   406→      rv = outcome.opportunity;
+   407→    } catch (err) {
+   408→      return {
+   409→        ok: false,
+   410→        stage: "revalidated",
+   411→        failureClass: "transient-rpc",
+   412→        reason: `revalidation threw: ${String(err)}`,
+   413→      };
+   414→    }
+   415→
+   416→    // Strategy filter: kind acceptance.
+   417→    if (!this.policy.accepts.kinds.includes(rv.kind)) {
+   418→      const reason = `strategy does not accept kind "${rv.kind}" (envelope said "${envelope.kind}")`;
+   419→      this.emit(
+   420→        "revalidation-rejected",
+   421→        { reason },
+   422→        { identity, failureClass: "stale-opportunity" },
+   423→      );
+   424→      return { ok: false, stage: "revalidated", failureClass: "stale-opportunity", reason };
+   425→    }
+   426→
+   427→    // 2. Live-derived CPI account set.
+   428→    let derived;
+   429→    try {
+   430→      derived = await deriveV4CpiAccounts(this.client.connection, rv.pool);
+   431→    } catch (err) {
+   432→      const failureClass: FailureClass =
+   433→        err instanceof MissingAccountsError ? "missing-accounts" : "transient-rpc";
+   434→      this.emit("revalidation-rejected", { reason: String(err) }, { identity, failureClass });
+   435→      return { ok: false, stage: "revalidated", failureClass, reason: String(err) };
+   436→    }
+   437→
+   438→    // 3. Salvor LP balance (burn source) — fail closed on empty.
+   439→    const salvorLpAmount = await this.readSalvorLpBalance(salvor, rv.pool.lpMint);
+   440→    if (salvorLpAmount === 0n) {
+   441→      const reason = `salvor holds no LP for pool ${pool.toBase58()} — nothing to burn`;
+   442→      this.emit(
+   443→        "revalidation-rejected",
+   444→        { reason },
+   445→        { identity, failureClass: "missing-accounts" },
+   446→      );
+   447→      return { ok: false, stage: "revalidated", failureClass: "missing-accounts", reason };
+   448→    }
+   449→
+   450→    // 4. Complete LP-holder snapshot (SDK; completeness-gated) + live
+   451→    //    supply re-pin (the on-chain 7018 check, caught early).
+   452→    let snapshot: SnapshotResult;
+   453→    try {
+   454→      snapshot = await snapshotLpHolders(this.client.connection, pool);
+   455→    } catch (err) {
+   456→      this.emit(
+   457→        "revalidation-rejected",
+   458→        { reason: String(err) },
+   459→        { identity, failureClass: "snapshot-incomplete" },
+   460→      );
+   461→      return {
+   462→        ok: false,
+   463→        stage: "revalidated",
+   464→        failureClass: "snapshot-incomplete",
+   465→        reason: String(err),
+   466→      };
+   467→    }
+   468→    const liveSupply = await readLpMintSupply(this.client.connection, rv.pool.lpMint);
+   469→    if (liveSupply !== BigInt(snapshot.snapshot.totalSupply.toString(10))) {
+   470→      const reason = `LP supply moved between snapshot and preparation (${snapshot.snapshot.totalSupply.toString()} → ${liveSupply.toString()}) — re-snapshotting is required`;
+   471→      this.emit("revalidation-rejected", { reason }, { identity, failureClass: "state-changed" });
+   472→      return { ok: false, stage: "revalidated", failureClass: "state-changed", reason };
+   473→    }
+   474→
+   475→    // 5. Route + economics (fresh).
+   476→    let quote: RouteQuote;
+   477→    let estimate: EconomicEstimate;
+   478→    let quoteIsFresh: boolean;
+   479→    try {
+   480→      const econ = await this.estimateCurrent({
+   481→        revalidated: rv,
+   482→        salvor,
+   483→        salvorLpAmount,
+   484→        envelope,
+   485→      });
+   486→      quote = econ.route;
+   487→      estimate = econ.estimate;
+   488→      quoteIsFresh = econ.quoteIsFresh;
+   489→    } catch (err) {
+   490→      const failureClass: FailureClass =
+   491→        err instanceof RouteError ? "route-failure" : "transient-route";
+   492→      this.emit("revalidation-rejected", { reason: String(err) }, { identity, failureClass });
+   493→      return { ok: false, stage: "revalidated", failureClass, reason: String(err) };
+   494→    }
+   495→    if (!quoteIsFresh) {
+   496→      const reason = `route quote older than ${this.policy.quoteMaxAgeMs}ms — refusing to use it`;
+   497→      this.emit("revalidation-rejected", { reason }, { identity, failureClass: "route-failure" });
+   498→      return { ok: false, stage: "revalidated", failureClass: "route-failure", reason };
+   499→    }
+   500→    if (estimate.status === "reject") {
+   501→      const failureClass: FailureClass = estimate.failureClass ?? "economic-unresolvable";
+   502→      const reason = estimate.reason ?? "economics unresolvable";
+   503→      this.emit("economic-reject", { reason }, { identity, failureClass });
+   504→      return { ok: false, stage: "economic-reject", failureClass, reason };
+   505→    }
+   506→    if ((estimate.netProfitLamports ?? 0n) < this.policy.minNetProfitLamports) {
+   507→      const reason = `net profit ${estimate.netProfitLamports?.toString()} below minimum ${this.policy.minNetProfitLamports.toString()}`;
+   508→      this.emit("economic-reject", { reason }, { identity, failureClass: "economic-insufficient" });
+   509→      return { ok: false, stage: "economic-reject", failureClass: "economic-insufficient", reason };
+   510→    }
+   511→    this.emit(
+   512→      "economic-pass",
+   513→      {
+   514→        netProfitLamports: estimate.netProfitLamports?.toString(),
+   515→        grossProceedsWsolLamports: estimate.grossProceedsWsolLamports?.toString(),
+   516→        minQuoteOutputLamports: estimate.minQuoteOutputLamports?.toString(),
+   517→        effectiveSlippageBps: estimate.effectiveSlippageBps,
+   518→        swapLegBelowDust: estimate.swapLegBelowDust,
+   519→      },
+   520→      { identity },
+   521→    );
+   522→
+   523→    // 6. Route validation — untrusted until proven otherwise.
+   524→    const routeProblem = validateRouteForSalvage(quote, {
+   525→      inputMint: rv.memecoinMint,
+   526→      outputMint: WSOL_MINT,
+   527→      expectedOutLamports: estimate.minQuoteOutputLamports ?? 0n,
+   528→      vaultAuthority: await this.vaultAuthorityPda(),
+   529→      vaultWsolAta: getAssociatedTokenAddressSync(WSOL_MINT, await this.vaultAuthorityPda(), true),
+   530→    });
+   531→    if (routeProblem) {
+   532→      this.emit(
+   533→        "revalidation-rejected",
+   534→        { reason: routeProblem },
+   535→        { identity, failureClass: "route-failure" },
+   536→      );
+   537→      return {
+   538→        ok: false,
+   539→        stage: "revalidated",
+   540→        failureClass: "route-failure",
+   541→        reason: routeProblem,
+   542→      };
+   543→    }
+   544→
+   545→    // 7. Assemble the transaction for the CURRENT kind.
+   546→    const feePlan = planFees({
+   547→      policy: this.policy,
+   548→      expectedProfitLamports: new BN((estimate.salvorGrossShareLamports ?? 0n).toString(10)),
+   549→      protocolCeilingMicroLamportsPerCu: new BN(
+   550→        rv.vaultConfig.maxPriorityFeeCeilingLamports.toString(10),
+   551→      ),
+   552→    });
+   553→
+   554→    const salvageIxInput = {
+   555→      vaultProgramId: this.client.graveVaultProgramId,
+   556→      scannerProgramId: this.client.graveScannerProgramId,
+   557→      ammProgramId: amm,
+   558→      poolAddress: pool,
+   559→      salvor,
+   560→      salvorLpTokenAccount: getAssociatedTokenAddressSync(rv.pool.lpMint, salvor),
+   561→      lpMint: rv.pool.lpMint,
+   562→      memecoinMint: rv.memecoinMint,
+   563→      lpSnapshotMerkleRoot: snapshot.tree.root(),
+   564→      lpTotalSupplyAtSnapshot: BigInt(snapshot.snapshot.totalSupply.toString(10)),
+   565→      salvorLpAmount,
+   566→      minQuoteOutputLamports: estimate.minQuoteOutputLamports ?? 0n,
+   567→      maxSlippageBpsOverride: this.policy.slippageBpsOverride ?? null,
+   568→      jupiterRouteData: quote.routeData,
+   569→      jupiterRouteAccountsLen: quote.routeAccounts.length,
+   570→      raydiumV4RemainingAccounts: toRemainingAccounts(derived),
+   571→      jupiterRouteAccounts: quote.routeAccounts,
+   572→    };
+   573→
+   574→    let prepared: PreparedTransaction;
+   575→    if (rv.kind === "salvageable") {
+   576→      prepared = await this.assembleSalvageOnlyTx({
+   577→        rv,
+   578→        salvageIxInput,
+   579→        feePrice: feePlan.maxMicroLamportsPerCu,
+   580→        snapshot,
+   581→        estimate,
+   582→        route: quote,
+   583→      });
+   584→    } else {
+   585→      // certification-ready → certify + salvage in ONE atomic tx.
+   586→      if (!opts.attestationSource) {
+   587→        const reason =
+   588→          "certification-ready requires an AttestationSource (oracle-signed C1) — none configured";
+   589→        this.emit(
+   590→          "revalidation-rejected",
+   591→          { reason },
+   592→          { identity, failureClass: "config-invalid" },
+   593→        );
+   594→        return { ok: false, stage: "revalidated", failureClass: "config-invalid", reason };
+   595→      }
+   596→      prepared = await this.assembleCertifyAndSalvageTx({
+   597→        rv,
+   598→        salvageIxInput,
+   599→        feePrice: feePlan.maxMicroLamportsPerCu,
+   600→        snapshot,
+   601→        estimate,
+   602→        route: quote,
+   603→        attestationSource: opts.attestationSource,
+   604→      });
+   605→    }
+   606→
+   607→    this.emit(
+   608→      "prepared",
+   609→      {
+   610→        kind: prepared.kind,
+   611→        scannerIxIndex: prepared.scannerIxIndex,
+   612→        salvageIxIndex: prepared.salvageIxIndex,
+   613→        feeMicroLamportsPerCu: prepared.feeMicroLamportsPerCu.toString(),
+   614→        computeUnitLimit: prepared.computeUnitLimit,
+   615→        holderCount: prepared.snapshotSummary.holderCount,
+   616→        snapshotSupply: prepared.snapshotSummary.totalSupply.toString(),
+   617→        salvorLpAmount: prepared.snapshotSummary.salvorLpAmount.toString(),
+   618→        minQuoteOutputLamports: prepared.minQuoteOutputLamports.toString(),
+   619→        routeAccounts: prepared.route.routeAccounts.length,
+   620→      },
+   621→      { identity },
+   622→    );
+   623→
+   624→    return { ok: true, stage: "prepared", prepared, estimate };
+   625→  }
+   626→
+   627→  /** [cuLimit, (cuPrice), salvage] — the already-certified path. */
+   628→  private async assembleSalvageOnlyTx(opts: {
+   629→    rv: RevalidatedOpportunity;
+   630→    salvageIxInput: Parameters<typeof buildSalvagePoolIx>[0];
+   631→    feePrice: BN;
+   632→    snapshot: SnapshotResult;
+   633→    estimate: EconomicEstimate;
+   634→    route: RouteQuote;
+   635→  }): Promise<PreparedTransaction> {
+   636→    const salvageIx = buildSalvagePoolIx(opts.salvageIxInput);
+   637→    const tx = new Transaction();
+   638→    const computeIxs = await this.computeIxsFor(opts.feePrice);
+   639→    for (const ix of computeIxs) tx.add(ix);
+   640→    tx.add(salvageIx);
+   641→    return {
+   642→      kind: "salvage-only",
+   643→      tx,
+   644→      scannerIxIndex: null,
+   645→      salvageIxIndex: computeIxs.length,
+   646→      attestationMessage: null,
+   647→      attestationSignature: null,
+   648→      issuedSlot: null,
+   649→      feeMicroLamportsPerCu: opts.feePrice,
+   650→      computeUnitLimit: this.policy.computeUnitLimit,
+   651→      snapshotSummary: {
+   652→        merkleRoot: opts.snapshot.tree.root(),
+   653→        totalSupply: BigInt(opts.snapshot.snapshot.totalSupply.toString(10)),
+   654→        salvorLpAmount: BigInt(opts.salvageIxInput.salvorLpAmount.toString()),
+   655→        holderCount: opts.snapshot.snapshot.holders.length,
+   656→        snapshotSlot: opts.snapshot.snapshotSlot,
+   657→      },
+   658→      minQuoteOutputLamports: opts.estimate.minQuoteOutputLamports ?? 0n,
+   659→      route: opts.route,
+   660→    };
+   661→  }
+   662→
+   663→  /**
+   664→   * [cuLimit, (cuPrice), precompile(pinned), phase2, salvage] — the
+   665→   * certification-ready path. The cert is minted and consumed in the
+   666→   * SAME transaction, so the 1h TTL cannot race between separate txs.
+   667→   */
+   668→  private async assembleCertifyAndSalvageTx(opts: {
+   669→    rv: RevalidatedOpportunity;
+   670→    salvageIxInput: Parameters<typeof buildSalvagePoolIx>[0];
+   671→    feePrice: BN;
+   672→    snapshot: SnapshotResult;
+   673→    estimate: EconomicEstimate;
+   674→    route: RouteQuote;
+   675→    attestationSource: AttestationSource;
+   676→  }): Promise<PreparedTransaction> {
+   677→    const { rv } = opts;
+   678→    const connection = this.client.connection;
+   679→    const issuedSlot = Number(await connection.getSlot());
+   680→    const slotHash = await fetchSlotHash(connection, issuedSlot);
+   681→    if (!slotHash) {
+   682→      throw new Error(
+   683→        `slot hash unavailable for slot ${issuedSlot} — attestation cannot be anchored`,
+   684→      );
+   685→    }
+   686→
+   687→    // The last-swap timestamp must be REAL: re-derive from Raydium V4
+   688→    // history (SDK, fail-closed) — never from the envelope.
+   689→    const { deriveLastSwapV4 } = await import("@graveyield/sdk");
+   690→    const lastSwap = await deriveLastSwapV4(connection, rv.ammProgramId, rv.poolAddress);
+   691→    if (!lastSwap) {
+   692→      throw new Error(
+   693→        `cannot certify ${rv.poolAddress.toBase58()}: last-swap derivation unavailable (never swapped or incomplete history)`,
+   694→      );
+   695→    }
+   696→
+   697→    const attestationMessage = buildAttestationMessage({
+   698→      ammProgramId: RAYDIUM_V4_PROGRAM_ID,
+   699→      poolAddress: rv.poolAddress,
+   700→      lastSwapUnixTs: lastSwap.lastSwapUnixTs,
+   701→      issuedSlot,
+   702→      slotHash,
+   703→    });
+   704→    const { signature: attestationSignature, oraclePublicKey } =
+   705→      await opts.attestationSource.signAttestation(attestationMessage);
+   706→
+   707→    const phase2 = buildEvaluatePoolPhase2Ix({
+   708→      scannerProgramId: this.client.graveScannerProgramId,
+   709→      ammProgramId: rv.ammProgramId,
+   710→      poolAddress: rv.poolAddress,
+   711→      msg: attestationMessage,
+   712→      writer: opts.salvageIxInput.salvor,
+   713→    });
+   714→
+   715→    const computeIxs = await this.computeIxsFor(opts.feePrice);
+   716→    // DYNAMIC INDEX PIN: precompile references the phase-2 ix at its
+   717→    // FINAL transaction index (compute ixs shift it — F3).
+   718→    const scannerIxIndex = computeIxs.length + 1;
+   719→    const precompileIx = buildEd25519VerifyInstruction({
+   720→      signature: attestationSignature,
+   721→      oraclePublicKey,
+   722→      message: attestationMessage,
+   723→      scannerInstructionIndex: scannerIxIndex,
+   724→      messageAddressOffset: IX_DATA_MSG_OFFSET,
+   725→    });
+   726→    const salvageIx = buildSalvagePoolIx(opts.salvageIxInput);
+   727→
+   728→    const tx = new Transaction();
+   729→    for (const ix of computeIxs) tx.add(ix);
+   730→    tx.add(precompileIx);
+   731→    tx.add(phase2);
+   732→    tx.add(salvageIx);
+   733→    // Assert the pin matches the assembled layout before returning.
+   734→    if (scannerIxIndex !== computeIxs.length + 1 || tx.instructions[scannerIxIndex] !== phase2) {
+   735→      throw new Error("attestation index pin drifted from the assembled transaction layout");
+   736→    }
+   737→
+   738→    return {
+   739→      kind: "certify-and-salvage",
+   740→      tx,
+   741→      scannerIxIndex,
+   742→      salvageIxIndex: scannerIxIndex + 1,
+   743→      attestationMessage,
+   744→      attestationSignature,
+   745→      issuedSlot,
+   746→      feeMicroLamportsPerCu: opts.feePrice,
+   747→      computeUnitLimit: this.policy.computeUnitLimit,
+   748→      snapshotSummary: {
+   749→        merkleRoot: opts.snapshot.tree.root(),
+   750→        totalSupply: BigInt(opts.snapshot.snapshot.totalSupply.toString(10)),
+   751→        salvorLpAmount: BigInt(opts.salvageIxInput.salvorLpAmount.toString()),
+   752→        holderCount: opts.snapshot.snapshot.holders.length,
+   753→        snapshotSlot: opts.snapshot.snapshotSlot,
+   754→      },
+   755→      minQuoteOutputLamports: opts.estimate.minQuoteOutputLamports ?? 0n,
+   756→      route: opts.route,
+   757→    };
+   758→  }
+   759→
+   760→  /**
+   761→   * Compute-budget instructions. The limit is ALWAYS set exactly once
+   762→   * (salvage bundles are large); the price only when > 0 — a zero fee
+   763→   * skips the price ix entirely (a zero priority fee trivially
+   764→   * satisfies the Charter). Any non-zero fee goes through the SDK's
+   765→   * charterGuard, which throws before anything reaches the network if
+   766→   * it exceeds the on-chain ceiling. The SDK call supplies ONLY the
+   767→   * price (no duplicate limit ix).
+   768→   */
+   769→  private async computeIxsFor(feePrice: BN): Promise<TransactionInstruction[]> {
+   770→    const ixs: TransactionInstruction[] = [
+   771→      ComputeBudgetProgram.setComputeUnitLimit({ units: this.policy.computeUnitLimit }),
+   772→    ];
+   773→    if (feePrice.gt(new BN(0))) {
+   774→      ixs.push(...(await this.client.computeBudgetIxs({ lamportsPerCu: feePrice })));
+   775→    }
+   776→    return ixs;
+   777→  }
+   778→
+   779→  // -------------------------------------------------- simulate + submit
+   780→
+   781→  /** Simulate a prepared transaction against current state. */
+   782→  async simulate(
+   783→    prepared: PreparedTransaction,
+   784→    identity?: import("./envelope.js").FleetOpportunityIdentity,
+   785→  ): Promise<PipelineOutcome> {
+   786→    // A valid recent blockhash is required for simulation; fetch one now.
+   787→    const { blockhash } = await this.client.connection.getLatestBlockhash();
+   788→    prepared.tx.recentBlockhash = blockhash;
+   789→    if (prepared.feeMicroLamportsPerCu.gt(new BN(0))) {
+   790→      // Belt-and-braces Charter guard at the gate (the SDK's
+   791→      // computeBudgetIxs already checked the attached price).
+   792→      const rejection = await this.client.charterGuard({
+   793→        feeLamportsPerCu: prepared.feeMicroLamportsPerCu,
+   794→      });
+   795→      if (rejection) {
+   796→        this.emit(
+   797→          "simulation-failed",
+   798→          { reason: rejection },
+   799→          { identity, failureClass: "charter-refusal" },
+   800→        );
+   801→        return { ok: false, stage: "failed", failureClass: "charter-refusal", reason: rejection };
+   802→      }
+   803→    }
+   804→    const sim = await simulateTransaction(this.client.connection, prepared.tx);
+   805→    if (!sim.ok) {
+   806→      // web3.js surfaces structured errors ({ InstructionError: [i,
+   807→      // { Custom: code }] }) — extract the custom code ourselves and
+   808→      // merge with the message-regex decoder so e.g. 7002 renders as
+   809→      // GraveVault::EligibilityCertExpired even without logs.
+   810→      const structured = extractCustomErrorCode(sim.raw.err);
+   811→      const decoded =
+   812→        sim.graveYieldError ??
+   813→        (structured !== null ? decodeGraveYieldErrorCode(structured) : undefined);
+   814→      this.emit(
+   815→        "simulation-failed",
+   816→        {
+   817→          reason: decoded
+   818→            ? `${decoded.program}::${decoded.name} (${decoded.hex}): ${decoded.description}`
+   819→            : JSON.stringify(sim.raw.err),
+   820→          logs: sim.logs ?? undefined,
+   821→        },
+   822→        { identity, failureClass: "simulation-failed" },
+   823→      );
+   824→      return {
+   825→        ok: false,
+   826→        stage: "failed",
+   827→        failureClass: "simulation-failed",
+   828→        reason: decoded?.name ?? "simulation error",
+   829→        simulation: sim,
+   830→      };
+   831→    }
+   832→    this.emit("simulated", { unitsConsumed: sim.unitsConsumed }, { identity });
+   833→    return { ok: true, stage: "simulated", prepared, simulation: sim };
+   834→  }
+   835→
+   836→  /**
+   837→   * Submit + confirm. Requires live mode — a hard THROW: dry-run and
+   838→   * simulation modes can never reach the network through this class,
+   839→   * not even by calling it directly.
+   840→   */
+   841→  async submit(opts: {
+   842→    prepared: PreparedTransaction;
+   843→    signer: Keypair;
+   844→    identity?: import("./envelope.js").FleetOpportunityIdentity;
+   845→  }): Promise<PipelineOutcome> {
+   846→    if (this.policy.mode !== "live") {
+   847→      this.emit(
+   848→        "error",
+   849→        {
+   850→          reason: `mode "${this.policy.mode}" never submits — flip to live with explicit operator enablement`,
+   851→        },
+   852→        { identity: opts.identity, failureClass: "config-invalid" },
+   853→      );
+   854→      throw new Error(
+   855→        `submit refused: mode "${this.policy.mode}" never submits — flip to live with explicit operator enablement`,
+   856→      );
+   857→    }
+   858→    const signature = await this.sender(this.client.connection, opts.prepared.tx, [opts.signer]);
+   859→    this.emit("submitted", { signature }, { identity: opts.identity });
+   860→    const receipt = await this.verifySalvageReceipt(opts.prepared, signature);
+   861→    if (receipt.ok) {
+   862→      this.emit(
+   863→        "confirmed",
+   864→        {
+   865→          signature,
+   866→          totalProceedsLamports: receipt.receipt?.totalProceedsLamports.toString(),
+   867→          salvorAmountLamports: receipt.receipt?.salvorAmountLamports.toString(),
+   868→        },
+   869→        { identity: opts.identity },
+   870→      );
+   871→      return {
+   872→        ok: true,
+   873→        stage: "confirmed",
+   874→        signature,
+   875→        receipt: receipt.receipt,
+   876→        prepared: opts.prepared,
+   877→      };
+   878→    }
+   879→    // The tx landed but the receipt read didn't resolve yet — report
+   880→    // submission; the Monitor owns the reconciliation retry.
+   881→    this.emit(
+   882→      "confirmed",
+   883→      { signature, receiptVerification: receipt.reason },
+   884→      { identity: opts.identity },
+   885→    );
+   886→    return { ok: true, stage: "confirmed", signature, prepared: opts.prepared };
+   887→  }
+   888→
+   889→  /** Read back the SalvageReceipt PDA after confirmation (best-effort; the Monitor re-checks). */
+   890→  private async verifySalvageReceipt(
+   891→    prepared: PreparedTransaction,
+   892→    _signature: string,
+   893→  ): Promise<
+   894→    { ok: false; reason: string } | { ok: true; receipt: NonNullable<PipelineOutcome["receipt"]> }
+   895→  > {
+   896→    try {
+   897→      // Deterministic: the salvage ix's 4th named account IS the receipt PDA.
+   898→      const salvageIx = prepared.tx.instructions[prepared.salvageIxIndex];
+   899→      if (!salvageIx) return { ok: false, reason: "salvage instruction missing from prepared tx" };
+   900→      const receiptPda = salvageIx.keys[3]?.pubkey;
+   901→      if (!receiptPda) return { ok: false, reason: "receipt PDA missing from salvage ix keys" };
+   902→      const info = await this.client.connection.getAccountInfo(receiptPda);
+   903→      if (!info) return { ok: false, reason: "salvage receipt not found yet" };
+   904→      const receipt = decodeSalvageReceipt(info.data);
+   905→      return {
+   906→        ok: true,
+   907→        receipt: {
+   908→          totalProceedsLamports: receipt.totalProceedsLamports,
+   909→          salvorAmountLamports: receipt.salvorAmountLamports,
+   910→          lpHolderAmountLamports: receipt.lpHolderAmountLamports,
+   911→          protocolAmountLamports: receipt.protocolAmountLamports,
+   912→          slot: receipt.issuedAtSlot,
+   913→        },
+   914→      };
+   915→    } catch (err) {
+   916→      return { ok: false, reason: `receipt verification failed: ${String(err)}` };
+   917→    }
+   918→  }
+   919→}
+   920→
+   921→/**
+   922→ * Extract a program custom error code from web3.js's structured
+   923→ * `InstructionError` shape: `{ InstructionError: [index, { Custom: n }] }`
+   924→ * (recursing one level into nested InstructionError forms). Returns
+   925→ * `null` when the shape does not carry one.
+   926→ */
+   927→export function extractCustomErrorCode(err: unknown): number | null {
+   928→  if (typeof err !== "object" || err === null) return null;
+   929→  const inner = (err as Record<string, unknown>)["InstructionError"];
+   930→  if (!Array.isArray(inner) || inner.length < 2) return null;
+   931→  let node: unknown = inner[1];
+   932→  for (let depth = 0; depth < 4 && typeof node === "object" && node !== null; depth++) {
+   933→    const rec = node as Record<string, unknown>;
+   934→    const custom = rec["Custom"];
+   935→    if (typeof custom === "number") return custom;
+   936→    const nested = rec["InstructionError"];
+   937→    if (Array.isArray(nested) && nested.length >= 2) {
+   938→      node = nested[1];
+   939→      continue;
+   940→    }
+   941→    break;
+   942→  }
+   943→  return null;
+   944→}
+   945→
+   946→/**
+   947→ * Route validation — route data is UNTRUSTED until these hold:
+   948→ *   * mints match the conversion the salvage performs;
+   949→ *   * the quote's slippage bps ≤ the effective ceiling (tighten-only);
+   950→ *   * the route accounts include the vault's WSOL destination
+   951→ *     (the on-chain vetting requires it — and the vault's own accounts
+   952→ *     must not be abused as intermediate hop custody accounts);
+   953→ *   * the expected floor is achievable: quoted out ≥ the estimator's
+   954→ *     floor (with the quote's own slippage already applied upstream).
+   955→ */
+   956→export function validateRouteForSalvage(
+   957→  quote: RouteQuote,
+   958→  expect: {
+   959→    inputMint: PublicKey;
+   960→    outputMint: PublicKey;
+   961→    expectedOutLamports: bigint;
+   962→    vaultAuthority: PublicKey;
+   963→    vaultWsolAta: PublicKey;
+   964→  },
+   965→): string | null {
+   966→  if (quote.inputMint !== expect.inputMint.toBase58()) {
+   967→    return `route input mint ${quote.inputMint} != pool memecoin ${expect.inputMint.toBase58()}`;
+   968→  }
+   969→  if (quote.outputMint !== expect.outputMint.toBase58()) {
+   970→    return `route output mint ${quote.outputMint} != WSOL ${expect.outputMint.toBase58()}`;
+   971→  }
+   972→  if (quote.outAmount < expect.expectedOutLamports) {
+   973→    return `route quote out ${quote.outAmount} below the estimator's floor ${expect.expectedOutLamports}`;
+   974→  }
+   975→  const includesDestination = quote.routeAccounts.some(
+   976→    (a) => a.pubkey.equals(expect.vaultWsolAta) && a.isWritable,
+   977→  );
+   978→  if (!includesDestination) {
+   979→    return `route accounts do not include the vault WSOL destination ${expect.vaultWsolAta.toBase58()}`;
+   980→  }
+   981→  return null;
+   982→}
+   983→
+   984→/** Re-export for bots that decode receipts directly. */
+   985→export { decodeSalvageReceipt, salvageReceiptPda, eligibilityCertPda, decodeGraveYieldError };
+   986→

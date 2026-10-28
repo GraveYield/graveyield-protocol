@@ -1,0 +1,141 @@
+# GraveYield shared worklog
+
+Recreated 2026-10-28 (W1 session). Prior entries (Tasks 0–12, recorded in the
+pre-reset workspace) are preserved in the engagement record via Handoff Vol IV
+§2.3; the workspace was hard-reset again before this session opened, so this
+file restarts at Task W1-0. The upload `GraveYield_Engineering_Handoff_PreW1_2026-10-28_Volume_IV.md`
+is the authoritative handoff.
+
+---
+Task ID: W1-0
+Agent: Z.ai main session (sethoshi.eth engagement)
+Task: Session open — read Handoff Vol IV; verify workspace; clone repos; verify heads
+
+Work Log:
+- Workspace found hard-reset: /home/z/my-project contained only download/README.md and the uploaded handoff Vol IV. No repos, no worklog, no keys/ (devnet payer key lost with the reset — W1 does not need it: local validator + fresh local keys only).
+- Cloned graveyield-protocol, grave-indexer, salvor-bots, graveyield-console from https://github.com/GraveYield (public, anonymous clone). Exit 0.
+- Head verification vs Vol IV §3.1: protocol 5a02e47 ✓, indexer e9109e6 ✓, salvor-bots cefbed0 ✓, console 8d9dc3e ✓ (all match).
+- grave-indexer submodule vendor/protocol initialized.
+
+Stage Summary:
+- Recovery anchors: Vol IV + repositories — sufficient, as designed.
+- Proceeding to W1 step 0 (mandated inspection, C1–C7, D5).
+---
+Task ID: W1-1b
+Agent: Explore (admin tool + SDK surface)
+Task: Extract exact TS/Node surface (protocol_admin.mjs, @graveyield/sdk, ops/, adversary/, indexer/, snapshotter/) needed to drive the real SDK against a local solana-test-validator.
+Work Log:
+- Read scripts/devnet/protocol_admin.mjs in full (subcommands, flags, ix builders, decodeProtocolConfig offsets, drill steps, error table) — it does NOT import the SDK; it hand-rolls Anchor ixs from @solana/web3.js only.
+- Read root package.json, sdk/package.json, pnpm-workspace.yaml, .nvmrc, scripts/devnet/package.json, sdk/tsconfig.json: pnpm workspace, Node >=24, web3.js pinned 3.1.1 via root pnpm override.
+- Read sdk/src/index.ts + every re-exported module: client.ts, instructions.ts, certifyAndSalvage.ts, salvagePool.ts, lastSwapAttestation.ts (112B C1 layout), launchPriceAttestation.ts (168B C2 layout), snapshot.ts, merkle.ts, pdas.ts, accountDecoders.ts, errors.ts, priorityFee.ts, web3compat.ts, borsh.ts, discriminators.ts, simulation.ts, types.ts, raydiumV4(+Constants).ts.
+- Read sdk/test/devnetSmoke.test.ts + fakeRpc.ts (env-gated DEVNET_RPC_URL pattern; in-memory account encoders + EvaluatePoolFakeRpc).
+- Confirmed build path: `pnpm -r build` → sdk `tsc -p tsconfig.json` → sdk/dist; sdk test script uses node:test + tsx. sdk/dist and node_modules currently absent (install needed).
+- Summarized ops/ (HealthRegistry, AlertManager, VaultObserver, MerkleService, IndexerService, ScenarioRunner SC-01/02/03, CLI bin graveyield-ops) and adversary/ (15 threat-class taxonomy + 7 node:test battery suites with offline synth helpers).
+- Checked snapshotter/: lib-only Rust crate (no [[bin]], no main.rs, no CLI RPC arg — RpcLpAccountSource::new(RpcClient) instead); artifact = deterministic JSON via SnapshotArtifact::to_json/to_json_pretty/from_json (format_version 1). indexer/ is a TS package, NOT a Rust crate.
+- Verified no update_protocol_config builder exists in SDK or protocol_admin.mjs (only the Rust instruction + SDK discriminator constants); oracle registration would need a hand-rolled ix (scanner params struct captured).
+Stage Summary:
+- protocol_admin.mjs: cmds init-scanner/init-vault/init-all/pause/check/drill; program IDs CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54 (scanner) / Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg (vault); NO update_protocol_config/oracle registration; drill = init-assert → pause → assert → intruder-must-revert-6000/7000 → unpause; error table covers 6000/6001/6010/6015/6016/6034/7000-7003 only.
+- SDK @graveyield/sdk 0.2.0 ESM, exports "." → dist/index.js; GraveYieldClient with 8 top-level ops; IDL-free builders (disc = sha256("global:name")[0..8]); C1 msg 112B (amm@0, pool@32, ts@64 i64, slot@72 u64, slotHash@80..112), precompile msg offset 72 in scanner ix; C2 msg 168B (amm@0,pool@32,base@64,quote@96,firstSwapSlot@128,firstSwapUnixTs@136 i64,priceQ64x64@128..160? no: u128@144,issuedSlot@160), offset 152 in record_launch_price ix.
+- Errors: full table 6000-6034 + 7000-7021 in sdk/src/errors.ts (decodeGraveYieldError/Error); key ones 6024/6025/6026 attestation, 7002/7003/7010/7018 vault.
+- PDAs: 12 helpers in pdas.ts, seeds protocol_config/eligibility_anchor/eligibility_cert/launch_price/pool_registry/salvage_receipt/lp_holder_pool/claim_record/protocol_treasury/vault_authority/vault_sol_holding.
+- Rehearsal script scripts/devnet/local_rehearsal.sh: keygen deployer+intruder → solana-test-validator --reset --warp-slot 1 on 127.0.0.1:8899 → airdrop 10 → deploy_devnet.sh → init-all → drill both programs.
+---
+Task ID: W1-1c
+Agent: Explore (custody runbook + salvor APIs)
+Task: Read-only recon — extract Oracle-Custody registration procedure (grave-indexer) and salvor-bots fleet-core/monitor/fleet-ops executor APIs for external Node driving.
+Work Log:
+- Read docs/ORACLE_CUSTODY.md fully (4-step procedure, 0600/offline keygen red lines, ORACLE_KEY_FILE/PAYER_KEY_FILE conventions, verify-path acceptance = 13/13 PASS 0 skipped, 6026→accept flip).
+- Read src/evidencePath.ts (903 lines) fully: 13-case matrix (7 program-live + 6 verifier-live), expectations helpers (errorCode / errorFamily / failedCheck / failedCheckAny), simulateTx + decodeCustomCode, buildCustomPrecompileIx raw ed25519 precompile builder (sig offset pin 48, shifted 56 case).
+- Read src/sign.ts fully: OracleSigner, resolveOracleSigner (ORACLE_KEY_FILE > ACTIVITY_ORACLE_KEY), resolvePayerKeypair (PAYER_KEY_FILE, null→ephemeral), signAttestationMessage (112B), signLaunchPriceMessage (168B via SDK LAUNCH_PRICE_MSG_LEN), generateDisposableOracleSigner.
+- Read src/config.ts: full PipelineConfig env table (DISCOVERY_RPC_URL, DEVNET_RPC_URL, SCANNER/VAULT_PROGRAM_ID overrides, MAX_POOLS_PER_SCAN, SIGNATURE_SCAN_LIMIT, staleness/freshness, DATA_DIR, ORACLE_KEY_FILE, ACTIVITY_ORACLE_KEY, ORACLE_IS_REGISTERED), parseOracleSeedFromFilePayload (64B keygen array / 32B seed / {seed_base58}).
+- Extracted exact update_protocol_config borsh shape from programs/grave-scanner/src/instructions/update_protocol_config.rs + programs/grave-vault/tests/scanner_windows_fork.rs (scanner_update_config_ix): disc(8)+6×None+2 oracle Options; both Some = 80 bytes; accounts [protocol_config PDA mut, authority signer]; config offsets activity_oracle@123, launch_price_oracle@155 (accountDecoders.ts).
+- Read salvor-bots root package.json (= @graveyield/sdk 0.2.0, ESM, web3.js ^3.1.1 pinned 3.1.1 via override, pnpm@9.12.0, node >=24), pnpm-workspace.yaml (7 packages incl root).
+- Read package.json for scout/fleet-core/monitor/fleet-ops: names, main/exports → ./dist/index.js, private, workspace:* deps, build scripts; tsconfig NodeNext/ESM.
+- Read fleet-core source: pipeline.ts (ExecutionPipeline prepare/simulate/submit, PipelineOptions, AttestationSource/LocalAttestationSource, PreparedTransaction, PipelineOutcome, validateRouteForSalvage, extractCustomErrorCode), policy.ts (ExecutionMode ladder, LiveEnablement, validatePolicy hard gate at construction, planFees, DEFAULT_TUNABLES), lifecycle.ts (15 states + transition map + LifecycleWalker), store.ts (FleetStore, InMemoryFleetStore, admitDelivery at-most-once), envelope.ts (identity triple, opportunityKey, deliveryIdOf, buildEnvelope/validateEnvelope), estimator.ts, revalidate.ts, route.ts (RouteAdapter/JupiterV6RouteAdapter/RouteError), raydiumAccounts.ts (13-account derivation offsets), events.ts (FailureClass taxonomy, FleetEventType, sinks).
+- Read monitor/src/monitor.ts fully: FleetMonitor, reconcile(identityKey, bot, signature) → salvageReceiptPda(vaultProgramId, pool) read + 40/40/20 ±1 lamport shareMatches + sumsOk + reportedOk → Reconciliation status receipt-verified/anomaly/missing/cert-gone/chain-unreadable; checkCert; diagnose codes.
+- Read fleet-ops: runner.ts (FleetRunner schedules + health/alerts), cli.ts (wireFleet: buildScout(loadScoutConfig) + FleetMonitor{botId:"fleet-ops", stale 24h, grace 10m, maxAttempts 5} sharing scout.client, bridge sink, JsonlEventSink, AlertManager dedup), index.ts exports.
+- Read fleet-core/test/helpers.ts + world.ts: FakeConnection surface (getAccountInfo, getProgramAccounts w/ dataSize+memcmp, getSignaturesForAddress, getTransaction, getSlot, getBlock, getEpochInfo, getLatestBlockhash, simulateTransaction) + fixture encoders + fakeSend — defines what a REAL Connection must provide.
+- Checked importability: NO dist/ and NO node_modules anywhere (salvor-bots, packages, graveyield-protocol/sdk, grave-indexer) — all packages need pnpm install + build before file: imports work; all ESM-only ("type":"module", exports import-only, NodeNext); web3.js ^3.1.1 everywhere incl graveyield-protocol/sdk 0.2.0 → version-compatible.
+Stage Summary:
+- Oracle custody: 4 steps (offline keygen 0600 → update_protocol_config via raw borsh (SDK has no client method): 8B sha256("global:update_protocol_config") disc + 6×Option::None tag 0x00 + Option tags (1+32B pubkey each), both oracles = 80B, accounts = scanner ["protocol_config"] PDA (mut) + authority signer (multisig PDA on mainnet, local authority key on localnet) → export ORACLE_KEY_FILE → PAYER_KEY_FILE=… bin/grave-indexer.mjs verify-path; acceptance = canonical case flips 6026→accepted, 13/13 PASS 0 skipped; env ORACLE_IS_REGISTERED=true afterwards; scanner ProtocolConfig layout: activity_oracle@123..155, launch_price_oracle@155..187.
+- 13-case matrix: program-live (via record_launch_price): missing-precompile→6024, tampered-signature→precompile, non-canonical-offsets→6025 (sig@56≠48), unauthorized-signer→6026, malformed-msg-length→anchor-decode, canonical-bundle-program→6026-or-accept, phase1-precondition→anchor-decode; verifier-live: canonical-bundle-verifier, tampered-binding, future-timestamp, stale-slot, slot-hash-mismatch, replayed-evidence; exact-code assertion = outcome.decoded.code === expectation.errorCode (decodeGraveYieldErrorCode family) / failedCheck ids for verifier layer.
+- sign.ts: signAttestationMessage(signer, msg) 112B (32 amm + 32 pool + 8 lastSwapTs + 8 issuedSlot + 32 slotHash); signLaunchPriceMessage 168B (32+32+32+32+8+8+8+8: amm, pool, base, quote, firstSwapSlot, firstSwapTs, price q64x64, issuedSlot); tweetnacl detached; resolvePayerKeypair reads PAYER_KEY_FILE only (64B/32B JSON array or {seed_base58}), returns null when unset.
+- fleet-core driving from external Node: ExecutionPipeline({client: GraveYieldClient, policy: ExecutionPolicy, liveEnablement, routeAdapter, eventSink, txSender?, now?}); prepare({envelope, salvor, attestationSource?}) → simulate(prepared) → submit({prepared, signer}) — submit throws unless policy.mode==="live" AND validatePolicy saw LiveEnablement{enabled:true, acknowledgedBy} at construction; dry-run/simulation never submit. StrategyExecutor (strategy.ts) = full loop with InMemoryFleetStore admission (admitDelivery) + LifecycleWalker.
+- 15 lifecycle states: received, duplicate-suppressed, revalidating, rejected-stale, rejected-economics, lease-waiting, preparing, simulating, simulation-failed, ready, submitting, submitted, confirmed, failed-terminal, reported.
+- Monitor: FleetMonitor({client, config{botId, staleAfterMs, verificationGraceMs, maxAttemptsPerIdentity, now?}, sink}); reconcile(identityKey "cluster|amm|pool", bot, signature) reads salvageReceiptPda(graveVaultProgramId, pool), asserts sum legs == total and each leg within 1 lamport of 4000/4000/2000 bps, cross-checks executor-reported receipt; returns Reconciliation{status, detail{sumsOk, sharesOk, reportedOk, expectedSharesBps}, receipt{...}}. Monitor has NO signer.
+- fleet-ops wireFleet(config{stateDir, scoutPollMs 5m, monitorPollMs 60s, alertDedupMs 30m}) → {runner, health, alerts}: builds Scout (loadScoutConfig env) + FleetMonitor sharing scout.client; bridge sink scouts→monitor.observeScoutEvent; JSONL trails in stateDir.
+- Importability: all salvor packages + SDK are ESM-only NodeNext with "exports" → ./dist/index.js; web3.js ^3.1.1 (root pnpm override pins 3.1.1) matching graveyield-protocol/sdk 0.2.0 and grave-indexer → compatible; BUT nothing is built (no dist/, no node_modules in any repo) — must pnpm install + pnpm -r build (root SDK build first: fleet-core build script = "pnpm -w run build && tsc") before file: imports from an external repo work.
+---
+Task ID: W1-1a
+Agent: Explore (fork fixture mechanics)
+Task: Extract precise operational facts (fixtures, ELFs, VM setup, program IDs, salvage/CPI semantics) needed to design a local solana-test-validator lifecycle rehearsal harness.
+Work Log:
+- Read scripts/fetch_v4_fork_fixtures.mjs in full (742 lines): accounts, ELFs, env vars, output paths, manifest structure, cross-validation proofs.
+- Read tests/README.md (fork harness docs: VM, forging policy, setup/run), programs/grave-vault/Cargo.toml (dev-deps: solana-program-test 2.3 / solana-sdk 2.3 / proptest / snapshotter).
+- Read raydium_v4_fork.rs lines 1-640 (fixture loading, ForkHarness::try_new genesis, program registration, salvage ix builder, remaining-accounts layout) + test fn list.
+- Read full_lifecycle_fork.rs lines 1-630 (PoolEnv, add_elf explicit bpf_loader registration, build_genesis, claim_side_genesis, start()) + PoolEnv::load / scanner_remaining.
+- Read jupiter_v6_stub (Cargo.toml + src/lib.rs): declare_id JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4, 25-account contract, V4 swapBaseIn tag 9 CPI, error codes 6001-6006.
+- Read jupiter_conversion_fork.rs route builder (global:route disc + 25 accounts) and salvage wire format; grep for orientation_pool usage (pool 2 = manifest.orientation_pool, files *2.bin, serum_dex2.so).
+- Read vault src/constants.rs (program IDs, AmmInfo offsets, withdraw tag 4, 13 remaining accounts, dust default 666_666), src/instructions/salvage_pool.rs (pre-flight, orientation derivation, dust gate, route vetting, slippage ceiling), src/cpi/jupiter.rs (verbatim forward, invoke_signed vault_authority, 7016).
+- Read Anchor.toml, rust-toolchain.toml, scripts/check-toolchain.sh, scripts/build_fork_harness.sh, scripts/devnet/local_rehearsal.sh (existing solana-test-validator rehearsal pattern).
+- Confirmed tests/fixtures/ does not exist and is fully gitignored (.gitignore:55).
+Stage Summary:
+- Fixtures: fetched to programs/grave-vault/tests/fixtures/ (gitignored, currently absent). Pool 1 = 58oQCh… (SOL/USDC, coin=WSOL); pool 2 candidates AVs9TA…/HVNwzt… (pc=WSOL). 19 files pool1 (*2 pool2) + manifest.json. ELFs fetched: raydium_v4, serum_dex (+serum_dex2), spl_token, spl_ata. Vault/scanner/jupiter ELFs built locally via cargo build-sbf and copied into tests/fixtures/.
+- VM: solana-program-test 2.3.13 (not LiteSVM); pt.prefer_bpf(true); add_program(name) resolves tests/fixtures/<name>.so; full_lifecycle registers ELFs explicitly as bpf_loader executable accounts. Compute 1.4M CU, 64 acct lock limit.
+- Program IDs in VM: vault Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg, scanner CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54, Jupiter stub at real JUP6 id JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4, V4 675kPX9…, serum = market_program from AmmInfo@560.
+- Salvage path: Jupiter CPI NOT always required — dust gate `memecoin_received >= cfg.jupiter_dust_threshold_lamports` (salvage_pool.rs:457); below dust = valid no-conversion path (route_data len 0, ra len 0, dust recorded on receipt + sweep_dust). When active: route vetting (9 forbidden vault accounts + WSOL dest required), slippage ceiling gate, empty route_data reverts 7016.
+- Toolchain: solana 3.0.10, anchor 0.32.1, rust 1.91.1, node 24, pnpm 9 (check-toolchain.sh; rust check is presence-only).
+- Existing solana-test-validator precedent: scripts/devnet/local_rehearsal.sh boots validator (--reset --quiet --warp-slot 1), deploys via deploy_devnet.sh, requires canonical devnet keypairs (GY_DEVNET_KEYS, default ~/my-project/devnet-keys).
+
+---
+Task ID: W1-1
+Agent: Z.ai main session (step-0 mandated inspection, W1 requirement 1)
+Task: Walk Vol IV §9 reuse map; resolve C1–C7; settle D5; produce final stage matrix + constraint statement
+
+Work Log:
+- Delegated recon (3 Explore agents, records above): W1-1a fork/fixture mechanics, W1-1b admin+SDK surface, W1-1c custody+salvor APIs. All load-bearing §9 entries verified at current heads; extra facts: protocol_admin.mjs is SDK-free (hand-rolled Anchor ixs) and import-safe; SDK/web3.js pinned 3.1.1 everywhere; nothing is built (node_modules/dist absent everywhere).
+
+Step-0 verdicts (replacing Vol IV §10 draft / §11 DRAFT):
+
+- C1 (program identity vs keypair custody) → RESOLVED: loader path (a). Deploy ELFs with solana-test-validator loader flags at the exact NS-2 IDs; NO program keypairs needed; local_rehearsal.sh's exit-2 path is bypassed. Exact flag semantics to be verified empirically post-install (--help). Scanner/vault ELFs sourced by `solana program dump` from DEVNET (exact NS-2 bytes — strongest provenance); Raydium V4 + serum ELFs from fetch_v4_fork_fixtures.mjs (real mainnet bytes).
+- C2 (no toolchain) → D5 = (a) install toolchain: agave CLI 3.0.10 (validator + keygen + program dump), rustup 1.91.1 (plain cargo build for the snapshotter). No SBF build needed in the canonical pass (scanner/vault from devnet dump; conversion leg skipped by config — see C3) — cargo-build-sbf only required for the optional Jupiter-stub extension.
+- C3 (real Jupiter cannot run locally) → RESOLVED per fork precedent, NOT the stub: full_lifecycle_fork (the canonical lifecycle suite) runs with build_genesis(u64::MAX dust threshold) — the conversion leg SKIPPED BY CONFIG (salvage_pool.rs L457 dust gate), min_quote_output 0, empty route. Harness canonical pass mirrors this exactly (fork-proven shape, requirement 2 reuse). jupiter_v6_stub live-build recorded as an OPTIONAL extension, not shipped in W1. Boundary labeled in every run report.
+- C4 (Scout→executor seam missing) → RESOLVED as drafted: harness drives fleet-core ExecutionPipeline directly in mode:"live" (salvage-only path) with LiveEnablement{enabled:true, acknowledgedBy: owner authorization}; scout envelope constructed per envelope.ts v1; transport seam stays out of scope. KEY FINDING: assembleCertifyAndSalvageTx re-derives last-swap from V4 history fail-closed (pipeline.ts L687-695) — impossible against a fixture pool (no swap history that is also ≥90d stale) → cert is minted via the real SDK path (buildEvaluatePoolPhase2Ix + ed25519 precompile) as its own stage, salvage executes through fleet-core salvage-only. Attestation timestamps: lastSwapUnixTs synthetic-old (fork-precedented, full_lifecycle_fork pattern), issuedSlot + slotHash anchored to REAL local slots via SDK fetchSlotHash.
+- C5 (deriveLastSwapV4 ALT/v1 yield gap) → RESOLVED: harness never depends on the derivation for determinism; C1 attestations fed directly (112B layout from lastSwapAttestation.ts); indexer derivation path stays covered by its own suites; evaluatePool wiring smoke used as the discovery stage with tolerant assertion + label.
+- C6 (fixture logistics) → RESOLVED: reuse fetch_v4_fork_fixtures.mjs verbatim (plain node, no deps, RPC_URL env, rate-limited, cross-validating manifest). LP MINT SUPPLY RE-PIN: local lp_mint account = real lp_mint bytes with supply patched to the local holder set (Σ balances); all other pool accounts = real mainnet bytes untouched. Economic grounding: salvage burn amounts derived from manifest parsed.amm_lp_amount (floor(amm_lp_amount/10_000) each) so V4 withdraw yields meaningful proceeds — NOT from the (re-pinned) mint supply. Boundary labeled.
+- C7 (snapshotter as real binary) → RESOLVED: snapshotter is a lib-only crate (no bin, no main.rs; RpcLpAccountSource::new(RpcClient) programmatic entry). Add NEW bin target snapshotter/src/bin/grave-snapshotter-cli.rs (lib untouched) that runs the REAL SnapshotBuilder+SnapshotArtifact::seal against the local RPC and writes the artifact JSON. Root equality asserted between the Rust artifact and the SDK snapshot fleet-core feeds into salvage.
+
+- Additional stage-coverage decisions: (1) paused-salvage (7003) and tampered-supply (7018) adversarial cases run BEFORE the real salvage, proving atomic no-PDA-survives-revert; replayed-salvage registry-init failure runs after. (2) duplicate claim fails at ClaimRecord init (zero movement, fee only — lp_claim_fork L1569-1589); bad proofs → 7010; inflated payout → 7009. (3) 7002 expired-cert: no wall-clock fast-forward on a live validator; produced only if cert TTL minimum allows a short sleep, else labeled fork-covered (in-VM clock control) — decide at implementation. (4) Oracle registration = NEW register_oracle.mjs implementing the proven 80-byte scanner update_protocol_config layout (scanner_windows_fork.rs L575-598: disc+6×None+tag1+activity+tag1+launch_price, accounts [config mut, authority signer]) — no SDK builder exists (deliberate, per ORACLE_CUSTODY.md "governance action, not a pipeline action").
+
+Final stage matrix (harness stages, all real-ELF + real-TS-client):
+1 validator boot + ELF load at NS-2 IDs (loader flags; sha256 vs DEVNET.md pins) → 2 config initialize via SDK builders (vault dust=u64::MAX, fork-precedented) → 3 oracle registration via register_oracle.mjs (validates ORACLE_CUSTODY.md steps 1–2) → 4 discovery wiring smoke (SDK evaluatePool, tolerant, C5 label) → 5 record_launch_price via SDK (168B, launch price = current reserves price × 200 → 99.5% collapse, fork-precedented) → 6 evaluate_pool_phase_1 via SDK (112B) → EligibilityAnchorWritten → 7 compressed 2-epoch confirmation (--slots-per-epoch 32) + 6016-at-gap-1 exact-code assertion → 8 evaluate_pool_phase_2 via SDK → EligibilityCertIssued → 9 REAL snapshotter (Rust bin) + SDK root-equality assert → 10+11 salvage via fleet-core mode:"live" salvage-only (real V4 withdraw CPI on real pool bytes; conversion leg config-skipped — C3 label) → PoolSalvaged + SalvageCompleted → 12 settlement 40/40/20 ±1 assert (monitor) → 13 monitor.reconcile (file: import @graveyield/monitor) receipt-verified → 14 claim_lp_proceeds ×N from Rust artifact proofs (+7010/7009/dup-init negatives) → 15 sweep_dust positive + 7021 re-sweep negative → 16 pause/intruder/unpause drills via protocol_admin.mjs drill (reused verbatim).
+
+Constraint statement (smallest valid alternatives, all labeled in report): synthetic C1 timestamps (fork-precedented), synthetic-collapse launch price ×200 (fork-precedented), LP mint supply re-pinned to local holder set (economic grounding via amm_lp_amount), conversion leg config-skipped (canonical full_lifecycle shape; stub optional extension), 7002 likely fork-covered (no wall-clock travel), Scout→executor transport out of scope (W5/owner decision).
+
+Stage Summary:
+- Step 0 complete. All constraints resolved with fork-precedented smallest alternatives; no mock replaces real program execution anywhere; every boundary has a label plan. D5=(a) install toolchain; ELFs: devnet dump (scanner/vault) + fixture fetch (V4/serum) + none built.
+
+---
+Task ID: W1-2..W1-6
+Agent: Z.ai main session (sethoshi.eth engagement)
+Task: Handoff Vol IV §12 checklist items 3–7 + the owner's 5-task list: re-run the rehearsal harness, fix runtime issues until all 16 stages + adversarial battery pass, re-run existing suites, harness README + secret scan + worklog, commit + push + CI poll
+
+Work Log:
+- Tooling D5 completed: rustup 1.91.1 (pinned) installed earlier this session; agave CLI 3.0.10 installed via the tools/agave-install.sh runbook script; verified solana-test-validator 3.0.10 boots ONLY under the scripts/no_uring seccomp wrapper (RLIMIT_MEMLOCK container trap, DEVNET.md §4).
+- Prior-session blocker fixed: the validator boot rejected fused --account arguments (mapfile line-per-entry) — word-split each flag line into separate argv entries (lifecycle_rehearsal.sh).
+- Run 3 (logged at logs/rehearsal-run3.log, relaunches in place): fixed 13 runtime issues until DRIVER COMPLETE — all_pass=true with the production emergency-control drill green ([4/7]) and the JSON run report written (target/lifecycle-rehearsal/run-report-2026-10-28T10-25-59-701Z.json):
+  (1) drive_lifecycle --salvor-bots vs salvorBots arg spelling; (2) lib.mjs REPO_ROOT off-by-one (resolved to scripts/); (3) web3.js 3.x async-ification: Keypair.fromSecretKey/generate, Transaction.partialSign, Transaction.serialize, VersionedTransaction.sign, AddressLookupTableProgram.createLookupTable (async + returns [instruction, address] tuple); (4) BigInt-safe JSON for the run report + fleet-events sink + all error paths (web3.js 3.x err objects carry BigInt); (5) error-family classifier mirroring grave-indexer classifySim (GraveYield table 6000-6034/7000-7021 = custom; foreign custom code on the ed25519 precompile ix = precompile; on a program ix = anchor-decode); (6) A5 must sign the 111-byte truncated message (precompile then verifies; Anchor [u8;112] decode dies); (7) A10 expectation corrected by observation: phase_2 without an anchor reverts 3012 (Anchor AccountNotInitialized) before the handler's 6015 — semantics unchanged, recorded per red line 5; (8) scanner remaining accounts need the UNCX marker PDA [global_lp_tracker, pool] (6020 otherwise; locally absent = proven-unlocked path, fork layout PoolEnv::scanner_remaining); (9) loader_account_flags.txt was written BEFORE the holder-ATA dumps were appended — 0 LP holders loaded, snapshot completeness gate failed at 0 vs supply (moved dedupe+write after the holder section); (10) SLOT-HASH FINDING (F1): SDK.fetchSlotHash's getBlock(slot).blockhash NEVER equals the SlotHashes sysvar entry on agave 3.0.10 (probe_slothash.mjs) → 6030 on every SDK-sourced hash; the harness reads (slot,hash) pairs from the sysvar itself; (11) 1232-byte legacy packet limit FINDING (F2): the salvage ix (21 named + 13 V4 remaining accounts ≈ 1.4 kB) cannot fit — enforced at simulate AND send — the harness compiles the SAME instructions into VersionedTransaction v0 over a REAL local address lookup table (txSender injection + expectRevert viaAlt; ALT pre-warmed before the adversarial battery so creation costs never enter a zero-movement window); (12) MARKET NONCE FINDING (F3): the real SOL/USDC Serum v3 market stores vault_signer_nonce=1 (u64 LE @45) → non-canonical vault signer → fleet-core's canonical derivation failed closed; prepare_local_accounts.mjs re-pins the local market's nonce to the canonical bump + re-points both market vault owners (documented fixture adaptation; probe_vault_signer.mjs); (13) DUAL web3.js INSTANCE (salvor vs protocol copies) broke instanceof inside the salvor SDK's simulateTransaction — the run Connection now comes from the salvor checkout; plus the salvor SDK's simulateTransaction uses a web3.js-1.99 config-object overload that 3.x rejects (Invalid---
+Task ID: W1-6a
+Agent: Z.ai main session
+Task: Task 5 preparation — commits + push runbook staging (push pending fresh PAT)
+
+Work Log:
+- Commits (identity sethoshi.eth <55265644+sethoshi18@users.noreply.github.com> per §2.1):
+  graveyield-protocol fcb543c "feat(w1): Lifecycle Rehearsal Harness — one-command local end-to-end pass with adversarial battery" (13 files, +3102/−10: harness + README + 2 evidence probes + SDK ESM-require fix + snapshotter bin + devnet pkg tweetnacl);
+  salvor-bots 0ec8f1c "fix(sdk-mirror): buildSweepDustIx ESM require crash — sync with protocol sdk" (byte-identical mirror; required for protocol CI sdk-sync-check).
+- Both trees clean after commit (git status --porcelain = 0 entries each).
+- Push runbook staged at scripts/push_w1_2026-10-28.sh (identity gate sethoshi18/55265644 → GIT_ASKPASS env-only push → three-way head gate → API author check → CI listing); git-askpass.sh recreated (lost in the workspace reset — never stored in any repo).
+- Push NOT executed: the PAT transiting chat on 2026-10-28 was flagged for rotation (§5.1) and no fresh token is present in this session — the runbook push executes as soon as the owner supplies GH_TOKEN. No token material exists on disk.
+
+Stage Summary:
+- W1 is feature-complete and locally verified end-to-end; only the network push awaits the fresh owner PAT.

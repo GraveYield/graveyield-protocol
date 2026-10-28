@@ -1,0 +1,903 @@
+     1→// SPDX-License-Identifier: Apache-2.0
+     2→//
+     3→// Evidence-path verification — the Phase 2 acceptance harness.
+     4→//
+     5→// Runs the full verification matrix against the DEPLOYED devnet
+     6→// GraveScanner (DR-001: CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54)
+     7→// and against live chain data, producing a structured pass/fail report.
+     8→//
+     9→// LIVE PROGRAM-LEVEL CASES (via record_launch_price — the attestation
+    10→// prologue — precompile presence, precompile offset pinning and oracle
+    11→// authorization are SHARED code with evaluate_pool_phase_1/2, so the
+    12→// 6024/6025/6026 outcomes transfer verbatim to the C1 path):
+    13→//
+    14→//   1. missing-precompile      → AttestationMissing (6024)
+    15→//   2. tampered-signature      → rejected by the ed25519 PRECOMPILE
+    16→//                                itself (no GraveYield custom code)
+    17→//   3. non-canonical-offsets   → InvalidAttestationOffsets (6025)
+    18→//   4. unauthorized-signer     → AttestationOracleMismatch (6026)
+    19→//   5. malformed-msg-length    → Anchor decode failure (no custom code)
+    20→//   6. canonical-bundle        → reaches the authorization equality and
+    21→//                                reverts 6026 UNLESS the signing key IS
+    22→//                                the configured launch-price oracle
+    23→//                                (owner-gated, open item 9.5)
+    24→//   + phase1-precondition (observational): evaluate_pool_phase_1 on a
+    25→//     pool without a LaunchPrice PDA fails at account validation —
+    26→//     documenting the hard record_launch_price → phase1 ordering.
+    27→//
+    28→// LIVE VERIFIER-LEVEL CASES (EvidenceVerifier against real SlotHashes /
+    29→// ProtocolConfig data — the checks the oracle equality currently gates
+    30→// on chain):
+    31→//
+    32→//   7. tampered-binding        → ATTESTATION_BINDING (6027 analogue)
+    33→//   8. future-timestamp        → ATTESTATION_TIMESTAMP (6028 analogue)
+    34→//   9. stale-slot              → ATTESTATION_STALE (6029 analogue)
+    35→//  10. slot-hash-mismatch      → ATTESTATION_SLOT_HASH (6030 analogue)
+    36→//  11. replayed-evidence       → ATTESTATION_REPLAY (journal)
+    37→//  12. canonical-bundle        → verifier "oracle-gated" outcome (all
+    38→//                                properties proven; key equality is the
+    39→//                                single remaining gate)
+    40→//
+    41→// All signatures are produced by EPHEMERAL devnet keys generated inside
+    42→// the run; no key material is serialized into the report (reports carry
+    43→// public keys and signatures only). Simulations never persist state.
+    44→// The fee payer is loaded from PAYER_KEY_FILE when provided (owner-funded
+    45→// devnet key — custody rules in docs/ORACLE_PIPELINE.md); otherwise it is
+    46→// ephemeral and dies with the run. Reports carry only the payer's PUBLIC
+    47→// address.
+    48→// Real submission stays opt-in (SUBMIT=1) and is NOT exercised by the
+    49→// default run — see the "no live salvage until verified" gate.
+    50→
+    51→import {
+    52→  Connection,
+    53→  Keypair,
+    54→  PublicKey,
+    55→  Transaction,
+    56→  TransactionInstruction,
+    57→} from "@solana/web3.js";
+    58→import nacl from "tweetnacl";
+    59→import {
+    60→  GraveYieldClient,
+    61→  buildAttestationMessage,
+    62→  buildEd25519VerifyInstruction,
+    63→  buildLaunchPriceMessage,
+    64→  buildRecordLaunchPriceIx,
+    65→  buildLaunchPriceEd25519VerifyInstruction,
+    66→  decodeGraveYieldError,
+    67→  decodeGraveYieldErrorCode,
+    68→  fetchScannerProtocolConfig,
+    69→  scannerProtocolConfigPda,
+    70→  ATTESTATION_MSG_LEN,
+    71→  LAUNCH_PRICE_MSG_OFFSET,
+    72→  type DecodedGraveYieldError,
+    73→} from "@graveyield/sdk";
+    74→import { verifyEvidenceBundle, type VerificationCheckId, type VerifyResult } from "./verify.js";
+    75→import { ReplayJournal } from "./journal.js";
+    76→import {
+    77→  buildEvidenceBundle,
+    78→  buildEvidenceMessage,
+    79→  type BuildEvidenceBundleInput,
+    80→  type EvidenceBundle,
+    81→} from "./evidence.js";
+    82→import {
+    83→  generateDisposableOracleSigner,
+    84→  publicKeyFingerprint,
+    85→  resolvePayerKeypair,
+    86→  signAttestationMessage,
+    87→  signLaunchPriceMessage,
+    88→  type OracleSigner,
+    89→} from "./sign.js";
+    90→import type { Cluster } from "./provenance.js";
+    91→
+    92→export interface EvidencePathExpectation {
+    93→  result: "reject" | "accept";
+    94→  /** Expected GraveYield custom error (program-level cases). */
+    95→  errorCode?: number;
+    96→  errorName?: string;
+    97→  /** Expected verifier failed check (verifier-level cases). */
+    98→  failedCheck?: VerificationCheckId;
+    99→  /** Acceptable set — some failures surface at more than one stage
+   100→   *  (e.g. the binding echo fires at parse time OR at the verifier
+   101→   *  stage; both are the 6027 analogue). */
+   102→  failedCheckAny?: VerificationCheckId[];
+   103→  /** "custom" (GraveYield custom error) | "precompile" | "anchor-decode" | "none". */
+   104→  errorFamily?: "custom" | "precompile" | "anchor-decode" | "none";
+   105→}
+   106→
+   107→export interface EvidencePathCaseReport {
+   108→  caseId: string;
+   109→  layer: "program-live" | "verifier-live" | "journal";
+   110→  description: string;
+   111→  expectation: EvidencePathExpectation;
+   112→  observed: {
+   113→    simErr?: string | null;
+   114→    decoded?: { code: number; hex: string; name: string; program: string } | null;
+   115→    failedCheck?: string;
+   116→    note?: string;
+   117→  };
+   118→  pass: boolean;
+   119→  skipped?: boolean;
+   120→}
+   121→
+   122→export interface EvidencePathReport {
+   123→  cluster: Cluster;
+   124→  scannerProgramId: string;
+   125→  configuredActivityOracle: string | null;
+   126→  configuredLaunchPriceOracle: string | null;
+   127→  generatedAtUnixMs: number;
+   128→  /** Public fingerprint of the ephemeral devnet oracle used for signing. */
+   129→  ephemeralOracle: string;
+   130→  payerFunded: boolean;
+   131→  /** Public devnet address of the fee payer (public data, never a secret). */
+   132→  payerAddress: string;
+   133→  cases: EvidencePathCaseReport[];
+   134→  allPass: boolean;
+   135→}
+   136→
+   137→interface SimOutcome {
+   138→  err: string | null;
+   139→  logs: string[];
+   140→  decoded: DecodedGraveYieldError | undefined;
+   141→}
+   142→
+   143→/**
+   144→ * web3.js 3.x returns simulation errors as STRUCTURED objects with BigInt
+   145→ * fields (e.g. `{InstructionError: [0n, {Custom: 6024n}]}`), so the
+   146→ * `String(err)` form used under 1.x/1.99 ("custom program error: 0x1788")
+   147→ * no longer exists. Serialize structurally (BigInt-safe) for the report,
+   148→ * and extract the custom program code directly from the structure.
+   149→ */
+   150→function simErrToString(err: unknown): string | null {
+   151→  if (err === null || err === undefined) return null;
+   152→  if (typeof err === "string") return err;
+   153→  try {
+   154→    return JSON.stringify(err, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
+   155→  } catch {
+   156→    return String(err);
+   157→  }
+   158→}
+   159→
+   160→/** Depth-first search for a `{Custom: N}` / `{custom: N}` node (numbers or BigInts). */
+   161→function decodeCustomCode(err: unknown): number | undefined {
+   162→  const walk = (v: unknown): number | undefined => {
+   163→    if (Array.isArray(v)) {
+   164→      for (const x of v) {
+   165→        const hit = walk(x);
+   166→        if (hit !== undefined) return hit;
+   167→      }
+   168→      return undefined;
+   169→    }
+   170→    if (v && typeof v === "object") {
+   171→      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+   172→        if ((k === "Custom" || k === "custom") && (typeof val === "number" || typeof val === "bigint")) {
+   173→          return Number(val);
+   174→        }
+   175→        const hit = walk(val);
+   176→        if (hit !== undefined) return hit;
+   177→      }
+   178→    }
+   179→    return undefined;
+   180→  };
+   181→  return walk(err);
+   182→}
+   183→
+   184→async function simulateTx(
+   185→  connection: Connection,
+   186→  tx: Transaction,
+   187→  signers: Keypair[],
+   188→): Promise<SimOutcome> {
+   189→  const { blockhash } = await connection.getLatestBlockhash("finalized");
+   190→  tx.recentBlockhash = blockhash;
+   191→  tx.feePayer = signers[0]?.publicKey ?? (await Keypair.generate()).publicKey;
+   192→  tx.sign(...signers);
+   193→  const sim = await connection.simulateTransaction(tx);
+   194→  const rawErr: unknown = sim.value.err;
+   195→  const err = simErrToString(rawErr);
+   196→  const logs = sim.value.logs ?? [];
+   197→  // Decode order: (1) structured `{Custom: N}` from the error object,
+   198→  // (2) thrown-style message string, (3) program logs ("custom program
+   199→  // error: 0x…"). decodeGraveYieldErrorCode only recognizes codes in the
+   200→  // GraveYield tables, so unrelated custom codes stay `undefined`.
+   201→  const customCode = rawErr ? decodeCustomCode(rawErr) : undefined;
+   202→  const decoded =
+   203→    (customCode !== undefined ? decodeGraveYieldErrorCode(customCode) : undefined) ??
+   204→    (err ? decodeGraveYieldError(err) : undefined) ??
+   205→    (logs.length > 0 ? decodeGraveYieldError(logs.join("\n")) : undefined);
+   206→  return { err, logs, decoded };
+   207→}
+   208→
+   209→function classifySim(outcome: SimOutcome): { family: "custom" | "precompile" | "anchor-decode" | "none" } {
+   210→  if (outcome.decoded) return { family: "custom" };
+   211→  if (outcome.err === null) return { family: "none" };
+   212→  // A GraveYield custom error would have decoded; a precompile signature
+   213→  // failure surfaces as a non-custom program error (the precompile aborts
+   214→  // the transaction before the scanner runs).
+   215→  return { family: "precompile" };
+   216→}
+   217→
+   218→function programCase(
+   219→  caseId: string,
+   220→  description: string,
+   221→  expectation: EvidencePathExpectation,
+   222→  outcome: SimOutcome,
+   223→): EvidencePathCaseReport {
+   224→  const observed: EvidencePathCaseReport["observed"] = {
+   225→    simErr: outcome.err,
+   226→    decoded: outcome.decoded
+   227→      ? {
+   228→          code: outcome.decoded.code,
+   229→          hex: outcome.decoded.hex,
+   230→          name: outcome.decoded.name,
+   231→          program: outcome.decoded.program,
+   232→        }
+   233→      : null,
+   234→  };
+   235→  let pass = false;
+   236→  if (expectation.errorCode !== undefined) {
+   237→    pass = outcome.decoded?.code === expectation.errorCode;
+   238→  } else if (expectation.errorFamily === "precompile") {
+   239→    pass = outcome.err !== null && !outcome.decoded;
+   240→  } else if (expectation.errorFamily === "anchor-decode") {
+   241→    pass = outcome.err !== null && !outcome.decoded;
+   242→  } else if (expectation.result === "accept") {
+   243→    pass = outcome.err === null;
+   244→  }
+   245→  return { caseId, layer: "program-live", description, expectation, observed, pass };
+   246→}
+   247→
+   248→function synthAddress(seed: number): PublicKey {
+   249→  return new PublicKey(new Uint8Array(32).fill(seed));
+   250→}
+   251→
+   252→/**
+   253→ * Run the evidence-path verification matrix. See the module header for
+   254→ * the case catalogue. `oracle` (optional) supplies the devnet oracle
+   255→ * signer; when absent, an ephemeral key is generated for the run
+   256→ * (recommended — the key never leaves memory).
+   257→ */
+   258→export async function runEvidencePathVerification(opts: {
+   259→  connection: Connection;
+   260→  cluster: Cluster;
+   261→  scannerProgramId: PublicKey;
+   262→  vaultProgramId: PublicKey;
+   263→  oracle?: OracleSigner;
+   264→  /** Pre-funded fee payer (e.g. loaded from PAYER_KEY_FILE by the caller).
+   265→   *  When absent, the harness resolves PAYER_KEY_FILE from the env and
+   266→   *  falls back to an ephemeral payer (+ optional faucet airdrop). */
+   267→  payer?: Keypair;
+   268→  /** Attempt to fund the payer via devnet airdrop (no-op when pre-funded). */
+   269→  allowFaucet?: boolean;
+   270→  /** Injected clock for deterministic verifier tests. */
+   271→  nowUnixSeconds?: number;
+   272→}): Promise<EvidencePathReport> {
+   273→  const connection = opts.connection;
+   274→  const scannerProgramId = opts.scannerProgramId;
+   275→  const vaultProgramId = opts.vaultProgramId;
+   276→  const oracle = opts.oracle ?? (await generateDisposableOracleSigner());
+   277→
+   278→  // ---- Live on-chain configuration context
+   279→  let configuredActivityOracle: string | null = null;
+   280→  let configuredLaunchPriceOracle: string | null = null;
+   281→  try {
+   282→    const pda = scannerProtocolConfigPda(scannerProgramId);
+   283→    const cfg = await fetchScannerProtocolConfig(connection, pda);
+   284→    if (cfg) {
+   285→      configuredActivityOracle = cfg.activityOracle.toBase58();
+   286→      configuredLaunchPriceOracle = cfg.launchPriceOracle.toBase58();
+   287→    }
+   288→  } catch {
+   289→    // Report continues with nulls; the config-dependent cases note it.
+   290→  }
+   291→
+   292→  const cases: EvidencePathCaseReport[] = [];
+   293→  const nowUnixSeconds = opts.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
+   294→  // =====================================================================
+   295→  // Verifier-level cases — always runnable (RPC read-only), no funding.
+   296→  // =====================================================================
+   297→  const verifierCases = await runVerifierLevelCases({
+   298→    connection,
+   299→    cluster: opts.cluster,
+   300→    scannerProgramId,
+   301→    vaultProgramId,
+   302→    oracle,
+   303→    configuredActivityOracle,
+   304→    nowUnixSeconds,
+   305→  });
+   306→  cases.push(...verifierCases);
+   307→
+   308→  // =====================================================================
+   309→  // Program-level cases — need a funded payer for the `init` stage of
+   310→  // record_launch_price (account validation precedes the handler, so even
+   311→  // failing cases pay rent from the payer inside simulation).
+   312→  // =====================================================================
+   313→  const payer =
+   314→    opts.payer ??
+   315→    (await resolvePayerKeypair()) ??
+   316→    (await Keypair.generate());
+   317→  let payerFunded = (await connection.getBalance(payer.publicKey)) > 0;
+   318→  if (!payerFunded && opts.allowFaucet !== false) {
+   319→    try {
+   320→      await connection.requestAirdrop(payer.publicKey, 0.5 * 1_000_000_000);
+   321→      payerFunded = (await connection.getBalance(payer.publicKey)) > 0;
+   322→    } catch {
+   323→      payerFunded = false;
+   324→    }
+   325→  }
+   326→
+   327→  if (!payerFunded) {
+   328→    cases.push({
+   329→      caseId: "program-level-batch",
+   330→      layer: "program-live",
+   331→      description:
+   332→        "Program-level attestation cases (6024/6025/6026 live) — SKIPPED: no funded payer available for the record_launch_price init stage (owner action: fund a payer key file and export PAYER_KEY_FILE, then rerun).",
+   333→      expectation: { result: "reject", errorFamily: "custom" },
+   334→      observed: { note: "skipped — unfunded payer" },
+   335→      pass: true, // a skip is not a failure; the report marks it explicitly
+   336→      skipped: true,
+   337→    });
+   338→  } else {
+   339→    cases.push(...(await runProgramLevelCases({ connection, scannerProgramId, vaultProgramId, oracle, payer })));
+   340→  }
+   341→
+   342→  const nonSkipped = cases.filter((c) => !c.skipped);
+   343→  return {
+   344→    cluster: opts.cluster,
+   345→    scannerProgramId: scannerProgramId.toBase58(),
+   346→    configuredActivityOracle,
+   347→    configuredLaunchPriceOracle,
+   348→    generatedAtUnixMs: Date.now(),
+   349→    ephemeralOracle: publicKeyFingerprint(oracle.publicKey),
+   350→    payerFunded,
+   351→    payerAddress: payer.publicKey.toBase58(),
+   352→    cases,
+   353→    allPass: nonSkipped.every((c) => c.pass),
+   354→  };
+   355→}
+   356→
+   357→// ======================================================================
+   358→// Verifier-level cases
+   359→// ======================================================================
+   360→
+   361→async function runVerifierLevelCases(ctx: {
+   362→  connection: Connection;
+   363→  cluster: Cluster;
+   364→  scannerProgramId: PublicKey;
+   365→  vaultProgramId: PublicKey;
+   366→  oracle: OracleSigner;
+   367→  configuredActivityOracle: string | null;
+   368→  nowUnixSeconds: number;
+   369→}): Promise<EvidencePathCaseReport[]> {
+   370→  const { connection, cluster, scannerProgramId, vaultProgramId, oracle, nowUnixSeconds } = ctx;
+   371→  const reports: EvidencePathCaseReport[] = [];
+   372→  const journal = new ReplayJournal(null); // in-memory journal for the run
+   373→
+   374→  const nowSlot = Number(await connection.getSlot());
+   375→
+   376→  // Memoized slot-hash resolver: devnet public RPC rate-limits getBlock
+   377→  // hard, so the whole matrix shares one resolved slot + hash.
+   378→  let memo: { slot: number; hash: Uint8Array } | null = null;
+   379→  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+   380→  const memoResolver = async (
+   381→    slot: number,
+   382→  ): Promise<{ hash: Uint8Array | null; indeterminate: boolean }> => {
+   383→    if (memo && memo.slot === slot) return { hash: memo.hash, indeterminate: false };
+   384→    for (let attempt = 0; attempt < 6 && !memo; attempt++) {
+   385→      try {
+   386→        const block = await connection.getBlock(slot, { maxSupportedTransactionVersion: 0 });
+   387→        if (block?.blockhash) {
+   388→          memo = { slot, hash: new PublicKey(block.blockhash).toBytes() };
+   389→          return { hash: memo.hash, indeterminate: false };
+   390→        }
+   391→      } catch {
+   392→        // 429 / transient — pace and retry.
+   393→      }
+   394→      await sleep(2000);
+   395→    }
+   396→    return { hash: null, indeterminate: memo === null };
+   397→  };
+   398→
+   399→  // Issuance slot: a few slots back so the block is confirmed + indexed.
+   400→  let issuedSlot = Math.max(1, nowSlot - 8);
+   401→  let slotHash: Uint8Array | null = null;
+   402→  for (let back = 8; back <= 60 && !slotHash; back += 4) {
+   403→    issuedSlot = Math.max(1, nowSlot - back);
+   404→    const resolved = await memoResolver(issuedSlot);
+   405→    if (resolved.hash) slotHash = resolved.hash;
+   406→  }
+   407→  if (!slotHash) {
+   408→    // Cannot resolve any recent block — verifier cases needing hash
+   409→    // context are skipped rather than mis-reported.
+   410→    const skipCase = (id: string, description: string): EvidencePathCaseReport => ({
+   411→      caseId: id,
+   412→      layer: "verifier-live",
+   413→      description: `${description} — SKIPPED: no recent devnet block resolvable via RPC.`,
+   414→      expectation: { result: "reject" },
+   415→      observed: { note: "skipped — RPC indexing" },
+   416→      pass: true,
+   417→      skipped: true,
+   418→    });
+   419→    return [
+   420→      skipCase("canonical-bundle-verifier", "Verifier-level canonical bundle (oracle-gated)"),
+   421→      skipCase("tampered-binding", "Verifier rejects a bundle whose binding was tampered"),
+   422→      skipCase("future-timestamp", "Verifier rejects a future last-swap timestamp"),
+   423→      skipCase("stale-slot", "Verifier rejects a bundle issued far outside the SlotHashes window"),
+   424→      skipCase("slot-hash-mismatch", "Verifier rejects a wrong slot hash"),
+   425→      skipCase("replayed-evidence", "Journal rejects replayed identical evidence"),
+   426→    ];
+   427→  }
+   428→
+   429→  const poolAddress = synthAddress(0xa1); // synthetic pool for the report run
+   430→  const ammProgramId = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
+   431→  const baseMint = synthAddress(0xb1);
+   432→  const quoteMint = new PublicKey("So11111111111111111111111111111111111111112");
+   433→  const lastSwapUnixTs = nowUnixSeconds - 90 * 24 * 3600; // 90 days stale → the derelict shape
+   434→
+   435→  const canonical = buildEvidenceBundle({
+   436→    destination: {
+   437→      cluster,
+   438→      scannerProgramId,
+   439→      protocolConfigPda: scannerProtocolConfigPda(scannerProgramId),
+   440→    },
+   441→    poolIdentity: {
+   442→      ammProgramId: ammProgramId.toBase58(),
+   443→      poolAddress: poolAddress.toBase58(),
+   444→      baseMint: baseMint.toBase58(),
+   445→      quoteMint: quoteMint.toBase58(),
+   446→      lpMint: synthAddress(0xc1).toBase58(),
+   447→      coinVault: synthAddress(0xd1).toBase58(),
+   448→      pcVault: synthAddress(0xe1).toBase58(),
+   449→    },
+   450→    activity: { lastSwapUnixTs, lastSwapSlot: issuedSlot, lastSwapSignature: "", derivationCluster: cluster },
+   451→    issuance: { issuedSlot, slotHash, issuedAtUnixMs: Date.now() },
+   452→    signature: signAttestationMessage(
+   453→      oracle,
+   454→      buildEvidenceMessage({ ammProgramId, poolAddress, lastSwapUnixTs, issuedSlot, slotHash }),
+   455→    ),
+   456→    oraclePublicKey: oracle.publicKey,
+   457→  });
+   458→
+   459→  const verifyWithJournal = async (bundle: unknown, sharedJournal: ReplayJournal): Promise<VerifyResult> =>
+   460→    verifyEvidenceBundle(connection, cluster, bundle, {
+   461→      journal: sharedJournal,
+   462→      nowUnixSeconds,
+   463→      nowSlot,
+   464→      ...(ctx.configuredActivityOracle !== null
+   465→        ? { expectedOracle: new PublicKey(ctx.configuredActivityOracle) }
+   466→        : {}),
+   467→      slotHashResolver: memoResolver,
+   468→    });
+   469→
+   470→  // Mutation cases run with the run's OWN oracle substituted as the
+   471→  // configured oracle (expectedOracle) — the on-chain check order gates
+   472→  // every case at the oracle equality first, so without this substitution
+   473→  // each mutation would merely repeat the authorization gate instead of
+   474→  // isolating its own on-chain analogue. The canonical case above runs
+   475→  // against the LIVE configured oracle and therefore reports the real
+   476→  // deployment gate.
+   477→  const verifyMutation = async (bundle: unknown, sharedJournal: ReplayJournal): Promise<VerifyResult> =>
+   478→    verifyEvidenceBundle(connection, cluster, bundle, {
+   479→      journal: sharedJournal,
+   480→      nowUnixSeconds,
+   481→      nowSlot,
+   482→      expectedOracle: oracle.publicKey,
+   483→      slotHashResolver: memoResolver,
+   484→    });
+   485→
+   486→  const asReport = (
+   487→    caseId: string,
+   488→    description: string,
+   489→    expectation: EvidencePathExpectation,
+   490→    result: VerifyResult,
+   491→  ): EvidencePathCaseReport => {
+   492→    const firstFailure = result.firstFailure;
+   493→    const observed: EvidencePathCaseReport["observed"] = {
+   494→      ...(firstFailure !== undefined ? { failedCheck: firstFailure.id } : {}),
+   495→      ...(firstFailure?.detail !== undefined ? { note: firstFailure.detail } : {}),
+   496→    };
+   497→    let pass: boolean;
+   498→    if (expectation.failedCheck) {
+   499→      pass = firstFailure?.id === expectation.failedCheck;
+   500→    } else if (expectation.failedCheckAny) {
+   501→      pass = firstFailure !== undefined && expectation.failedCheckAny.includes(firstFailure.id);
+   502→    } else if (expectation.result === "accept") {
+   503→      pass = result.outcome === "verified";
+   504→    } else {
+   505→      pass = result.outcome === "rejected";
+   506→    }
+   507→    return { caseId, layer: "verifier-live", description, expectation, observed, pass };
+   508→  };
+   509→
+   510→  // 12. canonical bundle → all properties pass; oracle gate decides the
+   511→  //     final outcome ("verified" when the signer IS the configured
+   512→  //     oracle — e.g. after 9.5 resolution — otherwise "oracle-gated").
+   513→  const canonicalResult = await verifyWithJournal(canonical, journal);
+   514→  const oracleIsConfigured =
+   515→    ctx.configuredActivityOracle !== null &&
+   516→    ctx.configuredActivityOracle === oracle.publicKey.toBase58();
+   517→  reports.push(
+   518→    asReport(
+   519→      "canonical-bundle-verifier",
+   520→      "Verifier accepts a canonical bundle: every property (well-formedness, signature, binding, timestamp, slot sanity, SlotHashes hash, freshness, replay) proven against live chain data",
+   521→      oracleIsConfigured
+   522→        ? { result: "accept" }
+   523→        : { result: "reject", failedCheck: "ATTESTATION_ORACLE" },
+   524→      canonicalResult,
+   525→    ),
+   526→  );
+   527→
+   528→  // 7. tampered binding: re-point the bundle at a different pool while
+   529→  //    keeping the original (valid) attestation bytes. The echo rule
+   530→  //    fires at parse time (BUNDLE_WELLFORMED) — the 6027 analogue.
+   531→  const tamperedBinding = structuredClone(canonical);
+   532→  tamperedBinding.poolIdentity = { ...tamperedBinding.poolIdentity, poolAddress: synthAddress(0xa2).toBase58() };
+   533→  reports.push(
+   534→    asReport(
+   535→      "tampered-binding",
+   536→      "Verifier rejects a bundle whose pool binding disagrees with the signed message (6027 analogue; surfaces at the parse-time echo rule)",
+   537→      { result: "reject", failedCheckAny: ["BUNDLE_WELLFORMED", "ATTESTATION_BINDING"] },
+   538→      await verifyMutation(tamperedBinding, journal),
+   539→    ),
+   540→  );
+   541→
+   542→  // 8. future timestamp: signed attestation is valid but the claimed
+   543→  //    last-swap time postdates the clock — the on-chain 0 < ts <= now
+   544→  //    check must fail. Re-sign so only the timestamp property is wrong.
+   545→  const futureTs = nowUnixSeconds + 3600;
+   546→  const futureBundle = buildEvidenceBundle({
+   547→    ...bundleToInput(canonical),
+   548→    activity: { lastSwapUnixTs: futureTs, lastSwapSlot: issuedSlot, lastSwapSignature: "", derivationCluster: cluster },
+   549→    issuance: { issuedSlot, slotHash, issuedAtUnixMs: Date.now() },
+   550→    signature: signAttestationMessage(
+   551→      oracle,
+   552→      buildEvidenceMessage({ ammProgramId, poolAddress, lastSwapUnixTs: futureTs, issuedSlot, slotHash }),
+   553→    ),
+   554→    oraclePublicKey: oracle.publicKey,
+   555→  });
+   556→  reports.push(
+   557→    asReport(
+   558→      "future-timestamp",
+   559→      "Verifier rejects a future last-swap timestamp (6028 analogue)",
+   560→      { result: "reject", failedCheck: "ATTESTATION_TIMESTAMP" },
+   561→      await verifyMutation(futureBundle, journal),
+   562→    ),
+   563→  );
+   564→
+   565→  // 9. stale slot: issued far outside the ~512-slot SlotHashes window.
+   566→  const staleSlot = Math.max(1, nowSlot - 10_000);
+   567→  const staleBundle = buildEvidenceBundle({
+   568→    ...bundleToInput(canonical),
+   569→    activity: { lastSwapUnixTs, lastSwapSlot: staleSlot, lastSwapSignature: "", derivationCluster: cluster },
+   570→    issuance: { issuedSlot: staleSlot, slotHash, issuedAtUnixMs: Date.now() },
+   571→    signature: signAttestationMessage(
+   572→      oracle,
+   573→      buildEvidenceMessage({ ammProgramId, poolAddress, lastSwapUnixTs, issuedSlot: staleSlot, slotHash }),
+   574→    ),
+   575→    oraclePublicKey: oracle.publicKey,
+   576→  });
+   577→  reports.push(
+   578→    asReport(
+   579→      "stale-slot",
+   580→      "Verifier rejects a bundle whose issued_slot aged out of the SlotHashes window (6029 analogue)",
+   581→      { result: "reject", failedCheck: "ATTESTATION_STALE" },
+   582→      await verifyMutation(staleBundle, journal),
+   583→    ),
+   584→  );
+   585→
+   586→  // 10. slot-hash mismatch: right slot, wrong 32-byte hash.
+   587→  const wrongHash = new Uint8Array(32).fill(0x5a);
+   588→  const mismatchBundle = buildEvidenceBundle({
+   589→    ...bundleToInput(canonical),
+   590→    activity: { lastSwapUnixTs, lastSwapSlot: issuedSlot, lastSwapSignature: "", derivationCluster: cluster },
+   591→    issuance: { issuedSlot, slotHash: wrongHash, issuedAtUnixMs: Date.now() },
+   592→    signature: signAttestationMessage(
+   593→      oracle,
+   594→      buildEvidenceMessage({ ammProgramId, poolAddress, lastSwapUnixTs, issuedSlot, slotHash: wrongHash }),
+   595→    ),
+   596→    oraclePublicKey: oracle.publicKey,
+   597→  });
+   598→  reports.push(
+   599→    asReport(
+   600→      "slot-hash-mismatch",
+   601→      "Verifier rejects a bundle whose attested slot hash does not match the chain (6030 analogue)",
+   602→      { result: "reject", failedCheck: "ATTESTATION_SLOT_HASH" },
+   603→      await verifyMutation(mismatchBundle, journal),
+   604→    ),
+   605→  );
+   606→
+   607→  // 11. replay: the SAME canonical bundle verified twice against the
+   608→  //     same journal — the second pass must fail ATTESTATION_REPLAY.
+   609→  await verifyMutation(canonical, journal);
+   610→  const replayResult = await verifyMutation(canonical, journal);
+   611→  reports.push(
+   612→    asReport(
+   613→      "replayed-evidence",
+   614→      "Journal rejects replayed identical (msg, pool, issuedSlot) evidence on second observation",
+   615→      { result: "reject", failedCheck: "ATTESTATION_REPLAY" },
+   616→      replayResult,
+   617→    ),
+   618→  );
+   619→
+   620→  return reports;
+   621→}
+   622→
+   623→function bundleToInput(b: EvidenceBundle): BuildEvidenceBundleInput {
+   624→  return {
+   625→    destination: {
+   626→      cluster: b.destination.cluster,
+   627→      scannerProgramId: new PublicKey(b.destination.scannerProgramId),
+   628→      protocolConfigPda: new PublicKey(b.destination.protocolConfigPda),
+   629→    },
+   630→    poolIdentity: b.poolIdentity,
+   631→    activity: b.activity,
+   632→    issuance: {
+   633→      issuedSlot: b.issuance.issuedSlot,
+   634→      slotHash: Uint8Array.from(Buffer.from(b.issuance.slotHashHex, "hex")),
+   635→      issuedAtUnixMs: b.issuance.issuedAtUnixMs,
+   636→    },
+   637→    signature: Uint8Array.from(Buffer.from(b.attestation.signatureHex, "hex")),
+   638→    oraclePublicKey: new PublicKey(b.attestation.oraclePublicKey),
+   639→    discoveryFingerprint: b.discoveryFingerprint,
+   640→    createdAtUnixMs: b.createdAtUnixMs,
+   641→  };
+   642→}
+   643→
+   644→// ======================================================================
+   645→// Program-level cases (live, simulation-only, funded payer)
+   646→// ======================================================================
+   647→
+   648→async function runProgramLevelCases(ctx: {
+   649→  connection: Connection;
+   650→  scannerProgramId: PublicKey;
+   651→  vaultProgramId: PublicKey;
+   652→  oracle: OracleSigner;
+   653→  payer: Keypair;
+   654→}): Promise<EvidencePathCaseReport[]> {
+   655→  const { connection, scannerProgramId, vaultProgramId, oracle, payer } = ctx;
+   656→  const client = new GraveYieldClient({
+   657→    connection,
+   658→    cluster: "devnet",
+   659→    graveScannerProgramId: scannerProgramId,
+   660→    graveVaultProgramId: vaultProgramId,
+   661→  });
+   662→
+   663→  const ammProgramId = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
+   664→  const poolAddress = synthAddress(0xf1);
+   665→  const baseMint = synthAddress(0xf2);
+   666→  const quoteMint = new PublicKey("So11111111111111111111111111111111111111112");
+   667→  const firstSwapSlot = 1;
+   668→  const firstSwapUnixTs = Math.floor(Date.now() / 1000) - 90 * 24 * 3600;
+   669→  const launchPriceQ64x64 = (1n << 64n) / 1000n; // 0.001 quote-per-base
+   670→  const { blockhash } = await connection.getLatestBlockhash("finalized");
+   671→  const issuedSlotHint = Number(await connection.getSlot()) - 8;
+   672→
+   673→  // Canonical C2 attestation, signed by the EPHEMERAL devnet oracle.
+   674→  const c2Msg = buildLaunchPriceMessage({
+   675→    ammProgramId,
+   676→    poolAddress,
+   677→    baseMint,
+   678→    quoteMint,
+   679→    firstSwapSlot,
+   680→    firstSwapUnixTs,
+   681→    launchPriceQ64x64,
+   682→    issuedSlot: issuedSlotHint,
+   683→  });
+   684→  const c2Sig = signLaunchPriceMessage(oracle, c2Msg);
+   685→
+   686→  const recordIx = buildRecordLaunchPriceIx({
+   687→    scannerProgramId,
+   688→    ammProgramId,
+   689→    poolAddress,
+   690→    baseMint,
+   691→    quoteMint,
+   692→    launchPriceQ64x64,
+   693→    msg: c2Msg,
+   694→    payer: payer.publicKey,
+   695→  });
+   696→
+   697→  const canonicalPrecompile = buildLaunchPriceEd25519VerifyInstruction({
+   698→    signature: c2Sig,
+   699→    oraclePublicKey: oracle.publicKey,
+   700→    recordInstructionIndex: 1,
+   701→  });
+   702→
+   703→  const reports: EvidencePathCaseReport[] = [];
+   704→
+   705→  const runCase = async (
+   706→    caseId: string,
+   707→    description: string,
+   708→    expectation: EvidencePathExpectation,
+   709→    ixs: TransactionInstruction[],
+   710→  ): Promise<void> => {
+   711→    const tx = new Transaction();
+   712→    for (const ix of ixs) tx.add(ix);
+   713→    const outcome = await simulateTx(connection, tx, [payer]);
+   714→    reports.push(programCase(caseId, description, expectation, outcome));
+   715→  };
+   716→
+   717→  // 1. missing-precompile → 6024
+   718→  await runCase(
+   719→    "missing-precompile",
+   720→    "record_launch_price without a preceding ed25519 verify instruction reverts AttestationMissing (6024) — the shared attestation prologue",
+   721→    { result: "reject", errorCode: 6024, errorName: "AttestationMissing" },
+   722→    [recordIx],
+   723→  );
+   724→
+   725→  // 2. tampered-signature → precompile-level rejection (no custom code)
+   726→  const tamperedSig = Uint8Array.from(c2Sig);
+   727→  const flipIndex = 10;
+   728→  if (tamperedSig.length <= flipIndex) throw new Error("signature shorter than expected");
+   729→  tamperedSig.set([tamperedSig[flipIndex]! ^ 0x01], flipIndex);
+   730→  await runCase(
+   731→    "tampered-signature",
+   732→    "A corrupted 64-byte signature is rejected by the ed25519 precompile BEFORE the scanner program runs (runtime guarantees signature validity)",
+   733→    { result: "reject", errorFamily: "precompile" },
+   734→    [
+   735→      buildLaunchPriceEd25519VerifyInstruction({
+   736→        signature: tamperedSig,
+   737→        oraclePublicKey: oracle.publicKey,
+   738→        recordInstructionIndex: 1,
+   739→      }),
+   740→      recordIx,
+   741→    ],
+   742→  );
+   743→
+   744→  // 3. non-canonical-offsets → 6025. The signature is GENUINE and the
+   745→  //    message span canonical, but the signature itself sits at a shifted
+   746→  //    offset inside the precompile instruction data (56 instead of the
+   747→  //    pinned 48) — runtime-valid (the precompile verifies whatever sits
+   748→  //    at the declared offset), and the program's sig-placement pin fires
+   749→  //    InvalidAttestationOffsets BEFORE the oracle-equality check
+   750→  //    (attestation.rs verify_ed25519_offsets_at: sig/pk pins at lines
+   751→  //    288–307 precede the oracle check at 310). This makes the offset pin
+   752→  //    observable on devnet TODAY, independent of open item 9.5. Note the
+   753→  //    as-implemented order: a shifted MESSAGE span (data[151..324)) is
+   754→  //    instead gated behind the oracle equality — it reverts 6026 while
+   755→  //    the signing key is unregistered, and 6025 only post-9.5.
+   756→  const shiftedSigOffset = 56; // canonical is 48; zones stay disjoint (pk@16..48, sig@56..120)
+   757→  const shiftedPrecompile = buildCustomPrecompileIx({
+   758→    signature: c2Sig, // GENUINE signature over the canonical message span
+   759→    oraclePublicKey: oracle.publicKey.toBytes(),
+   760→    messageDataOffset: LAUNCH_PRICE_MSG_OFFSET,
+   761→    messageDataSize: 168,
+   762→    messageInstructionIndex: 1,
+   763→    signatureOffset: shiftedSigOffset,
+   764→  });
+   765→  await runCase(
+   766→    "non-canonical-offsets",
+   767→    "A runtime-valid precompile instruction whose SIGNATURE sits at a non-pinned offset (56 ≠ 48, genuine signature, canonical message span) reverts InvalidAttestationOffsets (6025) — the fail-closed sig-offset pin precedes oracle authorization",
+   768→    { result: "reject", errorCode: 6025, errorName: "InvalidAttestationOffsets" },
+   769→    [shiftedPrecompile, recordIx],
+   770→  );
+   771→
+   772→  // 4. unauthorized-signer → 6026 (the signer-authorization check itself)
+   773→  await runCase(
+   774→    "unauthorized-signer",
+   775→    "A fully valid attestation signed by a key that is NOT the configured oracle reverts AttestationOracleMismatch (6026) — signer authorization",
+   776→    { result: "reject", errorCode: 6026, errorName: "AttestationOracleMismatch" },
+   777→    [canonicalPrecompile, recordIx],
+   778→  );
+   779→
+   780→  // 5. malformed-msg-length → Anchor decode failure (no custom code)
+   781→  const truncatedData = recordIx.data.subarray(0, recordIx.data.length - 1);
+   782→  const truncatedIx = new TransactionInstruction({ ...recordIx, data: truncatedData });
+   783→  await runCase(
+   784→    "malformed-msg-length",
+   785→    "Instruction data one byte short of the canonical params layout fails Anchor deserialization (malformed-input rejection; no GraveYield custom code)",
+   786→    { result: "reject", errorFamily: "anchor-decode" },
+   787→    [
+   788→      buildLaunchPriceEd25519VerifyInstruction({
+   789→        signature: c2Sig,
+   790→        oraclePublicKey: oracle.publicKey,
+   791→        recordInstructionIndex: 1,
+   792→      }),
+   793→      truncatedIx,
+   794→    ],
+   795→  );
+   796→
+   797→  // 6. canonical-bundle → the full valid attestation reaches the
+   798→  //    authorization equality and reverts 6026 (the ONLY remaining gate,
+   799→  //    owner-gated by open item 9.5). When the configured oracle matches
+   800→  //    the signer, this case instead SUCCEEDS (init writes the PDA in
+   801→  //    simulation) — the full positive path.
+   802→  const configuredLaunch = await (async () => {
+   803→    try {
+   804→      const cfg = await fetchScannerProtocolConfig(
+   805→        connection,
+   806→        scannerProtocolConfigPda(scannerProgramId),
+   807→      );
+   808→      return cfg?.launchPriceOracle.toBase58() ?? null;
+   809→    } catch {
+   810→      return null;
+   811→    }
+   812→  })();
+   813→  const signerIsConfigured = configuredLaunch === oracle.publicKey.toBase58();
+   814→  await runCase(
+   815→    "canonical-bundle-program",
+   816→    "The canonical, correctly-signed C2 attestation traverses the entire on-chain path and is gated ONLY by the oracle-key equality (6026 while the key is unregistered; acceptance once registered — open item 9.5)",
+   817→    signerIsConfigured
+   818→      ? { result: "accept" }
+   819→      : { result: "reject", errorCode: 6026, errorName: "AttestationOracleMismatch" },
+   820→    [canonicalPrecompile, recordIx],
+   821→  );
+   822→
+   823→  // + phase1 precondition (observational): phase1 on a pool with no
+   824→  //   LaunchPrice PDA fails at account validation, before attestation.
+   825→  const c1Msg = buildAttestationMessage({
+   826→    ammProgramId,
+   827→    poolAddress,
+   828→    lastSwapUnixTs: firstSwapUnixTs,
+   829→    issuedSlot: issuedSlotHint,
+   830→    slotHash: new Uint8Array(32).fill(1),
+   831→  });
+   832→  const phase1Pair = client.buildPhase1Ix({
+   833→    ammProgramId,
+   834→    poolAddress,
+   835→    derivation: {
+   836→      lastSwapUnixTs: firstSwapUnixTs,
+   837→      slot: issuedSlotHint,
+   838→      signature: "",
+   839→    },
+   840→    slotHash: new Uint8Array(32).fill(1),
+   841→    signature: nacl.sign.detached(c1Msg, oracle.keypair.secretKey),
+   842→    oraclePublicKey: oracle.publicKey,
+   843→    writer: payer.publicKey,
+   844→  });
+   845→  await runCase(
+   846→    "phase1-precondition",
+   847→    "evaluate_pool_phase_1 requires a recorded LaunchPrice PDA (record_launch_price runs first); without one the transaction fails at account validation — documenting the hard evidence ordering",
+   848→    { result: "reject", errorFamily: "anchor-decode" },
+   849→    [phase1Pair.precompileIx, phase1Pair.phase1Ix],
+   850→  );
+   851→
+   852→  return reports;
+   853→}
+   854→
+   855→/**
+   856→ * Build a raw ed25519 precompile verify instruction with EXPLICIT offsets
+   857→ * (used by the non-canonical case). Layout: 1B count + 1B pad + 7×u16 LE
+   858→ * offsets at byte 2 + pubkey@16 + signature@48 — byte-identical to the
+   859→ * runtime's own builder (mirrored by attestation.rs / lastSwapAttestation.ts).
+   860→ * `signatureOffset` relocates the signature (default 48) so the case can
+   861→ * present a runtime-valid but program-non-canonical placement; the data
+   862→ * buffer grows to cover it and the sig/pk zones stay disjoint.
+   863→ */
+   864→function buildCustomPrecompileIx(opts: {
+   865→  signature: Uint8Array;
+   866→  oraclePublicKey: Uint8Array;
+   867→  messageDataOffset: number;
+   868→  messageDataSize: number;
+   869→  messageInstructionIndex: number;
+   870→  signatureOffset?: number;
+   871→}): TransactionInstruction {
+   872→  if (opts.signature.length !== 64) throw new Error("signature must be 64 bytes");
+   873→  if (opts.oraclePublicKey.length !== 32) throw new Error("oracle pubkey must be 32 bytes");
+   874→  const signatureOffset = opts.signatureOffset ?? 48;
+   875→  if (signatureOffset < 16 + 32 || signatureOffset + 64 > 0xffff) {
+   876→    throw new Error("signatureOffset must sit past the pubkey zone and fit u16");
+   877→  }
+   878→  if (signatureOffset < 48 && signatureOffset + 64 > 16 + 32) {
+   879→    throw new Error("sig zone would overlap the pubkey zone");
+   880→  }
+   881→  const dataLen = Math.max(16 + 32 + 64, signatureOffset + 64);
+   882→  const data = Buffer.alloc(dataLen);
+   883→  data[0] = 1;
+   884→  data[1] = 0;
+   885→  const w = (off: number, v: number) => data.writeUInt16LE(v, off);
+   886→  w(2, signatureOffset); // signature_offset (case-controlled; canonical 48)
+   887→  w(4, 0xffff); // signature_instruction_index = this instruction
+   888→  w(6, 16); // public_key_offset (canonical placement)
+   889→  w(8, 0xffff); // public_key_instruction_index = this instruction
+   890→  w(10, opts.messageDataOffset);
+   891→  w(12, opts.messageDataSize);
+   892→  w(14, opts.messageInstructionIndex);
+   893→  Buffer.from(opts.oraclePublicKey).copy(data, 16);
+   894→  Buffer.from(opts.signature).copy(data, signatureOffset);
+   895→  return new TransactionInstruction({
+   896→    programId: new PublicKey("Ed25519SigVerify111111111111111111111111111"),
+   897→    keys: [],
+   898→    data,
+   899→  });
+   900→}
+   901→
+   902→
+   903→

@@ -1,0 +1,702 @@
+     1→#!/usr/bin/env node
+     2→// drive_lifecycle.mjs — W1 Lifecycle Rehearsal Harness: the lifecycle +
+     3→// adversarial battery driver (stages 2–16 of Handoff Vol IV §10, final
+     4→// matrix in worklog Task W1-1).
+     5→//
+     6→// REAL-EXECUTION DISCIPLINE:
+     7→//   - every stage sends REAL transactions to the local validator through the
+     8→//     REAL TypeScript SDK client paths (GraveYieldClient + instruction
+     9→//     builders) — never in-process program invocations;
+    10→//   - the salvage executes through salvor-bots fleet-core ExecutionPipeline
+    11→//     in mode:"live" (first-ever real submit-path execution), with at-most-
+    12→//     once admission via InMemoryFleetStore;
+    13→//   - the snapshot is produced by the REAL Rust snapshotter bin
+    14→//     (target/debug/grave-snapshotter-cli) and cross-checked against the
+    15→//     SDK snapshot fleet-core feeds into the salvage;
+    16→//   - reconciliation runs salvor-bots monitor (file-path import);
+    17→//   - every adversarial case asserts the EXACT program error code (or a
+    18→//     classified family for non-custom failures, mirroring the
+    19→//     grave-indexer verify-path precedent) plus a before/after balance
+    20→//     invariant proving zero STATE movement (failed transactions pay the
+    21→//     real signature fee to the fee payer — recorded, never normalized
+    22→//     away; every other wallet, every token account, and the PDA set must
+    23→//     be bit-identical).
+    24→//
+    25→// Boundaries (labeled in the report): synthetic C1 timestamps
+    26→// (fork-precedented), synthetic-collapse launch price ×200 (fork-precedented),
+    27→// LP mint supply re-pinned to the local holder set (C6), conversion leg
+    28→// config-skipped (u64::MAX dust — canonical full_lifecycle_fork shape; C3),
+    29→// route-account shim for fleet-core's destination validation (unused by the
+    30→// skipped leg), fork-covered negatives (7002 expired-cert and 7009
+    31→// math-overflow — in-VM clock/registry control only; see README).
+    32→import { readFileSync, writeFileSync, existsSync } from "node:fs";
+    33→import { createHash } from "node:crypto";
+    34→import { join, dirname } from "node:path";
+    35→import { fileURLToPath } from "node:url";
+    36→import { spawnSync } from "node:child_process";
+    37→import nacl from "tweetnacl";
+    38→import {
+    39→  Connection,
+    40→  PublicKey,
+    41→  Transaction,
+    42→  TransactionInstruction,
+    43→  SystemProgram,
+    44→} from "@solana/web3.js";
+    45→import {
+    46→  importSdk,
+    47→  importFleetCore,
+    48→  importMonitor,
+    49→  loadKeypair,
+    50→  pk,
+    51→  IDS,
+    52→  RunReport,
+    53→  sendTx,
+    54→  customCodeFromErr,
+    55→  errFamilyFromErr,
+    56→  eventsFromLogs,
+    57→  snapshotTokenAccounts,
+    58→  snapshotDiffZero,
+    59→  solBalance,
+    60→  hexToBytes,
+    61→} from "./lib.mjs";
+    62→import {
+    63→  buildRegisterOracleIx,
+    64→  configPda,
+    65→  registerOracles,
+    66→  readbackAssertOracles,
+    67→} from "./register_oracle.mjs";
+    68→
+    69→// --- args --------------------------------------------------------------------
+    70→const args = {};
+    71→for (let i = 2; i < process.argv.length; i++) {
+    72→  if (process.argv[i].startsWith("--")) args[process.argv[i].slice(2)] = process.argv[++i];
+    73→}
+    74→const { url, artifacts, fixtures, keys, salvorBots } = args;
+    75→for (const [k, v] of Object.entries({ url, artifacts, fixtures, keys, salvorBots })) {
+    76→  if (!v) {
+    77→    console.error(`missing --${k}`);
+    78→    process.exit(2);
+    79→  }
+    80→}
+    81→
+    82→const U64_MAX = 18_446_744_073_709_551_615n;
+    83→const DRIVER_DIR = dirname(fileURLToPath(import.meta.url)); // scripts/devnet/lifecycle_rehearsal
+    84→const REPO_ROOT = dirname(dirname(DRIVER_DIR)); // protocol repo root
+    85→const connection = new Connection(url, "confirmed");
+    86→const SDK = await importSdk();
+    87→const FC = await importFleetCore(salvorBots);
+    88→const MON = await importMonitor(salvorBots);
+    89→
+    90→const manifest = JSON.parse(readFileSync(join(fixtures, "manifest.json"), "utf8"));
+    91→const localPlan = JSON.parse(readFileSync(join(artifacts, "local_plan.json"), "utf8"));
+    92→const elfPins = JSON.parse(readFileSync(join(artifacts, "sha256.txt"), "utf8"));
+    93→
+    94→const POOL = pk(manifest.pool_address);
+    95→const AMM = pk(manifest.amm_program);
+    96→const LP_MINT = pk(localPlan.lp_mint);
+    97→const WSOL = pk(manifest.wsol_mint);
+    98→const MEMECOIN = pk(
+    99→  manifest.base_is_coin_side
+   100→    ? manifest.accounts.pc_mint.pubkey
+   101→    : manifest.accounts.coin_mint.pubkey,
+   102→);
+   103→const COIN_VAULT = pk(manifest.accounts.coin_vault.pubkey);
+   104→const PC_VAULT = pk(manifest.accounts.pc_vault.pubkey);
+   105→
+   106→const K = {
+   107→  authority: await loadKeypair(join(keys, "authority.json")),
+   108→  intruder: await loadKeypair(join(keys, "intruder.json")),
+   109→  activityOracle: await loadKeypair(join(keys, "activity_oracle.json")),
+   110→  launchOracle: await loadKeypair(join(keys, "launch_oracle.json")),
+   111→  salvor: await loadKeypair(join(keys, "salvor.json")),
+   112→  claimantA: await loadKeypair(join(keys, "claimant_a.json")),
+   113→  claimantB: await loadKeypair(join(keys, "claimant_b.json")),
+   114→};
+   115→
+   116→const client = new SDK.GraveYieldClient({
+   117→  connection,
+   118→  cluster: "localnet",
+   119→  graveScannerProgramId: IDS.scanner,
+   120→  graveVaultProgramId: IDS.vault,
+   121→});
+   122→
+   123→const SALVOR_LP_ATA = pk(localPlan.holders.salvor.lp_ata);
+   124→const [VAULT_AUTHORITY] = SDK.vaultAuthorityPda(IDS.vault);
+   125→const [TREASURY] = SDK.protocolTreasuryPda(IDS.vault);
+   126→const [POOL_REGISTRY] = SDK.poolRegistryPda(IDS.vault, POOL);
+   127→const [SALVAGE_RECEIPT] = SDK.salvageReceiptPda(IDS.vault, POOL);
+   128→const [LP_HOLDER_POOL] = SDK.lpHolderPoolVaultPda(IDS.vault, POOL);
+   129→const [SCANNER_CFG] = SDK.scannerProtocolConfigPda(IDS.scanner);
+   130→const [VAULT_CFG] = SDK.vaultProtocolConfigPda(IDS.vault);
+   131→const [ANCHOR_PDA] = SDK.eligibilityAnchorPda(IDS.scanner, IDS.raydiumV4, POOL);
+   132→const [CERT_PDA] = SDK.eligibilityCertPda(IDS.scanner, IDS.raydiumV4, POOL);
+   133→const [LAUNCH_PRICE_PDA] = SDK.launchPricePda(IDS.scanner, IDS.raydiumV4, POOL);
+   134→const VAULT_WSOL_ATA = PublicKey.findProgramAddressSync(
+   135→  [VAULT_AUTHORITY.toBytes(), IDS.tokenProgram.toBytes(), WSOL.toBytes()],
+   136→  IDS.ataProgram,
+   137→)[0];
+   138→const VAULT_MEMECOIN_ATA = PublicKey.findProgramAddressSync(
+   139→  [VAULT_AUTHORITY.toBytes(), IDS.tokenProgram.toBytes(), MEMECOIN.toBytes()],
+   140→  IDS.ataProgram,
+   141→)[0];
+   142→const TREASURY_MEMECOIN_ATA = PublicKey.findProgramAddressSync(
+   143→  [TREASURY.toBytes(), IDS.tokenProgram.toBytes(), MEMECOIN.toBytes()],
+   144→  IDS.ataProgram,
+   145→)[0];
+   146→const CLAIM_RECORD_A = SDK.claimRecordPda(IDS.vault, POOL, K.claimantA.publicKey);
+   147→
+   148→// The wallet / PDA set whose silence proves "no state movement" on reverts.
+   149→const SETTLEMENT_PDAS = () => [
+   150→  ["pool_registry", POOL_REGISTRY],
+   151→  ["salvage_receipt", SALVAGE_RECEIPT],
+   152→  ["lp_holder_pool", LP_HOLDER_POOL],
+   153→  ["eligibility_anchor", ANCHOR_PDA],
+   154→  ["eligibility_cert", CERT_PDA],
+   155→];
+   156→
+   157→// --- report ---------------------------------------------------------------------
+   158→const ts = new Date().toISOString().replace(/[:.]/g, "-");
+   159→const report = new RunReport(join(artifacts, `run-report-${ts}.json`), {
+   160→  authorization: "W1 Lifecycle Rehearsal Harness — owner authorization, Handoff Vol IV §8 (verbatim)",
+   161→  cluster: "solana-test-validator (local, --slots-per-epoch 32)",
+   162→  url,
+   163→  program_ids: { scanner: IDS.scanner.toBase58(), vault: IDS.vault.toBase58(), raydium_v4: IDS.raydiumV4.toBase58() },
+   164→  elf_pins: elfPins,
+   165→  local_plan: localPlan,
+   166→  fixture_manifest: {
+   167→    pool: manifest.pool_address,
+   168→    base_is_coin_side: manifest.base_is_coin_side,
+   169→    fetched_at: manifest._fetched_at,
+   170→    rpc: manifest._rpc,
+   171→  },
+   172→  keys_root: keys,
+   173→  boundaries_note: "see 'boundaries' — every mocked/stubbed/compressed edge is labeled here",
+   174→});
+   175→
+   176→function failFast(msg) {
+   177→  report.finish({});
+   178→  console.error(`FATAL: ${msg}`);
+   179→  process.exit(1);
+   180→}
+   181→
+   182→// --- shared helpers ---------------------------------------------------------------
+   183→async function stage(id, name, fn) {
+   184→  try {
+   185→    const entry = (await fn()) ?? {};
+   186→    report.stage({ id, name, pass: true, ...entry });
+   187→    return entry;
+   188→  } catch (e) {
+   189→    report.stage({ id, name, pass: false, reason: String(e?.stack ?? e) });
+   190→    failFast(`stage ${id} (${name}) failed: ${e?.message ?? e}`);
+   191→  }
+   192→}
+   193→
+   194→// A failed transaction still pays the real signature fee to its fee payer —
+   195→// that is the ONLY movement a revert is allowed to produce. Everything else
+   196→// (other wallets, token accounts, the settlement PDA set) must be identical.
+   197→const MAX_FAILED_TX_FEE_LAMPORTS = 10_000n; // single signature, no priority ixs
+   198→
+   199→async function expectRevert({
+   200→  id,
+   201→  name,
+   202→  ixs,
+   203→  signers,
+   204→  expectCode,
+   205→  expectFamily,
+   206→  feePayerBudgetLamports = MAX_FAILED_TX_FEE_LAMPORTS,
+   207→  pdaMustStayAbsent = [],
+   208→  tokenAccounts = {},
+   209→}) {
+   210→  const feePayer = signers[0].publicKey;
+   211→  const beforeFee = await solBalance(connection, feePayer);
+   212→  const tokensBefore = await snapshotTokenAccounts(connection, tokenAccounts);
+   213→  const res = await sendTx(connection, ixs, signers);
+   214→  const afterFee = await solBalance(connection, feePayer);
+   215→  const tokensAfter = await snapshotTokenAccounts(connection, tokenAccounts);
+   216→  const code = customCodeFromErr(res.err);
+   217→  const family = code === null && res.err ? errFamilyFromErr(res.err, res.logs) : null;
+   218→  const pass =
+   219→    expectCode !== undefined ? code === expectCode : family === expectFamily && res.err != null;
+   220→  const feeDelta = beforeFee - afterFee;
+   221→  const feeOk = feeDelta >= 0n && feeDelta <= feePayerBudgetLamports;
+   222→  const tokensSame = snapshotDiffZero(tokensBefore, tokensAfter);
+   223→  const absentChecks = [];
+   224→  for (const [label, pda] of pdaMustStayAbsent) {
+   225→    absentChecks.push({ label, absent: (await connection.getAccountInfo(pda)) === null });
+   226→  }
+   227→  const zeroMovement = {
+   228→    proved: feeOk && tokensSame && absentChecks.every((c) => c.absent),
+   229→    fee_payer_delta_lamports: feeDelta.toString(),
+   230→    fee_ok: feeOk,
+   231→    tokens_unchanged: tokensSame,
+   232→    pdas_absent: absentChecks,
+   233→    note:
+   234→      "fee-only debit on the submitter is the expected real cost of a failed transaction and is recorded, not normalized away; every other tracked balance and the settlement PDA set must be unchanged",
+   235→  };
+   236→  report.adversarial({
+   237→    id,
+   238→    name,
+   239→    expected: expectCode !== undefined ? { code: expectCode } : { family: expectFamily },
+   240→    observed: { code, family, err: res.err ?? null },
+   241→    pass,
+   242→    tx: res.sig,
+   243→    slot: res.slot,
+   244→    logs_tail: (res.logs ?? []).slice(-6),
+   245→    zero_movement: zeroMovement,
+   246→  });
+   247→  if (!pass) {
+   248→    failFast(
+   249→      `adversarial ${id} (${name}) did not revert as expected: err=${JSON.stringify(res.err)} logs=${(res.logs ?? []).slice(-4)}`,
+   250→    );
+   251→  }
+   252→  if (!zeroMovement.proved) {
+   253→    failFast(`adversarial ${id} (${name}) reverted but the zero-state-movement invariant failed`);
+   254→  }
+   255→  return { code, family, res };
+   256→}
+   257→
+   258→// C1 attestation: real local slot anchor + fork-precedented synthetic
+   259→// last-swap timestamp (documented boundary). issuedSlot points a few slots
+   260→// back so its block (and slot hash) is always resolvable.
+   261→async function buildC1Attestation({ oracleKeypair, lastSwapUnixTs }) {
+   262→  const tip = Number(await connection.getSlot());
+   263→  const issuedSlot = Math.max(1, tip - 4);
+   264→  const slotHash = await SDK.fetchSlotHash(connection, issuedSlot);
+   265→  if (!slotHash) throw new Error(`no slot hash for slot ${issuedSlot}`);
+   266→  const msg = SDK.buildAttestationMessage({
+   267→    ammProgramId: IDS.raydiumV4,
+   268→    poolAddress: POOL,
+   269→    lastSwapUnixTs: BigInt(lastSwapUnixTs),
+   270→    issuedSlot: BigInt(issuedSlot),
+   271→    slotHash,
+   272→  });
+   273→  if (msg.length !== 112) throw new Error(`C1 msg must be 112B, got ${msg.length}`);
+   274→  const signature = nacl.sign.detached(msg, oracleKeypair.secretKey);
+   275→  return { msg, signature, issuedSlot, slotHash };
+   276→}
+   277→
+   278→// The 13 V4 remaining accounts from the cross-validated manifest.
+   279→function v4RemainingAccounts() {
+   280→  return SDK.raydiumV4RemainingAccounts(
+   281→    { coinVault: COIN_VAULT, pcVault: PC_VAULT },
+   282→    {
+   283→      ammOpenOrders: pk(manifest.accounts.open_orders.pubkey),
+   284→      ammTargetOrders: pk(manifest.accounts.target_orders.pubkey),
+   285→      marketProgram: pk(manifest.market_program),
+   286→      market: pk(manifest.accounts.market.pubkey),
+   287→      marketCoinVault: pk(manifest.accounts.market_coin_vault.pubkey),
+   288→      marketPcVault: pk(manifest.accounts.market_pc_vault.pubkey),
+   289→      marketVaultSigner: pk(manifest.accounts.vault_signer.pubkey),
+   290→      marketEventQueue: pk(manifest.accounts.event_queue.pubkey),
+   291→      marketBids: pk(manifest.accounts.bids.pubkey),
+   292→      marketAsks: pk(manifest.accounts.asks.pubkey),
+   293→    },
+   294→  );
+   295→}
+   296→
+   297→// Scanner remaining accounts: [coin_vault, pc_vault, lp_mint] (any order —
+   298→// the adapter looks accounts up by pubkey and validates ownership/mints).
+   299→function scannerRemainingAccounts() {
+   300→  return [COIN_VAULT, PC_VAULT, LP_MINT].map((p) => ({
+   301→    pubkey: p,
+   302→    isSigner: false,
+   303→    isWritable: false,
+   304→  }));
+   305→}
+   306→
+   307→function salvageIxInput({ merkleRoot, supply, salvorLpAmount, minQuoteOutputLamports = 0n, routeData = new Uint8Array(0), routeAccounts = [] }) {
+   308→  return {
+   309→    vaultProgramId: IDS.vault,
+   310→    scannerProgramId: IDS.scanner,
+   311→    ammProgramId: AMM,
+   312→    poolAddress: POOL,
+   313→    salvor: K.salvor.publicKey,
+   314→    salvorLpTokenAccount: SALVOR_LP_ATA,
+   315→    lpMint: LP_MINT,
+   316→    memecoinMint: MEMECOIN,
+   317→    lpSnapshotMerkleRoot: merkleRoot,
+   318→    lpTotalSupplyAtSnapshot: supply,
+   319→    salvorLpAmount,
+   320→    minQuoteOutputLamports,
+   321→    maxSlippageBpsOverride: null,
+   322→    jupiterRouteData: routeData,
+   323→    jupiterRouteAccountsLen: routeAccounts.length,
+   324→    raydiumV4RemainingAccounts: v4RemainingAccounts(),
+   325→    jupiterRouteAccounts: routeAccounts,
+   326→  };
+   327→}
+   328→
+   329→async function readReserves() {
+   330→  return {
+   331→    coin: await SDK.readVaultReserve(connection, COIN_VAULT),
+   332→    pc: await SDK.readVaultReserve(connection, PC_VAULT),
+   333→  };
+   334→}
+   335→
+   336→async function waitUntilEpoch(targetEpoch, label) {
+   337→  const deadline = Date.now() + 180_000;
+   338→  for (;;) {
+   339→    const info = await connection.getEpochInfo();
+   340→    if (Number(info.epoch) >= targetEpoch) return Number(info.epoch);
+   341→    if (Date.now() > deadline) {
+   342→      failFast(`timed out waiting for epoch ≥ ${targetEpoch} (${label}); at ${info.epoch}`);
+   343→    }
+   344→    await new Promise((r) => setTimeout(r, 750));
+   345→  }
+   346→}
+   347→
+   348→// Non-canonical ed25519 precompile: runtime-valid (signature verifies) but
+   349→// sig offset 56 instead of the canonical 48 — the scanner's offset pin
+   350→// (ORACLE_PIPELINE.md §2.3 check order) reverts 6025.
+   351→function shiftedPrecompileIx({ signature, oraclePublicKey, message, scannerInstructionIndex }) {
+   352→  const data = Buffer.alloc(120); // header 16 + pk 32 (@16) + sig 64 (@56)
+   353→  data[0] = 1;
+   354→  const w = (off, v) => data.writeUInt16LE(v, off);
+   355→  w(2, 56); // signature_offset — SHIFTED (canonical pin is 48)
+   356→  w(4, 0xffff); // signature_instruction_index
+   357→  w(6, 16); // public_key_offset
+   358→  w(8, 0xffff); // public_key_instruction_index
+   359→  w(10, 72); // message_data_offset (scanner ix data @72)
+   360→  w(12, message.length);
+   361→  w(14, scannerInstructionIndex);
+   362→  Buffer.from(oraclePublicKey.toBytes()).copy(data, 16);
+   363→  Buffer.from(signature).copy(data, 56);
+   364→  return new TransactionInstruction({
+   365→    programId: SDK.ED25519_PROGRAM_ID ?? new PublicKey("Ed25519SigVerify111111111111111111111111111"),
+   366→    keys: [],
+   367→    data,
+   368→  });
+   369→}
+   370→
+   371→// Malformed-message phase_1 ix: hand-rolled 111-byte msg (canonical is 112)
+   372→// so the runtime precompile verifies fine but Anchor's [u8; 112] decode dies.
+   373→function malformedPhase1Ix({ ammProgramId, poolAddress, shortMsg, writer }) {
+   374→  const disc =
+   375→    SDK.ScannerIx?.evaluatePoolPhase1 ??
+   376→    createHash("sha256").update("global:evaluate_pool_phase_1").digest().subarray(0, 8);
+   377→  const data = Buffer.concat([
+   378→    Buffer.from(disc),
+   379→    Buffer.from(ammProgramId.toBytes()),
+   380→    Buffer.from(poolAddress.toBytes()),
+   381→    Buffer.from(shortMsg),
+   382→  ]);
+   383→  return new TransactionInstruction({
+   384→    programId: IDS.scanner,
+   385→    keys: [
+   386→      { pubkey: SCANNER_CFG, isSigner: false, isWritable: false },
+   387→      { pubkey: ANCHOR_PDA, isSigner: false, isWritable: true },
+   388→      { pubkey: LAUNCH_PRICE_PDA, isSigner: false, isWritable: false },
+   389→      { pubkey: POOL, isSigner: false, isWritable: true },
+   390→      { pubkey: new PublicKey("Sysvar1nstructions1111111111111111111111111"), isSigner: false, isWritable: false },
+   391→      { pubkey: new PublicKey("SysvarS1otHashes111111111111111111111111111"), isSigner: false, isWritable: false },
+   392→      { pubkey: writer, isSigner: true, isWritable: true },
+   393→      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+   394→      ...scannerRemainingAccounts(),
+   395→    ],
+   396→    data,
+   397→  });
+   398→}
+   399→
+   400→// --- [stage 2] ProtocolConfig initialize (real SDK builders) ------------------------
+   401→await stage(2, "ProtocolConfig initialize (SDK builders; vault dust = u64::MAX)", async () => {
+   402→  const scannerCfgBefore = await connection.getAccountInfo(SCANNER_CFG);
+   403→  if (scannerCfgBefore) throw new Error("scanner config already exists — validator must be fresh");
+   404→  const initScanner = SDK.buildScannerInitializeIx({
+   405→    scannerProgramId: IDS.scanner,
+   406→    authority: K.authority.publicKey,
+   407→    payer: K.authority.publicKey,
+   408→  });
+   409→  const initVault = SDK.buildVaultInitializeIx({
+   410→    vaultProgramId: IDS.vault,
+   411→    authority: K.authority.publicKey,
+   412→    payer: K.authority.publicKey,
+   413→    // Conversion-leg skip per canonical full_lifecycle_fork shape (C3):
+   414→    jupiterDustThresholdLamports: U64_MAX,
+   415→  });
+   416→  const r1 = await sendTx(connection, [initScanner], [K.authority]);
+   417→  if (r1.err) throw new Error(`scanner init failed: ${JSON.stringify(r1.err)}`);
+   418→  const r2 = await sendTx(connection, [initVault], [K.authority]);
+   419→  if (r2.err) throw new Error(`vault init failed: ${JSON.stringify(r2.err)}`);
+   420→  await client.ensureConfigs();
+   421→  const sc = await SDK.fetchScannerProtocolConfig(connection, SCANNER_CFG);
+   422→  const vc = await SDK.fetchVaultProtocolConfig(connection, VAULT_CFG);
+   423→  const defaultsOk =
+   424→    sc.inactivitySeconds === 7_776_000n &&
+   425→    sc.priceCollapseBps === 9_900 &&
+   426→    vc.lpHolderShareBps === 4000 &&
+   427→    vc.salvorShareBps === 4000 &&
+   428→    vc.protocolShareBps === 2000 &&
+   429→    vc.jupiterDustThresholdLamports === U64_MAX;
+   430→  if (!defaultsOk) throw new Error(`config defaults mismatch: scanner=${JSON.stringify(sc)} vault=${JSON.stringify(vc)}`);
+   431→  return {
+   432→    tx: r1.sig,
+   433→    tx2: r2.sig,
+   434→    detail: "scanner at spec defaults; vault at spec defaults with jupiter_dust_threshold = u64::MAX (conversion leg skipped by config — labeled boundary C3)",
+   435→  };
+   436→});
+   437→
+   438→// --- [stage 3] oracle registration (80-byte governance action) -----------------------
+   439→await stage(3, "oracle registration via 80-byte update_protocol_config (ORACLE_CUSTODY.md steps 1–2)", async () => {
+   440→  const sig = await registerOracles({
+   441→    connection,
+   442→    authorityKeypair: K.authority,
+   443→    activityOracle: K.activityOracle.publicKey,
+   444→    launchPriceOracle: K.launchOracle.publicKey,
+   445→  });
+   446→  const cfg = await readbackAssertOracles({
+   447→    connection,
+   448→    activityOracle: K.activityOracle.publicKey,
+   449→    launchPriceOracle: K.launchOracle.publicKey,
+   450→  });
+   451→  return {
+   452→    tx: sig,
+   453→    detail: `activity_oracle=${cfg.activityOracle.toBase58()} launch_price_oracle=${cfg.launchPriceOracle.toBase58()} — local runbook validation (fresh local keys), NOT the devnet custody situation`,
+   454→  };
+   455→});
+   456→
+   457→// --- [stage 4] discovery wiring smoke (SDK evaluatePool, tolerant) --------------------
+   458→await stage(4, "discovery/evaluation wiring smoke (SDK evaluatePool — C5 label)", async () => {
+   459→  let outcome = null;
+   460→  let err = null;
+   461→  try {
+   462→    outcome = await client.evaluatePool(POOL, { ammProgramId: IDS.raydiumV4 });
+   463→  } catch (e) {
+   464→    err = String(e?.message ?? e);
+   465→  }
+   466→  // Tolerant per devnetSmoke precedent: the wiring must respond (result or a
+   467→  // known wiring error) — the C1/C5 derivation yield gap is a labeled boundary.
+   468→  const wired = outcome !== null || /not found|not a canonical|owned by|No Signers|Raydium V4|signature|history/i.test(err ?? "");
+   469→  if (!wired) throw new Error(`evaluatePool wiring smoke failed unexpectedly: ${err}`);
+   470→  return { detail: "evaluatePool against the local fixture pool responded (wiring proven; last-swap history is intentionally absent — C5/C6 boundary)", outcome: outcome ? "derived" : `tolerant-error: ${err}` };
+   471→});
+   472→
+   473→// --- [stage 5] record_launch_price (168B C2, real precompile) -------------------------
+   474→await stage(5, "record_launch_price (168B C2 attestation; launch price = current × 200)", async () => {
+   475→  const pool = await SDK.fetchV4Pool(connection, POOL, { ammProgramId: IDS.raydiumV4 });
+   476→  const reserves = await readReserves();
+   477→  // The on-chain Raydium V4 adapter maps base = coin, quote = pc
+   478→  // unconditionally; SDK quotePerBaseQ64x64 mirrors that mapping.
+   479→  const currentPrice = SDK.quotePerBaseQ64x64(reserves.coin, reserves.pc);
+   480→  const launchPrice = currentPrice * 200n; // 99.5% collapse — fork-precedented
+   481→  const firstSwapSlot = 1; // deterministic synthetic reference (labeled boundary)
+   482→  const firstSwapUnixTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400);
+   483→  const issuedSlot = Number(await connection.getSlot()) - 4;
+   484→  const msg = SDK.buildLaunchPriceMessage({
+   485→    ammProgramId: IDS.raydiumV4,
+   486→    poolAddress: POOL,
+   487→    baseMint: pool.baseMint,
+   488→    quoteMint: pool.quoteMint,
+   489→    firstSwapSlot: BigInt(firstSwapSlot),
+   490→    firstSwapUnixTs,
+   491→    launchPriceQ64x64: launchPrice,
+   492→    issuedSlot: BigInt(issuedSlot),
+   493→  });
+   494→  if (msg.length !== 168) throw new Error(`C2 msg must be 168B, got ${msg.length}`);
+   495→  const signature = nacl.sign.detached(msg, K.launchOracle.secretKey);
+   496→  const { precompileIx, recordIx } = client.buildRecordLaunchPriceIx({
+   497→    ammProgramId: IDS.raydiumV4,
+   498→    poolAddress: POOL,
+   499→    derivation: {
+   500→      launchPriceQ64x64: launchPrice,
+   501→      firstSwapSlot: BigInt(firstSwapSlot),
+   502→      firstSwapUnixTs,
+   503→      baseMint: pool.baseMint,
+   504→      quoteMint: pool.quoteMint,
+   505→      signature,
+   506→    },
+   507→    issuedSlot,
+   508→    signature,
+   509→    oraclePublicKey: K.launchOracle.publicKey,
+   510→    msg,
+   511→    payer: K.authority.publicKey,
+   512→  });
+   513→  const r = await sendTx(connection, [precompileIx, recordIx], [K.authority]);
+   514→  if (r.err) throw new Error(`record_launch_price failed: ${JSON.stringify(r.err)} logs: ${(r.logs ?? []).slice(-5)}`);
+   515→  const events = eventsFromLogs(r.logs, ["LaunchPriceRecorded"]);
+   516→  const lp = await SDK.fetchLaunchPrice(connection, LAUNCH_PRICE_PDA);
+   517→  if (!lp || lp.launchPriceQ64x64 !== launchPrice) throw new Error("LaunchPrice PDA readback mismatch");
+   518→  return {
+   519→    tx: r.sig,
+   520→    events: Object.keys(events),
+   521→    detail: `launch price pinned at ${launchPrice} q64x64 (current × 200 → 99.5% collapse vs real fixture reserves)`,
+   522→  };
+   523→});
+   524→
+   525→// --- [adversarial A1–A5] attestation prologue battery (program-live, phase_1) --------
+   526→// Per ORACLE_PIPELINE.md §2.3 the scanner's as-implemented check order is
+   527→// 6024 (precompile presence) → 6025 (canonical offsets) → 6026 (oracle
+   528→// binding); the runtime precompile itself rejects tampered signatures, and
+   529→// a malformed msg length dies in Anchor decode. Every case must revert
+   530→// with zero state movement (the anchor PDA Anchor init creates is rolled
+   531→// back atomically — asserted via pdaMustStayAbsent).
+   532→{
+   533→  const lastSwapTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400);
+   534→
+   535→  // A1: missing precompile → 6024 (AttestationMissing)
+   536→  {
+   537→    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+   538→    const { phase1Ix } = client.buildPhase1Ix({
+   539→      ammProgramId: IDS.raydiumV4,
+   540→      poolAddress: POOL,
+   541→      derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
+   542→      slotHash: att.slotHash,
+   543→      signature: att.signature,
+   544→      oraclePublicKey: K.activityOracle.publicKey,
+   545→      writer: K.salvor.publicKey,
+   546→      remainingAccounts: scannerRemainingAccounts(),
+   547→    });
+   548→    await expectRevert({
+   549→      id: "A1",
+   550→      name: "evaluate_pool_phase_1 without the ed25519 precompile instruction",
+   551→      ixs: [phase1Ix],
+   552→      signers: [K.salvor],
+   553→      expectCode: 6024,
+   554→      pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA]],
+   555→    });
+   556→  }
+   557→
+   558→  // A2: tampered signature → the ed25519 precompile itself rejects
+   559→  //     (no GraveYield custom code can be reached — verify-path precedent).
+   560→  {
+   561→    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+   562→    const badSig = Uint8Array.from(att.signature);
+   563→    badSig[0] ^= 0x01;
+   564→    const { precompileIx, phase1Ix } = client.buildPhase1Ix({
+   565→      ammProgramId: IDS.raydiumV4,
+   566→      poolAddress: POOL,
+   567→      derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
+   568→      slotHash: att.slotHash,
+   569→      signature: badSig,
+   570→      oraclePublicKey: K.activityOracle.publicKey,
+   571→      writer: K.salvor.publicKey,
+   572→      remainingAccounts: scannerRemainingAccounts(),
+   573→    });
+   574→    await expectRevert({
+   575→      id: "A2",
+   576→      name: "evaluate_pool_phase_1 with a tampered oracle signature",
+   577→      ixs: [precompileIx, phase1Ix],
+   578→      signers: [K.salvor],
+   579→      expectFamily: "precompile",
+   580→      pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA]],
+   581→    });
+   582→  }
+   583→
+   584→  // A3: non-canonical precompile offsets (sig@56 ≠ 48) → 6025
+   585→  {
+   586→    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+   587→    const { phase1Ix } = client.buildPhase1Ix({
+   588→      ammProgramId: IDS.raydiumV4,
+   589→      poolAddress: POOL,
+   590→      derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
+   591→      slotHash: att.slotHash,
+   592→      signature: att.signature,
+   593→      oraclePublicKey: K.activityOracle.publicKey,
+   594→      writer: K.salvor.publicKey,
+   595→      remainingAccounts: scannerRemainingAccounts(),
+   596→    });
+   597→    const shifted = shiftedPrecompileIx({
+   598→      signature: att.signature,
+   599→      oraclePublicKey: K.activityOracle.publicKey,
+   600→      message: att.msg,
+   601→      scannerInstructionIndex: 1,
+   602→    });
+   603→    await expectRevert({
+   604→      id: "A3",
+   605→      name: "evaluate_pool_phase_1 with non-canonical precompile offsets (sig@56)",
+   606→      ixs: [shifted, phase1Ix],
+   607→      signers: [K.salvor],
+   608→      expectCode: 6025,
+   609→      pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA]],
+   610→    });
+   611→  }
+   612→
+   613→  // A4: signature by a key that is NOT the registered activity oracle → 6026
+   614→  {
+   615→    const att = await buildC1Attestation({ oracleKeypair: K.intruder, lastSwapUnixTs: lastSwapTs });
+   616→    const { precompileIx, phase1Ix } = client.buildPhase1Ix({
+   617→      ammProgramId: IDS.raydiumV4,
+   618→      poolAddress: POOL,
+   619→      derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
+   620→      slotHash: att.slotHash,
+   621→      signature: att.signature,
+   622→      oraclePublicKey: K.intruder.publicKey,
+   623→      writer: K.salvor.publicKey,
+   624→      remainingAccounts: scannerRemainingAccounts(),
+   625→    });
+   626→    await expectRevert({
+   627→      id: "A4",
+   628→      name: "evaluate_pool_phase_1 signed by an unauthorized oracle key",
+   629→      ixs: [precompileIx, phase1Ix],
+   630→      signers: [K.salvor],
+   631→      expectCode: 6026,
+   632→      pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA]],
+   633→    });
+   634→  }
+   635→
+   636→  // A5: malformed attestation message length (111 ≠ 112) → anchor-decode
+   637→  {
+   638→    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+   639→    const shortMsg = att.msg.slice(0, 111);
+   640→    // Only the message length is malformed here: the precompile must verify
+   641→    // (canonical sig@48, msg size 111), then Anchor's [u8; 112] decode dies.
+   642→    const pre111 = new TransactionInstruction({
+   643→      programId: SDK.ED25519_PROGRAM_ID,
+   644→      keys: [],
+   645→      data: (() => {
+   646→        const d = Buffer.alloc(16 + 32 + 64);
+   647→        d[0] = 1;
+   648→        const w = (off, v) => d.writeUInt16LE(v, off);
+   649→        w(2, 48); w(4, 0xffff); w(6, 16); w(8, 0xffff);
+   650→        w(10, 72); w(12, shortMsg.length); w(14, 1);
+   651→        Buffer.from(K.activityOracle.publicKey.toBytes()).copy(d, 16);
+   652→        Buffer.from(att.signature).copy(d, 48);
+   653→        return d;
+   654→      })(),
+   655→    });
+   656→    const malformed = malformedPhase1Ix({
+   657→      ammProgramId: IDS.raydiumV4,
+   658→      poolAddress: POOL,
+   659→      shortMsg,
+   660→      writer: K.salvor.publicKey,
+   661→    });
+   662→    await expectRevert({
+   663→      id: "A5",
+   664→      name: "evaluate_pool_phase_1 with a malformed (111-byte) attestation message",
+   665→      ixs: [pre111, malformed],
+   666→      signers: [K.salvor],
+   667→      expectFamily: "anchor-decode",
+   668→      pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA]],
+   669→    });
+   670→  }
+   671→}
+   672→
+   673→// --- [adversarial A10] phase2 before anchor → 6015 -------------------------------------
+   674→{
+   675→  const att = await buildC1Attestation({
+   676→    oracleKeypair: K.activityOracle,
+   677→    lastSwapUnixTs: BigInt(Math.floor(Date.now() / 1000) - 91 * 86400),
+   678→  });
+   679→  const { precompileIx, phase2Ix } = client.buildPhase2Ix({
+   680→    ammProgramId: IDS.raydiumV4,
+   681→    poolAddress: POOL,
+   682→    derivation: {
+   683→      lastSwapUnixTs: Number(Math.floor(Date.now() / 1000) - 91 * 86400),
+   684→      slot: att.issuedSlot,
+   685→      signature: "",
+   686→    },
+   687→    slotHash: att.slotHash,
+   688→    signature: att.signature,
+   689→    oraclePublicKey: K.activityOracle.publicKey,
+   690→    writer: K.salvor.publicKey,
+   691→    remainingAccounts: scannerRemainingAccounts(),
+   692→  });
+   693→  await expectRevert({
+   694→    id: "A10",
+   695→    name: "illegal transition: evaluate_pool_phase_2 before any anchor exists",
+   696→    ixs: [precompileIx, phase2Ix],
+   697→    signers: [K.salvor],
+   698→    expectCode: 6015,
+   699→    pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA], ["eligibility_cert", CERT_PDA]],
+   700→  });
+
+[showing lines 1-700 of 1337; use offset=701 with limit to continue reading]

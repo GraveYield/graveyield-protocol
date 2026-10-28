@@ -1,0 +1,724 @@
+     1→# GraveYield Engineering Handoff — 2026-10-28 · Volume IV
+     2→
+     3→**Pre-W1 state freeze & Lifecycle Rehearsal Harness kickoff**
+     4→
+     5→| | |
+     6→|---|---|
+     7→| Prepared by | sethoshi.eth — engagement lead (Z.ai session) |
+     8→| Prepared for | the protocol owner (sethoshi18) — and the next engineering session |
+     9→| Date | 2026-10-28 |
+    10→| Scope | State freeze of the whole engagement after the 2026-10-28 documentation push; condensed W1 reconnaissance; next-session execution plan |
+    11→| Classification | internal engineering · secret-free by construction (public addresses only; no key material, no tokens) |
+    12→| Document family | Vol II — pre-Phase-2 handoff (2026-10-26) · Vol III — Phase 2 handoff (2026-10-26, in `graveyield-protocol/docs/handoffs/`) · **Vol IV — this document** |
+    13→
+    14→---
+    15→
+    16→## 0. How to use this volume
+    17→
+    18→This volume exists because the working thread that produced it has become long, and
+    19→the workspace this engagement runs in has a documented history of hard resets that
+    20→erase session context (it happened at least twice: it destroyed the pre-Phase-2
+    21→worklog, and it destroyed the NS-2 authority key — see §2.4 and §7 B1). If this
+    22→session dies, this file plus the repositories must be sufficient to resume without
+    23→loss. Read it in this order depending on who you are:
+    24→
+    25→- **A fresh engineering session resuming W1**: read §2 (charter and red lines) →
+    26→  §8 (the W1 authorization, verbatim) → §12 (execution checklist) → then the
+    27→  condensed reconnaissance in §9–§11. Do not skip §2 or §8: the W1 authorization
+    28→  carries mandatory pre-implementation constraints and hard stop conditions.
+    29→- **The owner**: §1 is the ten-bullet state summary; §5 is the credential state
+    30→  (one action item: rotate the PAT); §6.4 is the decision that still gates all
+    31→  devnet progress; §13 lists what was deliberately *not* done.
+    32→- **An auditor** (the docs' own "Phase 13" target): §4 and §14 give the evidence
+    33→  trail — every load-bearing claim in this volume cites a source that is either a
+    34→  repository path, a worklog task with recorded exit codes, or a report already
+    35→  committed to `graveyield-protocol/docs/assessments/`.
+    36→
+    37→Two honesty rules govern this document, inherited from the engagement charter:
+    38→first, every claim is labeled with how it was verified and when; second, anything
+    39→that is a *hypothesis* rather than a verified fact is explicitly marked
+    40→**DRAFT — verify at step 0** (this applies to the whole of §10–§11, which are
+    41→inputs to W1's mandated reconnaissance, not a substitute for it).
+    42→
+    43→---
+    44→
+    45→## 1. Executive summary
+    46→
+    47→1. **All code is on GitHub and green.** Four repos (`graveyield-protocol`,
+    48→   `grave-indexer`, `salvor-bots`, `graveyield-console`) are fully pushed;
+    49→   heads as of 2026-10-28: protocol `5a02e47`, indexer `e9109e6`, salvor-bots
+    50→   `cefbed0`, console `8d9dc3e`. The indexer pins the protocol as a submodule at
+    51→   `vendor/protocol = 5b84440`. CI on the two heads touched this session is
+    52→   completed-success (§4.2).
+    53→2. **All owner-session work products are now in-repo.** The 2026-10-28 push
+    54→   landed the Phase 3 readiness assessment, the 2026-10-27 Next-Milestone
+    55→   assessment, the Phase 2 handoff volume (Vol III, docx), and the full
+    56→   Oracle-Custody Registration Guide (docx) into the repositories, indexed from
+    57→   `graveyield-protocol/docs/README.md` (§4.4).
+    58→3. **The project has never executed its own lifecycle on any live cluster.** A
+    59→   decisive `getProgramAccounts` census (2026-10-27) shows exactly one account
+    60→   per program on devnet — the two ProtocolConfigs. Zero anchors, certs,
+    61→   launch prices, registries, receipts, claim records. Everything else is
+    62→   fork-tested or simulated (§6.2).
+    63→4. **The single hard blocker on devnet progress is B1**: the NS-2
+    64→   ProtocolConfig authority key (which was also both oracle signers and the
+    65→   upgrade authority) was erased in a workspace reset. Until the owner resolves
+    66→   custody (register oracles if the key survives / NS-3 refresh if not), no
+    67→   attestation-gated write can succeed on devnet (§7).
+    68→5. **W1 is authorized and is the only authorized task.** The owner authorized
+    69→   the *Lifecycle Rehearsal Harness* — a one-command, fully local end-to-end
+    70→   pass through the real program binaries and the real TypeScript clients, with
+    71→   adversarial cases — with eight explicit requirements, seven acceptance
+    72→   criteria, a mandatory pre-implementation constraint analysis, and a hard stop
+    73→   after W1 (§8). W1 has **not been started** beyond reconnaissance preparation.
+    74→6. **W1 needs no owner authority.** It runs on `solana-test-validator` with
+    75→   fresh local keys; the authority/oracle roles are minted locally and registered
+    76→   via the exact `ORACLE_CUSTODY.md` procedure, so the B1 situation does not
+    77→   block it (§10.2). This is also its honest boundary: it validates program
+    78→   behavior and client wiring, not the devnet custody situation.
+    79→7. **The environment has known gaps that W1 step 0 must resolve**, chiefly: no
+    80→   Rust/Solana toolchain in this workspace (ELFs must be rebuilt locally or
+    81→   fetched from CI artifacts — owner decision D5), and an unresolved question
+    82→   about how to load NS-2 ELFs at the NS-2 program IDs locally when the canonical
+    83→   program keypairs' custody is unknown (§11 C1–C2, marked DRAFT).
+    84→8. **The off-chain execution stack is built and tested but has never moved a
+    85→   real transaction.** Scout runs dry-run only; fleet-core is hard-gated to
+    86→   `mode:"live"` and all 354 salvor tests run against fakes; the production
+    87→   Scout→executor envelope transport does not exist (B3) (§7, §9.3).
+    88→9. **Standing hygiene risks carried forward**: the PAT transited chat on
+    89→   2026-10-28 and must be rotated by the owner; workspace restores repeatedly
+    90→   re-loosen file modes (chmod-only churn, now cleaned again); a tool-output
+    91→   display artifact in this environment truncates the literal `[m` sequence,
+    92→   which produced weeks of false "malformed CI trigger" reports — byte-level
+    93→   checks are the only authoritative read (§2.4).
+    94→10. **One new pre-existing signal needs triage**: a scheduled `fork-harness`
+    95→    run on protocol `5b84440` (2026-10-27) concluded `failure`. It predates the
+    96→    2026-10-28 push and is unrelated to it (docs-only change), but nobody has
+    97→    diagnosed it yet (§4.2).
+    98→
+    99→---
+   100→
+   101→## 2. Continuity, charter and working agreements
+   102→
+   103→### 2.1 Engagement frame
+   104→
+   105→- **Owner and identity**: GitHub user `sethoshi18` (ID `55265644`), display name
+   106→  `sethoshi.eth`. All repository commits use the identity
+   107→  `sethoshi.eth <55265644+sethoshi18@users.noreply.github.com>`. Pushes are
+   108→  executed *as the owner* using an owner-provided PAT under the env-only
+   109→  discipline of §5.1. (Exception noted for provenance: the six Phase 3 console
+   110→  commits were authored `Z User <z@container>` per the 2026-10-27 assessment —
+   111→  cosmetic, recorded in the assessment, not corrected.)
+   112→- **Repositories** (all under the `GraveYield` org; indexer and the four-repo set
+   113→  are public):
+   114→  `graveyield-protocol` (canonical spec + programs + SDK),
+   115→  `grave-indexer` (evidence pipeline; pins protocol as submodule),
+   116→  `salvor-bots` (execution stack; carries a byte-identical SDK mirror enforced
+   117→  by the protocol repo's `sdk-sync-check` CI job),
+   118→  `graveyield-console` (Next.js UI),
+   119→  `graveyield-site` (exists on the org; no local clone; untouched).
+   120→- **Session protocol**: each session opens by reading the handoff volume and
+   121→  `/home/z/my-project/worklog.md`; every task appends to the worklog (§2.3);
+   122→  every report distinguishes real execution from simulation; every command
+   123→  reported must have actually run with its real exit code.
+   124→
+   125→### 2.2 Red lines (standing prohibitions — verbatim in spirit, binding always)
+   126→
+   127→1. **Never generate, recover, or expose production keys.** No mainnet keypair may
+   128→   be created, derived, restored, or displayed. Devnet-only disposable keys are
+   129→   permitted (the payer in §5.2 is one) and live outside every repository.
+   130→2. **No governance changes.** No `update_protocol_config` against the *live
+   131→   devnet* deployment, no timelock/multisig actions, no authority transfers.
+   132→   (Inside the W1 local validator, governing the *local* deployment with *fresh
+   133→   local* keys is precisely the point — that is not a governance change.)
+   134→3. **No program deployments to any live cluster.** Local test-validator deploys
+   135→   are fine; devnet/mainnet deploys require explicit owner authorization.
+   136→4. **No devnet transactions and no fees** except where an owner decision has
+   137→   already funded and authorized them (the 2026-10-26 verify-path matrix was
+   138→   such a case; nothing new is authorized).
+   139→5. **Never weaken existing security checks or modify production behavior to
+   140→   make a harness pass.** If the harness fails, the failure is reported, not
+   141→   papered over.
+   142→6. **Never represent an incomplete harness as full lifecycle validation.** Every
+   143→   mocked, stubbed, or compressed boundary must be labeled in the run report.
+   144→7. **No mock may silently replace real program execution** in anything claimed
+   145→   as lifecycle coverage.
+   146→
+   147→### 2.3 Worklog protocol
+   148→
+   149→The shared worklog is `/home/z/my-project/worklog.md`. It is **append-only**;
+   150→each task block starts with a line containing exactly `---` and carries:
+   151→
+   152→```
+   153→Task ID: <id>            (global order; parallel work = 2-a, 2-b, …)
+   154→Agent: <who>
+   155→Task: <what was asked>
+   156→
+   157→Work Log:
+   158→- <concrete steps with real exit codes, commit SHAs, file counts>
+   159→
+   160→Stage Summary:
+   161→- <key results, decisions, artifacts>
+   162→```
+   163→
+   164→Current state through this volume: Tasks 0–11 are recorded (0–1 session open and
+   165→clones; 2–5 Phase 2 build-out; 6-6c push runbook + devnet payer + CI fixes;
+   166→7-7b live 13/13 matrix + push; 8 custody guides; 9 Phase 3 readiness assessment;
+   167→10 P3-A console/indexer real-data pass; 10.1 push + CI verification; 11 the
+   168→2026-10-28 documentation push). This volume is accompanied by worklog Task 12.
+   169→
+   170→### 2.4 Workspace fragility notes (read before trusting any observation)
+   171→
+   172→- **Hard resets happen.** At least twice the workspace was destroyed and
+   173→  restored from partial artifacts. Assume anything outside Git and outside
+   174→  `download/` can vanish: it already erased one worklog and one authority
+   175→  keypair. This is why this volume exists and why the owner asked for repo
+   176→  landings of all work products.
+   177→- **Filemode churn on restore.** Every restore re-loosens file modes
+   178→  (100644→100755 across whole trees) with zero content delta. As of 2026-10-28
+   179→  all four repos are clean again (verified: `git status --porcelain` = 0 files;
+   180→  `git diff --stat` = 0 insertions/deletions). If you see hundreds of "modified"
+   181→  files, check `git diff --stat` before believing them; restore with
+   182→  `git checkout -- .` only after confirming zero content delta.
+   183→- **Tool-output display artifact.** This environment's transport drops the
+   184→  two-character sequence `[m` from displayed text, so `branches: [main]` renders
+   185→  as `branches: ain]`. This caused a weeks-long false report of malformed CI
+   186→  triggers across six workflow files. The byte-level truth (verified 2026-10-27,
+   187→  recorded in the Next-Milestone assessment §1.2): **all six workflow files are
+   188→  valid**; the Phase 3 commit `8d9dc3e` was right. Treat any bracketed-main
+   189→  display anomaly here as suspect and verify with a byte count.
+   190→- **pnpm workspace build order.** `salvor-bots` packages cross-reference each
+   191→  other's `dist/`; run `pnpm -r build` before `pnpm -r test`. The root SDK
+   192→  mirror is tested with `pnpm -w test`. pnpm 9 is installed via
+   193→  `npm i -g pnpm@9` if missing.
+   194→- **Submodule.** `grave-indexer/vendor/protocol` is a real git submodule pinned
+   195→  to protocol `5b84440`; the offline test battery uses it as a real copy. After
+   196→  workspace restores, `git -C vendor/protocol checkout -- .` clears its internal
+   197→  mode churn (it is currently clean).
+   198→
+   199→---
+   200→
+   201→## 3. Verified repository and CI state (as of 2026-10-28)
+   202→
+   203→### 3.1 Repositories and sync
+   204→
+   205→| Repo | Remote main | Local | Delta | Last change |
+   206→|---|---|---|---|---|
+   207→| graveyield-protocol | `5a02e47` | same | in sync | 2026-10-28 docs landing (assessments + Vol III handoff + docs index) on top of `5b84440` (Dependabot triage record) |
+   208→| grave-indexer | `e9109e6` | same | in sync | 2026-10-28 custody-guide docx landing on top of `159a244` (cluster-split fix); submodule `vendor/protocol = 5b84440` |
+   209→| salvor-bots | `cefbed0` | same | in sync | NS-2 fresh devnet deployment — re-key programs (DR-001) |
+   210→| graveyield-console | `8d9dc3e` | same* | in sync* | freshness tests (P3-A final commit) — *local clone was 6 behind and was never fast-forwarded locally; remote is authoritative and green |
+   211→
+   212→All four local trees: `git status --porcelain` = 0 entries; only-filemode drift
+   213→restored 2026-10-28. The indexer submodule is clean at its pin.
+   214→
+   215→### 3.2 CI state
+   216→
+   217→| Repo @ head | Workflow | Conclusion |
+   218→|---|---|---|
+   219→| protocol @ `5a02e47` | CI (rust fmt/clippy/test, ts build+test, sdk-sync, anchor build, typecheck, lint, terminology, doc-links) | **success** (run 40633519919) |
+   220→| protocol @ `5a02e47` | CodeQL | **success** (run 40633520084) |
+   221→| indexer @ `e9109e6` | ci (build + typecheck + offline battery; devnet evidence smoke) | **success** |
+   222→| protocol @ `5b84440` | fork-harness (scheduled, 2026-10-27) | **failure — PRE-EXISTING, undiagnosed** |
+   223→
+   224→The fork-harness failure deserves a triage pass (likely fixture-fetch or
+   225→toolchain flake; it runs seven fork suites against real mainnet fixtures). It
+   226→predates the docs-only push of 2026-10-28 and is not caused by it. Historically
+   227→the same workflow's badge was green; nothing in this engagement changed program
+   228→code since `5b84440`.
+   229→
+   230→Also verified (2026-10-27, byte-level, see §2.4): all six workflow files across
+   231→the repos contain a valid `branches: [main]` filter; the long-reported malformed
+   232→trigger was a display artifact, not a defect.
+   233→
+   234→### 3.3 Test batteries (independently re-run 2026-10-27, remote heads)
+   235→
+   236→| Suite | Head | Result | Exit |
+   237→|---|---|---|---|
+   238→| graveyield-console (`bun test`) | `8d9dc3e` | 45/45 pass | 0 |
+   239→| grave-indexer offline battery + typecheck (src+test) | `159a244` | 59/59 pass, clean | 0 |
+   240→| salvor-bots workspace packages (7 suites) | `cefbed0` | 238/238 pass | 0 |
+   241→| salvor-bots root SDK mirror | `cefbed0` | 116/116 pass | 0 |
+   242→| protocol TS workspace (sdk, indexer, ops, adversary) | `5b84440` | 231/231 pass | 0 |
+   243→| protocol Rust unit + 7 fork suites | `5b84440` | not runnable in this workspace (no toolchain) — CI-based evidence | — |
+   244→
+   245→### 3.4 Documentation landings (2026-10-28, both commits authored by the owner identity)
+   246→
+   247→- `graveyield-protocol/docs/assessments/` — `phase3-assessment.md`,
+   248→  `phase4-assessment.md` (the 2026-10-27 Next-Milestone Assessment), and a
+   249→  provenance `README.md`; indexed from `docs/README.md` under "Session
+   250→  assessments and handoff volumes" with an explicit *working records, not
+   251→  canon* clause.
+   252→- `graveyield-protocol/docs/handoffs/GraveYield_Engineering_Handoff_Phase2_2026-10-26.docx`
+   253→  — Vol III of this family.
+   254→- `grave-indexer/docs/GraveYield_Oracle-Custody_Registration_Guide_2026-10-26.docx`
+   255→  — the full 23-page custody walkthrough, cross-linked from
+   256→  `docs/ORACLE_CUSTODY.md` ("Full illustrated guide" section).
+   257→- Pre-push gates that ran green: `doc-links-lint.sh` (109 relative links
+   258→  resolve), `terminology-lint.sh` (no forbidden vocabulary), secret scan over
+   259→  markdown and unzipped docx (zero token/key matches), files normalized back to
+   260→  mode 100644.
+   261→
+   262→---
+   263→
+   264→## 4. What is real vs simulated today (short form; full matrix in the Next-Milestone assessment §3)
+   265→
+   266→- **Implemented and live-proven (read paths):** devnet deployment + configs;
+   267→  indexer discovery/evidence pipeline; verify-path 13/13 live matrix against the
+   268→  deployed scanner (2026-10-26 record, `examples/verify-path-report.live.json`);
+   269→  SDK read paths and devnet smokes; console Graveyard rendering of a real
+   270→  mainnet snapshot and live ProtocolConfig pulse decoding (fail-closed).
+   271→- **Implemented and tested, never executed live anywhere:** every
+   272→  attestation-gated on-chain write (`record_launch_price`,
+   273→  `evaluate_pool_phase_1/2`), the entire salvage path (withdraw CPI, slippage
+   274→  ceiling, 40/40/20 settlement, receipts), LP claims, dust sweep, scout
+   275→  submission mode, fleet-core live submit (hard-gated), monitor reconcile
+   276→  against a real receipt.
+   277→- **Simulated:** console fleet feed/KPIs/claims fixtures (labeled; three
+   278→  specific label gaps tracked as W1b), the Jupiter leg in tests (documented
+   279→  test-only stand-in at the pinned aggregator program ID).
+   280→- **Impossible right now:** any attestation-signed on-chain action on devnet —
+   281→  both registered oracles equal the erased NS-2 authority key (§7 B1).
+   282→
+   283→---
+   284→
+   285→## 5. Credential and token state
+   286→
+   287→### 5.1 PAT handling runbook (owner-provided token, env-only discipline)
+   288→
+   289→The established, charter-compliant way this engagement pushes to GitHub:
+   290→
+   291→1. Owner pastes the PAT in chat → operator exports it **only** as
+   292→   `GH_TOKEN` in the executing shell. It is never printed, never written to
+   293→   disk, never embedded in URLs, argv, or git config.
+   294→2. Git auth goes through `scripts/git-askpass.sh` (token-free helper that reads
+   295→   `GH_TOKEN` from the environment at call time; `Username` → `x-access-token`,
+   296→   `Password` → `$GH_TOKEN`), invoked as
+   297→   `GIT_ASKPASS=… git -c credential.helper= push <url> main:main`.
+   298→3. API reads use `curl -H @-` with the auth header supplied on stdin.
+   299→4. Identity gate before any push: `/user` must return `sethoshi18` / `55265644`.
+   300→5. After every push: `ls-remote` head must equal local head must equal API head
+   301→   (three-way verification), then CI is polled on the pushed SHA.
+   302→
+   303→Reusable scripts from this session: `scripts/survey_repos.sh` (fetch + ahead/
+   304→behind + remote heads for all four repos), `scripts/push_docs_2026-10-28.sh`
+   305→(identity gate → push → three-way head gate → API author check → CI listing).
+   306→Both follow the runbook and never persist the token.
+   307→
+   308→> **⚠️ ACTION REQUIRED (owner): rotate the PAT.** It transited chat on
+   309→> 2026-10-28 (and on earlier occasions). Nothing on disk or in any repo contains
+   310→> it — the runbook is env-only by construction — but chat transport is not a
+   311→> secret channel. Post-rotation, pushes simply wait for the fresh token; the
+   312→> runbook is unchanged.
+   313→
+   314→### 5.2 Key inventory
+   315→
+   316→| Key | Where | State | Rules |
+   317→|---|---|---|---|
+   318→| Devnet payer `8G6nsmrAG3JnQYoPcQzjYpfRgJ2PJJX5AgNPcaodcP6L` | `/home/z/my-project/keys/devnet-payer.json`, mode 0600, outside every repo | funded 0.05 SOL devnet (5× the original requirement); balance verified 2026-10-27 | devnet-only; never commit; re-check `chmod 600` after any workspace restore (restores keep re-loosening it) |
+   319→| NS-2 authority key (= both oracle signers + upgrade authority, `AsB5u…EWXa`) | **erased** in the 2026-10-26 workspace reset | unknown custody — owner decision D1 | never regenerate/re-key without owner decision (§7 B1) |
+   320→| Canonical NS-2 program keypairs (scanner/vault deploy keys) | unknown in this workspace (`local_rehearsal.sh` looks in `${GY_DEVNET_KEYS:-$HOME/my-project/devnet-keys}`) | custody unverified — W1 step 0 item | never fabricate; if absent, W1 uses the local-build or loader path (§11 C1) |
+   321→| W1 fresh local keys | to be minted by the harness into a temp dir, gitignored, 0600, discarded | not yet created | ephemeral by design; nothing persists |
+   322→
+   323→---
+   324→
+   325→## 6. Devnet deployment and economics (NS-2)
+   326→
+   327→### 6.1 Coordinates (all public, verified live 2026-10-27)
+   328→
+   329→| Object | Address | Notes |
+   330→|---|---|---|
+   331→| GraveScanner program | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` | executable, BPF-loader-owned |
+   332→| GraveVault program | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` | executable |
+   333→| scanner ProtocolConfig PDA | `Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD` | 252 bytes, scanner-owned |
+   334→| vault ProtocolConfig PDA | `hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS` | 210 bytes, vault-owned |
+   335→| Retired DR-001 scanner | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | still on-chain, historical artifact only |
+   336→| Devnet payer | `8G6nsmrAG3JnQYoPcQzjYpfRgJ2PJJX5AgNPcaodcP6L` | 0.05 SOL |
+   337→
+   338→Console constants and regression tests pin the NS-2 IDs (Phase 3 guards fail
+   339→loudly on the retired ones); indexer defaults match.
+   340→
+   341→### 6.2 The decisive census
+   342→
+   343→`getProgramAccounts` on both programs (2026-10-27): exactly **one account per
+   344→program** — the two ProtocolConfigs. Zero EligibilityAnchor, EligibilityCert,
+   345→LaunchPrice, PoolRegistry, SalvageReceipt, ClaimRecord accounts exist. **The
+   346→lifecycle has never executed on-chain** — not one stage of it — anywhere outside
+   347→the in-VM fork harness. This is the fact that motivates W1 (rehearse locally)
+   348→and W3 (first controlled devnet run, separately authorized).
+   349→
+   350→### 6.3 Epoch pacing
+   351→
+   352→Epoch 1193 at verification time; 432,000 slots/epoch ≈ 2–4 days wall clock per
+   353→epoch on devnet. The C6 two-epoch confirmation (`MIN_EPOCH_CONFIRMATION=2`) is
+   354→therefore ~4–6 days of wall clock on real devnet — W1 compresses this with
+   355→`--slots-per-epoch` (e.g. 32) so the boundary runs in minutes locally; W3 pays
+   356→the real wait. Fork tests prove the boundary (6016 at gap 1, pass at exactly 2).
+   357→
+   358→### 6.4 Cost ledger
+   359→
+   360→- **W1 costs nothing**: local validator, airdropped local SOL, no live-cluster
+   361→  writes, no infrastructure.
+   362→- **W2/D1 path (a)** (key survives → register oracles): one 80-byte
+   363→  `update_protocol_config` transaction; rent-free; payer funded.
+   364→- **W2/D1 path (b)** (NS-3 refresh): rehearsed scripts exist; devnet-only cost
+   365→  ≈ **6–8 SOL of rent**; produces new program IDs requiring mechanical updates
+   366→  already guarded by console regression tests.
+   367→- **W3**: devnet pool creation + salvage → modest rent/fees on devnet only.
+   368→
+   369→---
+   370→
+   371→## 7. Blocker register (restated for W1 scoping)
+   372→
+   373→**Critical (gates devnet progress, NOT W1):**
+   374→
+   375→- **B1 — NS-2 ProtocolConfig authority key erased.** One keypair was, at
+   376→  initialize: config authority for both programs, both oracle signers, and
+   377→  program upgrade authority. Consequences while unresolved: no
+   378→  `update_protocol_config` on the live deployment (oracle registration 9.5
+   379→  cannot execute); no valid C1/C2 attestations can verify on devnet (6026 on
+   380→  every submission); no authority pause/unpause; no upgrades. Owner decision D1:
+   381→  (a) key in owner custody → execute `grave-indexer/docs/ORACLE_CUSTODY.md` as
+   382→  written; (b) key lost → approve NS-3 refresh. **No session may attempt any
+   383→  re-key, regeneration, or governance action on the live deployment.**
+   384→- **B2 — No registered oracle keypair** (subsumed by B1): the positive-path
+   385→  verify case ends 6026 by design until registration; scout submission mode
+   386→  requires `ACTIVITY_ORACLE_KEY`.
+   387→
+   388→**Integration gaps (must close before/at fleet operation; not W1 blockers):**
+   389→
+   390→- **B3 — Scout→executor transport missing.** Envelope format exists and is
+   391→  validated, but nothing in production converts `ScoutOpportunity` →
+   392→  `OpportunityEnvelope` or carries it; every `buildEnvelope` call site is a
+   393→  test; `wireFleet` wires Scout+Monitor only.
+   394→- **B4 — Production attestation source missing.** fleet-core's
+   395→  `LocalAttestationSource` is tests + devnet drill; the intended indexer oracle
+   396→  service has no client.
+   397→- **B5 — `deriveLastSwapV4` robustness** (ALT / version-1 transactions):
+   398→  activity derivation failed for 11 of 12 enriched pools in the Phase 3
+   399→  snapshot; caps attestation yield on mainnet-like data. Tracked as W4
+   400→  (protocol changeset + salvor mirror sync).
+   401→- **B6 — Shared `FleetStore` / lease fencing (finding F5):** single-process
+   402→  only; expired-lease takeover unfenced. Tracked as W5.
+   403→
+   404→**Pre-mainnet tracked rows (safe to wait):** KEYS-003 (custody-generated
+   405→mainnet keypairs), GOV-001 (timelock wiring decision — currently deliberately
+   406→unwired, 7014 never raised), ORACLE-003 (custody/rotation drills outstanding),
+   407→CPI-002…008 (non-V4 AMMs — v1.1), LOCKER-002, KEYS-002, NS-8 (doc corrections),
+   408→NS-9 (IDLs not committed), SDK npm publish. W1b (console honesty micro-fixes)
+   409→remains approved-in-principle, unstarted.
+   410→
+   411→---
+   412→
+   413→## 8. The W1 authorization (verbatim, from the owner, this thread)
+   414→
+   415→> **Proceed with W1: Lifecycle Rehearsal Harness**, based on the 2026-10-27
+   416→> Next-Milestone Assessment. This is an implementation authorization for W1
+   417→> only. Do not begin W2 or W3.
+   418→>
+   419→> **Objective:** Build a reproducible, single-command local end-to-end
+   420→> rehearsal harness that uses the real deployed program binaries (appropriate
+   421→> local-validator setup) and the real TypeScript SDK/client paths, and includes
+   422→> adversarial testing.
+   423→>
+   424→> **Requirements:**
+   425→> 1. Inspect the existing fork harnesses, local rehearsal scripts, deployment
+   426→>    scripts, SDK builders, scanner, vault, indexer, and Salvor client
+   427→>    interfaces before designing anything new.
+   428→> 2. Reuse existing infrastructure and fixtures wherever possible; do not
+   429→>    duplicate settlement logic or create a second implementation of the
+   430→>    protocol.
+   431→> 3. Define exactly which lifecycle stages the harness can rehearse, which need
+   432→>    oracle authorization, and which cannot be tested due to the missing
+   433→>    authority key.
+   434→> 4. Cover the happy path and the relevant negative cases: unauthorized
+   435→>    operations, illegal lifecycle transitions, replay attempts, duplicate
+   436→>    claims, accounting invariants, transaction atomicity.
+   437→> 5. Use deterministic fixtures and document all preconditions; do not
+   438→>    silently substitute mocks for real program execution.
+   439→> 6. Clearly distinguish: real program execution vs mocked RPC vs stubbed
+   440→>    Jupiter vs off-chain simulation.
+   441→> 7. Never generate, recover, or expose production keys; attempt no governance
+   442→>    changes; deploy no programs; submit no devnet transactions; incur no fees.
+   443→> 8. Do not weaken existing security checks or modify production behavior to
+   444→>    make the harness pass.
+   445→>
+   446→> **Acceptance criteria:**
+   447→> 1. A documented, reproducible single command from a clean checkout.
+   448→> 2. The harness uses real program binaries and real TS client paths for every
+   449→>    stage it claims to cover.
+   450→> 3. Explicit assertions for both success and adversarial cases.
+   451→> 4. Assertions verify expected account state changes, balance conservation,
+   452→>    and atomic rollback where applicable.
+   453→> 5. Every mocked or untested boundary is documented.
+   454→> 6. Existing test suites remain green.
+   455→> 7. A final report lists: files changed, commands, exit codes, test results,
+   456→>    known limitations, and the exact lifecycle stages validated.
+   457→>
+   458→> **Before implementation, identify any technical constraint that prevents a
+   459→> genuinely end-to-end local rehearsal and propose the smallest valid
+   460→> alternative. Do not represent an incomplete harness as full lifecycle
+   461→> validation.**
+   462→>
+   463→> **Stop after W1 and report the evidence.** W2 requires a separate owner
+   464→> decision, and W3 remains unauthorized until the local validation results and
+   465→> authority situation have been reviewed.
+   466→
+   467→Supplementary definition of done (from the assessment the owner authorized
+   468→against, §7 of that document): machine-readable JSON run report with per-stage
+   469→tx signature, slot, program logs and asserted events
+   470→(`EligibilityAnchorWritten`, `EligibilityCertIssued`, `PoolSalvaged`,
+   471→`SalvageCompleted`, `LpClaimProcessed`); final balances exactly 40/40/20
+   472→(± D7 floor rounding); Σ ClaimRecords == registry cumulative == Σ floors
+   473→recomputed from the snapshotter artifact; adversarial cases assert the precise
+   474→error code (6026/7002/7003/7010/7009/7018, registry-init failure) **and** a
+   475→before/after balance-invariant check proving zero state movement; headless-CI-
+   476→able; ELFs sha256-pinned against `docs/DEVNET.md`; tooling decision D5
+   477→(install toolchain vs fetch CI artifacts) to be settled at step 0.
+   478→
+   479→**Status: W1 has NOT been started.** What exists so far is the reconnaissance
+   480→preparation in §9–§11 of this volume — explicitly *inputs* to the mandated
+   481→step-0 inspection, not its replacement.
+   482→
+   483→---
+   484→
+   485→## 9. Condensed reconnaissance — the reuse map (W1 requirement 1 input)
+   486→
+   487→Everything below exists at the current heads and is a candidate for direct
+   488→reuse. Paths are relative to each repo root. This map was assembled from the
+   489→2026-10-27 deep-dives plus this session's verification; the next session must
+   490→re-verify the load-bearing entries at step 0 before designing (requirement 1).
+   491→
+   492→### 9.1 graveyield-protocol (programs, SDK, fork harnesses, devnet kit)
+   493→
+   494→| Asset | Role | W1 relevance |
+   495→|---|---|---|
+   496→| `scripts/devnet/local_rehearsal.sh` | Boots `solana-test-validator`, mints throwaway deployer/intruder keys, deploys both ELFs via the production `deploy_devnet.sh`, initializes both ProtocolConfigs via `protocol_admin.mjs init-all`, runs pause/intruder-reject/unpause drills. Fully self-cleaning (mktemp + trap). | **The boot/teardown pattern to copy.** ⚠️ Its deploy path (`solana program deploy`) requires program keypairs matching the ELFs' embedded `declare_id!` and refuses without them (exit 2) — see constraint C1. |
+   497→| `scripts/devnet/deploy_devnet.sh` | Production deploy script (build → identity check → deploy → fund guards). | Reused verbatim by the rehearsal script; the identity-check behavior is the thing W1 must either satisfy (keypair custody) or route around (validator loader flags — C1, DRAFT). |
+   498→| `scripts/devnet/protocol_admin.mjs` | `init-all` (both ProtocolConfigs) + `drill` (pause/intruder/unpause) + `decodeProtocolConfig` readback at pinned offsets. | Config initialization and readback verification for the local deployment. |
+   499→| `scripts/build_fork_harness.sh` | Builds scanner/vault/jupiter_v6_stub ELFs (`cargo build-sbf`), copies to `tests/fixtures/`, fetches mainnet fixtures, runs **all seven** fork suites. | The canonical build+run pipeline; also the proof that the Jupiter stand-in is built from `programs/grave-vault/tests/jupiter_v6_stub/`. |
+   500→| `scripts/fetch_v4_fork_fixtures.mjs` | Pulls REAL mainnet Raydium V4 state + program ELFs (pool `58oQCh…YQo2`), cross-validates every account against authoritative layouts (AmmInfo 752 B offsets, Serum MarketState), writes `*.bin` + `manifest.json`; fails loudly on mismatch; fixtures gitignored (multi-MB). | **Deterministic-fixture source** (requirement 5). The manifest's cross-validation is the determinism guarantee to inherit. |
+   501→| `programs/grave-vault/tests/*_fork.rs` (7 suites, ~50 tests) | raydium_v4 (withdraw CPI wire), jupiter_conversion (route vetting/slippage/orientation), settlement_economics (40/40/20 + D7/D6), lp_claim (merkle/double-claim), full_lifecycle, scanner_windows (attestation windows/replays/oneshot), security_negative (on-chain negatives). | The behavioral oracle for W1: every happy-path and adversarial expectation W1 asserts on a live validator has a fork-tested precedent to match against. |
+   502→| `programs/grave-vault/tests/jupiter_v6_stub/` | Test-only Jupiter v6 stand-in at the pinned aggregator program ID. | The conversion leg stand-in (boundary to label — C3). |
+   503→| `sdk/src/*` | The real TS client: `client.ts` (program ID constants incl. devnet strings + PublicKey forms in `config`), `instructions.ts`, `discriminators.ts`, `pdas.ts`, `borsh.ts`, `accountDecoders.ts`, `certifyAndSalvage.ts`, `salvagePool.ts`, `lastSwapAttestation.ts` (112 B C1) + `launchPriceAttestation.ts` (168 B C2), `snapshot.ts`, `simulation.ts`, `priorityFee.ts` (charter fee guard), `merkle.ts`, `raydiumV4.ts` + `raydiumV4Constants.ts`, `web3compat.ts`. | **The "real TS client path" W1 must drive** (requirement 2) — the harness calls these builders against the local RPC, never in-process program invocations. |
+   504→| `sdk/test/fakeRpc.ts`, `sdk/test/devnetSmoke.test.ts` | Existing test plumbing patterns. | Shape reference for the harness's RPC-facing layers. |
+   505→| `adversary/` (8 suites) + `ops/` (scenarios, vault observer, health) | Offline adversarial battery + ops tooling. | Adversarial expectation source (requirement 4); `ops` scenarios may seed harness case structure. |
+   506→| `indexer/`, `snapshotter/` (Rust crates) | On-chain indexer + snapshot builder (merkle tree, artifact). | The **real snapshotter** runs as a local binary in the happy path (assessment §6 step 3). |
+   507→| `Anchor.toml`, `rust-toolchain.toml` (1.91.1) | Build config. | Needed only if the toolchain path (D5-a) is chosen. |
+   508→| `docs/DEVNET.md`, `docs/ORACLE_PIPELINE.md`, `docs/technical-documentation.md:489`, `docs/PROTOCOL_SPEC.md`, `docs/ADVERSARY.md`, `docs/PRE_MAINNET_CHECKLIST.md` | Deployment record (ELF sha256s, NS-2), oracle pipeline + §6.4 key-erasure record, Jupiter stand-in documentation, frozen spec, threat taxonomy, checklist. | DEVNET.md is the sha256 pin source for requirement "no drift"; ORACLE_PIPELINE §2.3 documents the as-implemented 6024/6025/6026 check order. |
+   509→
+   510→### 9.2 grave-indexer (evidence pipeline + custody runbook)
+   511→
+   512→| Asset | Role | W1 relevance |
+   513→|---|---|---|
+   514→| `src/evidencePath.ts` + `src/sign.ts` | The verify-path harness: 13-case matrix (6 verifier-level + 7 program-level), `resolvePayerKeypair` (`PAYER_KEY_FILE`, custody rules mirroring `ORACLE_KEY_FILE`), `signLaunchPriceMessage` (168 B) vs `signAttestationMessage` (112 B, cross-format use throws). | **The existing model for "real TS client against a real program with exact-error assertions"** — W1's adversarial cases mirror its structure, pointed at the local validator instead of devnet. |
+   515→| `src/config.ts` | `ORACLE_IS_REGISTERED` (declared, not consumed — decorative), program-ID overrides, key-file resolution. | Step-0 note: W1's local run WILL consume real registration, so the flag's decorativeness must not leak into harness logic. |
+   516→| `src/discovery.ts` + `src/activityLive.ts` | Pool discovery + activity derivation (`deriveLastSwapV4`, ALT/v1 gap B5). | Discovery stage realism; the ALT/v1 yield gap shapes fixture selection (C5). |
+   517→| `src/consoleSnapshot.ts` | Phase 3 typed, secret-free, fail-closed snapshot contract. | Pattern reference for machine-readable run reports (acceptance criterion 2/7). |
+   518→| `docs/ORACLE_CUSTODY.md` (+ full docx guide) | The 4-step registration procedure: offline 0600 keygen → 80-byte `update_protocol_config` registration → `ORACLE_KEY_FILE` → verify-path acceptance. | **W1 executes this procedure verbatim against the local deployment** (fresh local authority + oracles) — validating the runbook itself. |
+   519→| `docs/ORACLE_PIPELINE.md` | As-implemented oracle interface, §6.4 key-erasure record, §8.3 ALT limitation. | Constraint citations for the matrix. |
+   520→| `examples/verify-path-report.live.json` | The green 13/13 live report (2026-10-26). | Report schema precedent. |
+   521→
+   522→### 9.3 salvor-bots (execution stack)
+   523→
+   524→| Asset | Role | W1 relevance |
+   525→|---|---|---|
+   526→| root `src/` | Byte-identical SDK mirror (enforced by protocol CI `sdk-sync-check` — any divergence fails). | If W1 changes SDK code (it should not), the mirror must be synced in the same coordinated changeset. |
+   527→| `scout/` | Discovery → prefilter → admission (hard/soft refusals) → submission builders; dry-run mode live-proven; submission mode never run. | W1 exercises scout submission builders against the local validator where they bind to real stages (C2 boundary for the queue→executor seam). |
+   528→| `fleet-core/` | The full engine: `pipeline.ts` (prepare/simulate/submit), hard `mode:"live"` gate, `LocalAttestationSource`, `estimator.ts`, `revalidate.ts`, `policy.ts`, `route.ts`, `raydiumAccounts.ts`, 15-state lifecycle, at-most-once admission. All 238 tests against `FakeConnection`. | **The salvage executor W1 drives in `mode:"live"` against the local RPC** — the first-ever non-fake submit path execution. |
+   529→| `fleet-ops/` | Wires Scout + Monitor (`wireFleet`); no executor wiring (B3). | Defines the seam W1 does NOT cover; harness drives fleet-core directly. |
+   530→| `monitor/` | Reconcile receipts (40/40/20 ±1 lamport checks). | Settlement verification stage of the happy path. |
+   531→| `conservative/`, `experimental/`, `sniper/` | Strategy packages (offline-tested). | Out of W1 scope; do not wire. |
+   532→| Build order | `pnpm -r build` **before** `pnpm -r test` (dist cross-references); root mirror via `pnpm -w test`. | Environment precondition (§2.4). |
+   533→
+   534→### 9.4 graveyield-console (consumer; honesty gaps)
+   535→
+   536→| Asset | Role | W1 relevance |
+   537→|---|---|---|
+   538→| `src/lib/gy/data.ts` | NS-2 program IDs + PDA regression guards. | Program-ID ground truth for harness constants. |
+   539→| Snapshot loader + Graveyard/pulse surfaces | Fail-closed real-data rendering. | None directly (W1 emits its own report); W1b's honesty fixes remain unstarted. |
+   540→
+   541→---
+   542→
+   543→## 10. DRAFT lifecycle-stage × testability matrix (verify at step 0 — requirement 3 input)
+   544→
+   545→**DRAFT — verify at step 0.** Classification logic: on the local validator, the
+   546→harness mints a **fresh local authority** and registers **fresh local oracle
+   547→keys** via the exact `ORACLE_CUSTODY.md` procedure — so "needs oracle
+   548→authorization" stages become locally executable, and the *missing devnet
+   549→authority key (B1) blocks nothing locally*. What remains non-rehearsable locally
+   550→is driven by physics (real Jupiter, wall-clock epochs) and by the missing
+   551→production seams (B3/B4), not by key custody.
+   552→
+   553→| # | Lifecycle stage | Locally rehearsable (real ELF + real TS client) | Needs oracle auth | Blocked by missing authority key | Boundary to label |
+   554→|---|---|---|---|---|---|
+   555→| 1 | Validator boot + program load at NS-2 IDs | DRAFT yes (loader path C1 vs keypair path) | — | no | ELF provenance (sha256 vs DEVNET.md) |
+   556→| 2 | ProtocolConfig initialize (`init-all`) | yes | — | no (fresh local authority) | none |
+   557→| 3 | Oracle registration (`update_protocol_config`, 80 B) | yes — exercises ORACLE_CUSTODY.md verbatim | authority (fresh local) | no | runbook validation, not devnet custody |
+   558→| 4 | Candidate discovery + evidence (indexer path) | partial (fixture pool; read-only RPC) | — | no | mainnet fixture freshness; B5 yield gap |
+   559→| 5 | `record_launch_price` (168 B C2 attestation) | yes | launch-price oracle (fresh local) | no | — |
+   560→| 6 | `evaluate_pool_phase_1` (112 B C1 attestation → anchor) | yes | activity oracle (fresh local) | no | — |
+   561→| 7 | C6 two-epoch confirmation | yes (compressed `--slots-per-epoch`) | — | no | **compressed epochs ≠ wall-clock epochs** |
+   562→| 8 | `evaluate_pool_phase_2` (→ eligibility cert) | yes | activity oracle | no | cert-expiry crossing not provable in-VM (inherited) |
+   563→| 9 | Snapshotter run (merkle artifact) | yes (real `grave-snapshotter` binary) | — | no | snapshot trust boundary (documented) |
+   564→| 10 | Vault salvage — withdraw CPI (Raydium V4) | yes (fixture pool accounts) | — | no | fixture pool is a mainnet clone, frozen state |
+   565→| 11 | Vault salvage — Jupiter conversion leg | yes with **stub** | — | no | **test-only Jupiter stand-in; real aggregator never exercised** |
+   566→| 12 | Settlement + receipts (40/40/20, D7/D6) | yes | — | no | — |
+   567→| 13 | `monitor.reconcile` (±1 lamport) | yes | — | no | — |
+   568→| 14 | `claim_lp_proceeds` ×N (merkle) | yes (fresh local holders) | — | no | — |
+   569→| 15 | `sweep_dust` | yes | — | no | — |
+   570→| 16 | Pause / intruder-reject / unpause drills | yes (via `protocol_admin.mjs drill`) | authority | no | — |
+   571→| 17 | Squads timelock / multisig governance | **no** | — | no | GOV-001 unwired; no Squads program locally — out of scope, documented |
+   572→| 18 | Anything against the LIVE devnet deployment | **no — unauthorized** | — | **yes (B1)** | devnet custody situation is W2's subject, not W1's |
+   573→
+   574→Adversarial cases to assert (each: exact error code + zero-state-movement
+   575→balance check, per the DoD): unauthorized attestation signer (6026, and the
+   576→6025 sig-placement pin per `ORACLE_PIPELINE.md` §2.3 check order), ineligible
+   577→pool (C1/C3 variants), replayed salvage (PoolRegistry `init` failure),
+   578→duplicate claim (7010), overclaim (7009), expired-cert salvage (7002), paused
+   579→salvage (7003), tampered snapshot supply (7018), illegal transitions
+   580→(cert-before-anchor, salvage-before-cert), plus atomicity checks (failed
+   581→salvage leaves no partial PDA state — "no PDA survives the revert").
+   582→
+   583→---
+   584→
+   585→## 11. DRAFT constraint analysis — candidates for "smallest valid alternative" (verify at step 0)
+   586→
+   587→**DRAFT — hypotheses with proposed resolutions, to be confirmed or replaced by
+   588→the mandated step-0 inspection.** The W1 authorization requires this analysis
+   589→*before implementation*; the next session owns the verdicts.
+   590→
+   591→- **C1 — Program identity vs keypair custody (the sharpest one).**
+   592→  `local_rehearsal.sh`'s deploy path (`solana program deploy` via
+   593→  `deploy_devnet.sh`) requires program keypairs matching the ELFs' embedded
+   594→  `declare_id!` (NS-2 IDs); their canonical keypair files' custody in this
+   595→  workspace is unverified. *Candidate smallest alternatives:* (a) load the
+   596→  NS-2 ELFs directly with `solana-test-validator --bpf-program <ID> <so>` /
+   597→  `--upgradeable-program` (loader flag places the program at the given address
+   598→  without the deploy keypair — **verify this flag's exact semantics for
+   599→  upgradeable programs at step 0**); or (b) rebuild ELFs locally with fresh
+   600→  local program IDs (requires toolchain — C2 — and yields new IDs, weakening
+   601→  the "exact NS-2 bytes at NS-2 IDs" DoD); or (c) locate the canonical
+   602→  keypairs (`GY_DEVNET_KEYS` / `$HOME/my-project/devnet-keys` world) if the
+   603→  owner holds them. Preference order as it stands: (a) > (c) > (b).
+   604→- **C2 — No Rust/Solana toolchain in this workspace** (verified 2026-10-27:
+   605→  cargo/anchor/solana CLI absent). Owner decision D5: (a) install the
+   606→  toolchain (self-sufficient; heavier setup) or (b) fetch CI-built ELF
+   607→  artifacts with the owner PAT (lighter; adds a CI-artifact dependency and a
+   608→  token touchpoint). If (a), pin versions to `rust-toolchain.toml` (1.91.1) +
+   609→  Solana CLI 3.0.10 / platform-tools ≥ v1.54 per `build_fork_harness.sh`.
+   610→- **C3 — Real Jupiter v6 aggregator cannot run locally** (needs live mainnet
+   611→  routing state). *Smallest alternative (already the fork harness's own
+   612→  answer):* the documented `jupiter_v6_stub` at the pinned aggregator program
+   613→  ID, labeled as a stub in every run report. Real-aggregator compatibility
+   614→  stays an open item (never claimed as validated).
+   615→- **C4 — The Scout→executor seam does not exist** (B3). W1 therefore drives
+   616→  fleet-core's pipeline directly (the real executor) and exercises scout's
+   617→  submission builders where they bind to real stages; the queue→handoff
+   618→  transport itself is out of harness scope and documented as untested-by-W1.
+   619→  Do not build the transport to make the harness look end-to-end — that is W5
+   620→  work with an owner decision behind it.
+   621→- **C5 — `deriveLastSwapV4` ALT/version-1 yield gap** (B5; 11/12 pools failed
+   622→  activity derivation in the Phase 3 snapshot). The harness must not depend on
+   623→  the broken path for determinism: either select/construct fixture pool state
+   624→  whose activity derives, or feed attestations directly (the indexer path
+   625→  stays covered by its own suite). Labeled either way.
+   626→- **C6 — Fixture logistics.** Fork fixtures are gitignored multi-MB ELFs +
+   627→  account bins with a cross-validating `manifest.json`. The harness should
+   628→  reuse `fetch_v4_fork_fixtures.mjs` (network read-only, no cost) and fail
+   629→  loudly on manifest mismatch; determinism comes from the manifest, not from
+   630→  committing binaries.
+   631→- **C7 — Snapshotter as a real binary.** The happy path calls for the real
+   632→  `grave-snapshotter` crate binary; step 0 must confirm it builds/runs in the
+   633→  chosen toolchain path and can target a local RPC URL (its `rpc.rs` accepts
+   634→  an endpoint — verify).
+   635→
+   636→---
+   637→
+   638→## 12. Next-session execution checklist (W1, ordered)
+   639→
+   640→1. **Open**: read this volume; read the worklog tail; verify the four repos'
+   641→   status (expect: in sync with §3.1 heads, clean trees; if not, stop and
+   642→   diff).
+   643→2. **Step 0 — mandated inspection** (requirement 1): walk the §9 reuse map,
+   644→   confirming each load-bearing entry at the current head; resolve C1–C7 with
+   645→   verdicts; produce the **final** lifecycle-stage matrix (replacing §10's
+   646→   draft) and the final constraint statement. Present nothing for approval —
+   647→   the authorization is already given — but record everything in the worklog.
+   648→3. **Tooling decision D5**: pick and set up the ELF path (loader flags vs
+   649→   toolchain install); record sha256 of every ELF used against `DEVNET.md`.
+   650→4. **Design the harness** as a thin orchestrator over reused assets
+   651→   (requirement 2): one command, e.g.
+   652→   `bash scripts/devnet/lifecycle_rehearsal.sh` (name free, location should
+   653→   follow the repo's existing `scripts/devnet/` convention); stages per §10
+   654→   rows 1–16; adversarial cases per §10's list; JSON run report per the DoD.
+   655→5. **Implement** in the protocol repo (it owns programs + SDK + devnet kit),
+   656→   with salvor-bots imports where fleet-core/monitor are driven — mind the
+   657→   `sdk-sync-check` CI job and the workspace build order. Keys: minted at run
+   658→   time into mktemp dirs, 0600, never committed (requirement 7).
+   659→6. **Self-verify** (acceptance criteria): run the single command from a clean
+   660→   state; then re-run all existing suites (protocol TS 231, salvor 354,
+   661→   indexer 59, console 45; Rust suites if toolchain available) — requirement
+   662→   that everything stays green; secret-scan the diff; run the repo linters if
+   663→   docs changed.
+   664→7. **Stop and report** (stop condition): evidence report with files changed,
+   665→   commands, exit codes, test results, known limitations, the exact validated
+   666→   stage list, and the real-vs-mock boundary table. **Do not begin W2 or W3.**
+   667→8. If the session ends mid-work: the worklog + this volume are the recovery
+   668→   anchors; commit nothing partially — partial harness state lives in the
+   669→   worktree, documented in the worklog.
+   670→
+   671→---
+   672→
+   673→## 13. Evidence appendix — the 2026-10-28 session (commands actually run)
+   674→
+   675→- Survey: `scripts/survey_repos.sh` — for each of 4 repos: `git branch -vv`,
+   676→  `ls-remote`, `fetch --prune`, `rev-list --left-right --count main...origin/main`
+   677→  → result: 0 local-only commits everywhere; indexer 0/2, console 0/6 behind;
+   678→  remote heads authoritative (§3.1). Submodule check: gitlink `5b84440`, dir
+   679→  dirty from mode churn only → cleaned.
+   680→- Hygiene: `git checkout -- .` in all four repos + submodule after verifying
+   681→  `git diff --stat` = 0 insertions/deletions (filemode churn only);
+   682→  `chmod 600 keys/devnet-payer.json` (restore had re-loosened it).
+   683→- Secret scans over the docx/md set (including unzipped `word/document.xml`):
+   684→  zero matches for token/private-key/seed patterns. Handoff Vol III sniff:
+   685→  "secret-free by construction" confirmed; custody guide's only marker is the
+   686→  workspace key path already public in `ORACLE_CUSTODY.md`.
+   687→- Lints (protocol, pre-commit): `doc-links-lint.sh` → "checked 109 relative
+   688→  link target(s) … ok", exit 0; `terminology-lint.sh` → ok, exit 0.
+   689→- Commits (identity `sethoshi.eth <55265644+sethoshi18@users.noreply.github.com>`):
+   690→  protocol `5a02e47` "docs: land session assessment reports + Phase 2 handoff
+   691→  volume" (5 files, +355, incl. two docx binaries); indexer `e9109e6`
+   692→  "docs(custody): land full Oracle-Custody Registration Guide (docx)" (2 files,
+   693→  +8) — indexer commit rebased onto `origin/main` (`159a244`) for a clean
+   694→  fast-forward; no force-push anywhere.
+   695→- Pushes via `scripts/push_docs_2026-10-28.sh` (env-only token, askpass,
+   696→  identity gate `sethoshi18/55265644`): `5b84440..5a02e47 main->main` exit 0;
+   697→  `159a244..e9109e6 main->main` exit 0. Three-way head gate (ls-remote == local
+   698→  == API) passed for both; API author check passed for both.
+   699→- CI polls (authenticated): protocol @ `5a02e47` → CI success (run
+   700→  40633519919), CodeQL success (run 40633520084); indexer @ `e9109e6` → ci
+   701→  success. Pre-existing scheduled `fork-harness` failure on `5b84440`
+   702→  (2026-10-27) observed and flagged, not diagnosed (§3.2).
+   703→- Deliberately not pushed: `keys/` (secret), `scripts/` workspace plumbing,
+   704→  live `worklog.md`, transport bundles (`grave-indexer-phase2.bundle`,
+   705→  `phase2-tree.zip`), `download/grave-indexer-examples/` (already in-repo),
+   706→  `download/README.md` (placeholder).
+   707→
+   708→---
+   709→
+   710→## 14. Source-document index (where every fact lives)
+   711→
+   712→| Fact cluster | Canonical source |
+   713→|---|---|
+   714→| Engagement charter, red lines, session protocol | Vol III (`graveyield-protocol/docs/handoffs/GraveYield_Engineering_Handoff_Phase2_2026-10-26.docx`) §2 |
+   715→| Phase 2 build-out, live 13/13 matrix, payer funding, custody guides | worklog Tasks 6–8; `grave-indexer/docs/ORACLE_PIPELINE.md`; `grave-indexer/docs/ORACLE_CUSTODY.md` (+ docx) |
+   716→| Phase numbering collision + P3-A scoping | `graveyield-protocol/docs/assessments/phase3-assessment.md` |
+   717→| Post-Phase-3 verified state, coverage matrix §3, blockers §4, roadmap §5, W1 shape §6, DoD §7, decisions §8 | `graveyield-protocol/docs/assessments/phase4-assessment.md` (the 2026-10-27 Next-Milestone Assessment) |
+   718→| P3-A execution record (6 console + 2 indexer commits, CI green) | worklog Tasks 10, 10.1 |
+   719→| 2026-10-28 push evidence, lints, CI runs | worklog Task 11; §13 of this volume |
+   720→| Devnet coordinates + ELF sha256 pins | `graveyield-protocol/docs/DEVNET.md` |
+   721→| Oracle check order (6024/6025/6026 as implemented) | `grave-indexer/docs/ORACLE_PIPELINE.md` §2.3 |
+   722→| Fork-suite behavioral expectations | `graveyield-protocol/programs/grave-vault/tests/*.rs` + `tests/README.md` |
+   723→| W1 authorization verbatim | §8 of this volume (owner message, this thread) |
+   724→

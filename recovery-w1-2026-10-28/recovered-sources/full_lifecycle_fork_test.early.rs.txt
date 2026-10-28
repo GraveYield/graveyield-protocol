@@ -1,0 +1,702 @@
+     1→// SPDX-License-Identifier: Apache-2.0
+     2→//
+     3→// Phase 6 — the first COMPLETE GraveYield integration test (roadmap
+     4→// Phase 6). One test executes the entire protocol lifecycle end to end
+     5→// against real mainnet Raydium V4 / OpenBook / SPL-token bytecode:
+     6→//
+     7→//   candidate pool (real mainnet AmmInfo state)
+     8→//     -> GraveScanner initialize (governance thresholds, oracle keys)
+     9→//     -> record_launch_price      (C2 baseline: oracle-signed 168B Ed25519
+    10→//                                  attestation, runtime precompile path)
+    11→//     -> evaluate_pool_phase_1    (C1 evidence: indexer-signed 112B Ed25519
+    12→//                                  attestation + six criteria over the real
+    13→//                                  pool bytes) -> EligibilityAnchor
+    14→//     -> multi-epoch waiting period (VM warp; >= MIN_EPOCH_CONFIRMATION)
+    15→//     -> evaluate_pool_phase_2    (fresh C1 attestation, bitmap equality,
+    16→//                                  epoch gap) -> EligibilityCert
+    17→//     -> LP-holder snapshot over the live VM ledger (grave-snapshotter)
+    18→//     -> SnapshotMerkleTree -> sealed SnapshotArtifact -> JSON publication
+    19→//     -> salvage_pool             (real withdraw CPI + Jupiter stand-in
+    20→//                                  conversion + 40/40/20 settlement; the
+    21→//                                  artifact root + supply sealed on chain)
+    22→//     -> claim_lp_proceeds x5     (artifact proofs -> SOL in wallets)
+    23→//
+    24→// and asserts every state transition along the way.
+    25→//
+    26→// The forged-EligibilityCert stand-in the Phase 2.1-5.3 suites documented
+    27→// is GONE here: the cert that authorizes salvage is issued by the real
+    28→// grave-scanner program running as BPF in the same VM, and both
+    29→// attestation paths execute through the runtime's actual ed25519
+    30→// precompile verification. (Phase 6 also CORRECTED the scanner's
+    31→// precompile offset contract — the previously shipped 14-byte header is
+    32→// not a wire format any Solana runtime accepts; see
+    33→// grave-scanner/src/attestation.rs and spec rev 1.10.0.)
+    34→//
+    35→// Harness notes:
+    36→//   * The withdraw-leg economics are measured on a disposable VM that
+    37→//     runs the SAME full scanner path (no forged cert anywhere) with the
+    38→//     conversion leg disabled — the VM is deterministic, so the real
+    39→//     salvage's withdraw produces byte-identical deltas (the Phase 5.3
+    40→//     suite's measurement pattern, upgraded to the honest boot).
+    41→//   * Governance thresholds are configured explicitly (they are
+    42→//     governance parameters, not constants): the fork pool is a real
+    43→//     mainnet account, and the C1/C2 evidence authorities are test
+    44→//     keypairs, exactly as in production the indexer/oracle keys are
+    45→//     registered in ProtocolConfig at initialize.
+    46→
+    47→// solana-sdk 2.3 deprecates the monolithic `system_program` / `bpf_loader`
+    48→// modules in favour of the split interface crates; the deprecated paths
+    49→// still work and keep the harness on the same re-exports anchor-lang's
+    50→// prelude uses (same rationale as the Phase 3/4/5 suites).
+    51→#![allow(deprecated)]
+    52→
+    53→use std::path::PathBuf;
+    54→use std::str::FromStr;
+    55→
+    56→use anchor_lang::AccountDeserialize;
+    57→use anchor_lang::Space;
+    58→use grave_scanner::state::{
+    59→    EligibilityAnchor, EligibilityCert, LaunchPrice, ProtocolConfig as ScannerProtocolConfig,
+    60→};
+    61→use grave_snapshotter::source::InMemorySource;
+    62→use grave_snapshotter::{
+    63→    InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest,
+    64→    TokenAccountSnapshot,
+    65→};
+    66→use grave_vault::constants::{
+    67→    JUPITER_V6_PROGRAM_ID, RAYDIUM_V4_AMM_AUTHORITY, RAYDIUM_V4_PROGRAM_ID, VAULT_AUTHORITY_SEED,
+    68→    WSOL_MINT,
+    69→};
+    70→use solana_program_test::{BanksClient, ProgramTest, ProgramTestContext};
+    71→use solana_sdk::{
+    72→    account::Account,
+    73→    bpf_loader,
+    74→    hash::hash,
+    75→    instruction::{AccountMeta, Instruction},
+    76→    native_token::LAMPORTS_PER_SOL,
+    77→    pubkey::Pubkey,
+    78→    rent::Rent,
+    79→    signature::Keypair,
+    80→    signer::Signer,
+    81→    system_program,
+    82→    sysvar::clock as clock_sysvar,
+    83→    sysvar::slot_hashes as slot_hashes_sysvar,
+    84→    transaction::Transaction,
+    85→};
+    86→
+    87→fn vault_id() -> Pubkey {
+    88→    grave_vault::ID
+    89→}
+    90→fn scanner_id() -> Pubkey {
+    91→    grave_scanner::ID
+    92→}
+    93→fn spl_token_id() -> Pubkey {
+    94→    anchor_spl::token::ID
+    95→}
+    96→fn spl_ata_id() -> Pubkey {
+    97→    anchor_spl::associated_token::ID
+    98→}
+    99→/// Ed25519 signature-verification native program (precompile).
+   100→fn ed25519_id() -> Pubkey {
+   101→    Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()
+   102→}
+   103→/// UNCX Raydium AMM V4 locker — the marker PDA for this pool is supplied
+   104→/// (non-existent = proven unlocked) to satisfy the C5 marker gate.
+   105→fn uncx_locker_id() -> Pubkey {
+   106→    Pubkey::from_str("GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo").unwrap()
+   107→}
+   108→
+   109→/// Anchored wall-clock reference: the VM's genesis clock is "now", so any
+   110→/// attestation timestamp of `now - 3600` is comfortably in the past while
+   111→/// staying positive.
+   112→const INACTIVITY_MARGIN_SECONDS: i64 = 3_600;
+   113→
+   114→// AmmInfo offset of `lp_amount` (the pool's tracked LP balance).
+   115→const AMM_LP_AMOUNT_OFF: usize = 720;
+   116→// AmmInfo offsets of the pool's own pointers (scanner adapter parity).
+   117→const AMM_COIN_VAULT_OFF: usize = 336;
+   118→const AMM_PC_VAULT_OFF: usize = 368;
+   119→const AMM_COIN_MINT_OFF: usize = 400;
+   120→const AMM_PC_MINT_OFF: usize = 432;
+   121→const AMM_LP_MINT_OFF: usize = 464;
+   122→// SPL token account amount offset (165-byte classic token account).
+   123→const TA_AMOUNT: usize = 64;
+   124→// SPL mint supply offset.
+   125→const MINT_SUPPLY: usize = 36;
+   126→
+   127→// Effective slippage cap used by the harness when computing floors: the
+   128→// protocol default (config.max_slippage_bps = 300 bps via initialize's
+   129→// 0-means-default), below the 1_000 bps hard ceiling.
+   130→const HARNESS_CAP_BPS: u128 = 300;
+   131→const BPS_DEN: u128 = 10_000;
+   132→
+   133→// Base transaction fee in program-test (one signature).
+   134→const FEE: u64 = 5_000;
+   135→
+   136→// =====================================================================
+   137→// Fixture loading
+   138→// =====================================================================
+   139→
+   140→fn fixtures_dir() -> PathBuf {
+   141→    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+   142→        .join("tests")
+   143→        .join("fixtures")
+   144→}
+   145→
+   146→fn load_manifest() -> Option<serde_json::Value> {
+   147→    let path = fixtures_dir().join("manifest.json");
+   148→    let text = match std::fs::read_to_string(&path) {
+   149→        Ok(t) => t,
+   150→        Err(_) => {
+   151→            eprintln!(
+   152→                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
+   153→                path.display()
+   154→            );
+   155→            return None;
+   156→        }
+   157→    };
+   158→    serde_json::from_str(&text).ok()
+   159→}
+   160→
+   161→fn pk(s: &str) -> Pubkey {
+   162→    Pubkey::from_str(s).unwrap()
+   163→}
+   164→
+   165→/// Real mainnet account from a manifest section: (pubkey, Account).
+   166→fn load_real_account(section: &serde_json::Value, name: &str) -> (Pubkey, Account) {
+   167→    let entry = &section[name];
+   168→    let data = std::fs::read(fixtures_dir().join(entry["file"].as_str().unwrap()))
+   169→        .unwrap_or_else(|e| panic!("missing fixture for {name}: {e}"));
+   170→    let account = Account {
+   171→        lamports: entry["lamports"].as_u64().unwrap(),
+   172→        data,
+   173→        owner: pk(entry["owner"].as_str().unwrap()),
+   174→        executable: false,
+   175→        rent_epoch: u64::MAX,
+   176→    };
+   177→    (pk(entry["pubkey"].as_str().unwrap()), account)
+   178→}
+   179→
+   180→/// Register a fixture ELF as an executable program account under `id`.
+   181→/// Returns false (after printing a SKIP reason) when the file is absent.
+   182→fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
+   183→    match std::fs::read(fixtures_dir().join(file)) {
+   184→        Ok(bytes) => {
+   185→            pt.add_account(
+   186→                id,
+   187→                Account {
+   188→                    lamports: 1,
+   189→                    data: bytes,
+   190→                    owner: bpf_loader::id(),
+   191→                    executable: true,
+   192→                    rent_epoch: u64::MAX,
+   193→                },
+   194→            );
+   195→            true
+   196→        }
+   197→        Err(e) => {
+   198→            if required {
+   199→                eprintln!("SKIP: required fixture {file} missing ({e})");
+   200→            }
+   201→            required
+   202→        }
+   203→    }
+   204→}
+   205→
+   206→fn read_u64(data: &[u8], off: usize) -> u64 {
+   207→    u64::from_le_bytes(data[off..off + 8].try_into().unwrap())
+   208→}
+   209→
+   210→fn read_pubkey(data: &[u8], off: usize) -> Pubkey {
+   211→    Pubkey::new_from_array(data[off..off + 32].try_into().unwrap())
+   212→}
+   213→
+   214→fn token_amount(account: &Account) -> u64 {
+   215→    read_u64(&account.data, TA_AMOUNT)
+   216→}
+   217→
+   218→fn token_owner(account: &Account) -> Pubkey {
+   219→    Pubkey::new_from_array(account.data[32..64].try_into().unwrap())
+   220→}
+   221→
+   222→fn mint_supply(account: &Account) -> u64 {
+   223→    read_u64(&account.data, MINT_SUPPLY)
+   224→}
+   225→
+   226→fn forged_token_account(mint: &Pubkey, owner: &Pubkey, amount: u64) -> Account {
+   227→    let mut data = vec![0u8; 165];
+   228→    data[0..32].copy_from_slice(mint.as_ref());
+   229→    data[32..64].copy_from_slice(owner.as_ref());
+   230→    data[TA_AMOUNT..TA_AMOUNT + 8].copy_from_slice(&amount.to_le_bytes());
+   231→    data[108] = 1; // AccountState::Initialized
+   232→    Account {
+   233→        lamports: Rent::default().minimum_balance(165),
+   234→        data,
+   235→        owner: spl_token_id(),
+   236→        executable: false,
+   237→        rent_epoch: u64::MAX,
+   238→    }
+   239→}
+   240→
+   241→// =====================================================================
+   242→// Pool environment (identical to the Phase 4/5 suites, pool 1 focus)
+   243→// =====================================================================
+   244→
+   245→#[derive(Clone)]
+   246→struct PoolEnv {
+   247→    pool: Pubkey,
+   248→    coin_vault: Pubkey,
+   249→    pc_vault: Pubkey,
+   250→    lp_mint: Pubkey,
+   251→    memecoin_mint: Pubkey,
+   252→    open_orders: Pubkey,
+   253→    target_orders: Pubkey,
+   254→    market: Pubkey,
+   255→    market_program: Pubkey,
+   256→    market_coin_vault: Pubkey,
+   257→    market_pc_vault: Pubkey,
+   258→    vault_signer: Pubkey,
+   259→    event_queue: Pubkey,
+   260→    bids: Pubkey,
+   261→    asks: Pubkey,
+   262→    coin_reserve: u64,
+   263→    pc_reserve: u64,
+   264→    lp_supply: u64,
+   265→    lp_burn_plan: u64,
+   266→    base_is_coin_side: bool,
+   267→    salvor: Pubkey,
+   268→    cert_pda: Pubkey,
+   269→    anchor_pda: Pubkey,
+   270→    launch_price_pda: Pubkey,
+   271→    uncx_marker: Pubkey,
+   272→    vault_authority: Pubkey,
+   273→    pool_registry: Pubkey,
+   274→    salvage_receipt: Pubkey,
+   275→    lp_holder_pool_vault: Pubkey,
+   276→    protocol_treasury: Pubkey,
+   277→    vault_sol_holding: Pubkey,
+   278→    vault_base_ata: Pubkey,
+   279→    vault_memecoin_ata: Pubkey,
+   280→    salvor_lp_ata: Pubkey,
+   281→}
+   282→
+   283→impl PoolEnv {
+   284→    fn load(section: &serde_json::Value, salvor: &Keypair) -> Self {
+   285→        let accounts = &section["accounts"];
+   286→        let (pool, pool_acct) = load_real_account(accounts, "pool");
+   287→        let (coin_vault, coin_vault_acct) = load_real_account(accounts, "coin_vault");
+   288→        let (pc_vault, pc_vault_acct) = load_real_account(accounts, "pc_vault");
+   289→        let (lp_mint, lp_mint_acct) = load_real_account(accounts, "lp_mint");
+   290→        let (coin_mint, _) = load_real_account(accounts, "coin_mint");
+   291→        let (pc_mint, _) = load_real_account(accounts, "pc_mint");
+   292→        let (open_orders, _) = load_real_account(accounts, "open_orders");
+   293→        let (target_orders, _) = load_real_account(accounts, "target_orders");
+   294→        let (market, _) = load_real_account(accounts, "market");
+   295→        let (market_coin_vault, _) = load_real_account(accounts, "market_coin_vault");
+   296→        let (market_pc_vault, _) = load_real_account(accounts, "market_pc_vault");
+   297→        let (event_queue, _) = load_real_account(accounts, "event_queue");
+   298→        let (bids, _) = load_real_account(accounts, "bids");
+   299→        let (asks, _) = load_real_account(accounts, "asks");
+   300→        let (vault_signer, _) = load_real_account(accounts, "vault_signer");
+   301→        let market_program = pk(section["market_program"].as_str().unwrap());
+   302→
+   303→        let base_is_coin_side = section["base_is_coin_side"].as_bool().unwrap();
+   304→        if base_is_coin_side {
+   305→            assert_eq!(coin_mint, WSOL_MINT);
+   306→        } else {
+   307→            assert_eq!(pc_mint, WSOL_MINT);
+   308→        }
+   309→        let memecoin_mint = if base_is_coin_side {
+   310→            pc_mint
+   311→        } else {
+   312→            coin_mint
+   313→        };
+   314→
+   315→        let coin_reserve = token_amount(&coin_vault_acct);
+   316→        let pc_reserve = token_amount(&pc_vault_acct);
+   317→        let lp_supply = mint_supply(&lp_mint_acct);
+   318→        let amm_lp_amount = read_u64(&pool_acct.data, AMM_LP_AMOUNT_OFF);
+   319→        let lp_burn_plan = (lp_supply / 10_000).max(1);
+   320→        assert!(lp_burn_plan < amm_lp_amount);
+   321→
+   322→        let ata = |wallet: &Pubkey, mint: &Pubkey| {
+   323→            Pubkey::find_program_address(
+   324→                &[wallet.as_ref(), spl_token_id().as_ref(), mint.as_ref()],
+   325→                &spl_ata_id(),
+   326→            )
+   327→            .0
+   328→        };
+   329→        let vault_authority = Pubkey::find_program_address(&[VAULT_AUTHORITY_SEED], &vault_id()).0;
+   330→        let (cert_pda, _) = Pubkey::find_program_address(
+   331→            &[
+   332→                b"eligibility_cert",
+   333→                RAYDIUM_V4_PROGRAM_ID.as_ref(),
+   334→                pool.as_ref(),
+   335→            ],
+   336→            &scanner_id(),
+   337→        );
+   338→        let (anchor_pda, _) = Pubkey::find_program_address(
+   339→            &[
+   340→                b"eligibility_anchor",
+   341→                RAYDIUM_V4_PROGRAM_ID.as_ref(),
+   342→                pool.as_ref(),
+   343→            ],
+   344→            &scanner_id(),
+   345→        );
+   346→        let (launch_price_pda, _) = Pubkey::find_program_address(
+   347→            &[
+   348→                b"launch_price",
+   349→                RAYDIUM_V4_PROGRAM_ID.as_ref(),
+   350→                pool.as_ref(),
+   351→            ],
+   352→            &scanner_id(),
+   353→        );
+   354→        let (uncx_marker, _) =
+   355→            Pubkey::find_program_address(&[b"global_lp_tracker", pool.as_ref()], &uncx_locker_id());
+   356→
+   357→        Self {
+   358→            pool,
+   359→            coin_vault,
+   360→            pc_vault,
+   361→            lp_mint,
+   362→            memecoin_mint,
+   363→            open_orders,
+   364→            target_orders,
+   365→            market,
+   366→            market_program,
+   367→            market_coin_vault,
+   368→            market_pc_vault,
+   369→            vault_signer,
+   370→            event_queue,
+   371→            bids,
+   372→            asks,
+   373→            coin_reserve,
+   374→            pc_reserve,
+   375→            lp_supply,
+   376→            lp_burn_plan,
+   377→            base_is_coin_side,
+   378→            salvor: salvor.pubkey(),
+   379→            cert_pda,
+   380→            anchor_pda,
+   381→            launch_price_pda,
+   382→            uncx_marker,
+   383→            vault_authority,
+   384→            pool_registry: Pubkey::find_program_address(
+   385→                &[b"pool_registry", pool.as_ref()],
+   386→                &vault_id(),
+   387→            )
+   388→            .0,
+   389→            salvage_receipt: Pubkey::find_program_address(
+   390→                &[b"salvage_receipt", pool.as_ref()],
+   391→                &vault_id(),
+   392→            )
+   393→            .0,
+   394→            lp_holder_pool_vault: Pubkey::find_program_address(
+   395→                &[b"lp_holder_pool", pool.as_ref()],
+   396→                &vault_id(),
+   397→            )
+   398→            .0,
+   399→            protocol_treasury: Pubkey::find_program_address(&[b"protocol_treasury"], &vault_id()).0,
+   400→            vault_sol_holding: Pubkey::find_program_address(
+   401→                &[b"vault_sol_holding", pool.as_ref()],
+   402→                &vault_id(),
+   403→            )
+   404→            .0,
+   405→            vault_base_ata: ata(&vault_authority, &WSOL_MINT),
+   406→            vault_memecoin_ata: ata(&vault_authority, &memecoin_mint),
+   407→            salvor_lp_ata: ata(&salvor.pubkey(), &lp_mint),
+   408→        }
+   409→    }
+   410→
+   411→    /// The 13 pool-derived remaining accounts in vault CPI order.
+   412→    fn remaining(&self) -> Vec<Pubkey> {
+   413→        vec![
+   414→            RAYDIUM_V4_AMM_AUTHORITY,
+   415→            self.open_orders,
+   416→            self.target_orders,
+   417→            self.coin_vault,
+   418→            self.pc_vault,
+   419→            self.market_program,
+   420→            self.market,
+   421→            self.market_coin_vault,
+   422→            self.market_pc_vault,
+   423→            self.vault_signer,
+   424→            self.event_queue,
+   425→            self.bids,
+   426→            self.asks,
+   427→        ]
+   428→    }
+   429→
+   430→    fn remaining_writable(&self) -> Vec<bool> {
+   431→        vec![
+   432→            false, true, true, true, true, false, true, true, true, false, true, true, true,
+   433→        ]
+   434→    }
+   435→
+   436→    /// The scanner-side remaining accounts: the adapter's pool pointers
+   437→    /// (looked up by pubkey, any order) plus the UNCX marker gate account
+   438→    /// (non-existent here = proven unlocked).
+   439→    fn scanner_remaining(&self) -> Vec<Pubkey> {
+   440→        vec![
+   441→            self.coin_vault,
+   442→            self.pc_vault,
+   443→            self.lp_mint,
+   444→            self.uncx_marker,
+   445→        ]
+   446→    }
+   447→}
+   448→
+   449→// =====================================================================
+   450→// Genesis
+   451→// =====================================================================
+   452→
+   453→const POOL_ACCOUNTS: [&str; 15] = [
+   454→    "pool",
+   455→    "coin_vault",
+   456→    "pc_vault",
+   457→    "lp_mint",
+   458→    "coin_mint",
+   459→    "pc_mint",
+   460→    "open_orders",
+   461→    "target_orders",
+   462→    "market",
+   463→    "market_coin_vault",
+   464→    "market_pc_vault",
+   465→    "event_queue",
+   466→    "bids",
+   467→    "asks",
+   468→    "vault_signer",
+   469→];
+   470→
+   471→/// A claimant wallet + its pre-salvage LP balance + its genesis lamports.
+   472→struct Claimant {
+   473→    wallet: Keypair,
+   474→    balance: u64,
+   475→    start_lamports: u64,
+   476→}
+   477→
+   478→fn wallet_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
+   479→    Pubkey::find_program_address(
+   480→        &[wallet.as_ref(), spl_token_id().as_ref(), mint.as_ref()],
+   481→        &spl_ata_id(),
+   482→    )
+   483→    .0
+   484→}
+   485→
+   486→/// The four non-salvor claimants: deterministic splits of the claimable
+   487→/// remainder after the pool-LP custody share and the burn plan. The salvor
+   488→/// is claimant #0 (D11 policy 2: the pre-burn balance is an ordinary leaf).
+   489→fn claim_wallets(claimable_total: u64) -> Vec<Claimant> {
+   490→    let b1 = claimable_total / 2;
+   491→    let b2 = claimable_total * 3 / 10;
+   492→    let b3 = claimable_total / 8;
+   493→    let b4 = claimable_total - b1 - b2 - b3;
+   494→    [
+   495→        (b1, LAMPORTS_PER_SOL),
+   496→        (b2, LAMPORTS_PER_SOL),
+   497→        (b3, LAMPORTS_PER_SOL),
+   498→        (b4, LAMPORTS_PER_SOL),
+   499→    ]
+   500→    .into_iter()
+   501→    .map(|(balance, start_lamports)| Claimant {
+   502→        wallet: Keypair::new(),
+   503→        balance,
+   504→        start_lamports,
+   505→    })
+   506→    .collect()
+   507→}
+   508→
+   509→/// Genesis accounts for the claim side: the pool-LP custody token account
+   510→/// (owner = the real AMM authority — can never sign a claim, the exact
+   511→/// shape the D11 sink exclusion exists for), each wallet's LP ATA (so the
+   512→/// VM ledger is enumerable and Σ == supply holds) and each wallet's
+   513→/// funding (fees + ClaimRecord rent).
+   514→fn claim_side_genesis(
+   515→    lp_mint: &Pubkey,
+   516→    custody_account: Pubkey,
+   517→    custody_balance: u64,
+   518→    wallets: &[Claimant],
+   519→) -> Vec<(Pubkey, Account)> {
+   520→    let mut out = vec![(
+   521→        custody_account,
+   522→        forged_token_account(lp_mint, &RAYDIUM_V4_AMM_AUTHORITY, custody_balance),
+   523→    )];
+   524→    for claimant in wallets {
+   525→        out.push((
+   526→            wallet_ata(&claimant.wallet.pubkey(), lp_mint),
+   527→            forged_token_account(lp_mint, &claimant.wallet.pubkey(), claimant.balance),
+   528→        ));
+   529→        out.push((
+   530→            claimant.wallet.pubkey(),
+   531→            Account {
+   532→                lamports: claimant.start_lamports,
+   533→                data: vec![],
+   534→                owner: system_program::ID,
+   535→                executable: false,
+   536→                rent_epoch: u64::MAX,
+   537→            },
+   538→        ));
+   539→    }
+   540→    out
+   541→}
+   542→
+   543→struct Boot {
+   544→    pt: Option<ProgramTest>,
+   545→    env1: PoolEnv,
+   546→    salvor: Keypair,
+   547→    /// `u64::MAX` = conversion leg always skipped (measurement shape);
+   548→    /// `0` = protocol default floor — swap leg always active.
+   549→    dust: u64,
+   550→}
+   551→
+   552→/// Bootstraps the VM with pool 1's real state, the vault AND scanner
+   553→/// programs, the real AMM / market / token ELFs and the Jupiter stand-in.
+   554→/// There is NO forged cert anywhere — the EligibilityCert is issued by the
+   555→/// real scanner later in the pipeline. Returns None (SKIP) when required
+   556→/// fixtures are absent.
+   557→fn build_genesis(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair) -> Option<Boot> {
+   558→    let manifest = load_manifest()?;
+   559→    let env1 = PoolEnv::load(&manifest, &salvor);
+   560→
+   561→    let mut pt = ProgramTest::default();
+   562→    pt.prefer_bpf(true);
+   563→    pt.set_compute_max_units(1_400_000);
+   564→    pt.set_transaction_account_lock_limit(64);
+   565→
+   566→    if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
+   567→        return None;
+   568→    }
+   569→    if !add_elf(&mut pt, "grave_scanner.so", scanner_id(), true) {
+   570→        return None;
+   571→    }
+   572→    if !add_elf(&mut pt, "jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID, true) {
+   573→        return None;
+   574→    }
+   575→    add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
+   576→    add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
+   577→    add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
+   578→    add_elf(&mut pt, "serum_dex.so", env1.market_program, true);
+   579→
+   580→    for name in POOL_ACCOUNTS {
+   581→        let (k, a) = load_real_account(&manifest["accounts"], name);
+   582→        pt.add_account(k, a);
+   583→    }
+   584→    let (wsol_key, wsol_acct) = load_real_account(&manifest["accounts"], "wsol_mint");
+   585→    pt.add_account(wsol_key, wsol_acct);
+   586→
+   587→    // The salvor's pre-salvage LP balance — the LP the salvage will deposit
+   588→    // (the snapshotter later treats the pre-burn balance as an ordinary
+   589→    // leaf, D11 policy 2). Seeded, not forged: this is an SPL token account,
+   590→    // not a program-owned evidence account.
+   591→    pt.add_account(
+   592→        env1.salvor_lp_ata,
+   593→        forged_token_account(&env1.lp_mint, &salvor.pubkey(), env1.lp_burn_plan),
+   594→    );
+   595→
+   596→    pt.add_account(
+   597→        salvor.pubkey(),
+   598→        Account {
+   599→            lamports: 100 * LAMPORTS_PER_SOL,
+   600→            data: vec![],
+   601→            owner: system_program::ID,
+   602→            executable: false,
+   603→            rent_epoch: u64::MAX,
+   604→        },
+   605→    );
+   606→    for (addr, account) in extra {
+   607→        pt.add_account(addr, account);
+   608→    }
+   609→
+   610→    Some(Boot {
+   611→        pt: Some(pt),
+   612→        env1,
+   613→        salvor,
+   614→        dust,
+   615→    })
+   616→}
+   617→
+   618→/// Starts the VM and runs the vault `initialize` (protocol defaults:
+   619→/// 40/40/20, dust as configured — 0 → conversion leg active). The
+   620→/// `ProgramTestContext` handle is kept: warping is the multi-epoch
+   621→/// waiting period's only lever.
+   622→async fn start(mut boot: Boot) -> (ProgramTestContext, Boot) {
+   623→    let mut ctx = boot.pt.take().unwrap().start_with_context().await;
+   624→    let payer = boot.salvor.pubkey();
+   625→    let mut data = anchor_disc("initialize").to_vec();
+   626→    data.extend_from_slice(payer.as_ref()); // authority
+   627→    data.extend_from_slice(&0u16.to_le_bytes()); // lp share (default)
+   628→    data.extend_from_slice(&0u16.to_le_bytes()); // salvor share (default)
+   629→    data.extend_from_slice(&0u16.to_le_bytes()); // protocol share (default)
+   630→    data.extend_from_slice(&0u64.to_le_bytes()); // priority fee ceiling
+   631→    data.extend_from_slice(&0u16.to_le_bytes()); // max slippage bps (0 = 300)
+   632→    data.extend_from_slice(&boot.dust.to_le_bytes()); // dust threshold
+   633→    data.extend_from_slice(&0i64.to_le_bytes()); // timelock (0 = default)
+   634→    let init = Instruction::new_with_bytes(
+   635→        vault_id(),
+   636→        &data,
+   637→        vec![
+   638→            AccountMeta::new(
+   639→                Pubkey::find_program_address(&[b"protocol_config"], &vault_id()).0,
+   640→                false,
+   641→            ),
+   642→            AccountMeta::new(payer, true),
+   643→            AccountMeta::new_readonly(system_program::ID, false),
+   644→        ],
+   645→    );
+   646→    send(&mut ctx.banks_client, &boot.salvor, &[init])
+   647→        .await
+   648→        .expect("vault initialize failed");
+   649→    (ctx, boot)
+   650→}
+   651→
+   652→// =====================================================================
+   653→// Clock / SlotHashes readers (raw sysvar bytes — the exact layouts the
+   654→// scanner's attestation module consumes)
+   655→// =====================================================================
+   656→
+   657→/// (slot, epoch, unix_timestamp) from the live Clock sysvar.
+   658→async fn read_clock(client: &mut BanksClient) -> (u64, u64, i64) {
+   659→    let a = acct(client, &clock_sysvar::id()).await;
+   660→    let slot = read_u64(&a.data, 0);
+   661→    let epoch = read_u64(&a.data, 16);
+   662→    let ts = i64::from_le_bytes(a.data[32..40].try_into().unwrap());
+   663→    (slot, epoch, ts)
+   664→}
+   665→
+   666→/// The freshest (slot, hash) entry the VM's SlotHashes sysvar can resolve.
+   667→/// Entries are scanned (newest-first in practice) and the max slot is
+   668→/// returned; fails the test when no positive-slot entry exists (slot 0 is
+   669→/// unusable — the scanner requires `issued_slot > 0`).
+   670→async fn newest_slot_hash(client: &mut BanksClient, now_slot: u64) -> (u64, [u8; 32]) {
+   671→    let a = acct(client, &slot_hashes_sysvar::id()).await;
+   672→    let count = read_u64(&a.data, 0) as usize;
+   673→    let mut best: Option<(u64, [u8; 32])> = None;
+   674→    for i in 0..count {
+   675→        let base = 8 + i * 40;
+   676→        let slot = read_u64(&a.data, base);
+   677→        if slot == 0 || slot > now_slot {
+   678→            continue;
+   679→        }
+   680→        let mut h = [0u8; 32];
+   681→        h.copy_from_slice(&a.data[base + 8..base + 40]);
+   682→        if best.is_none_or(|(s, _)| slot > s) {
+   683→            best = Some((slot, h));
+   684→        }
+   685→    }
+   686→    best.unwrap_or_else(|| panic!("no usable slot-hash entry at slot {now_slot}"))
+   687→}
+   688→
+   689→// =====================================================================
+   690→// Attestation machinery (runtime precompile wire format)
+   691→// =====================================================================
+   692→
+   693→/// Anchor global instruction discriminator = sha256("global:<name>")[..8].
+   694→fn anchor_disc(name: &str) -> [u8; 8] {
+   695→    let h = hash(format!("global:{name}").as_bytes()).to_bytes();
+   696→    [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]]
+   697→}
+   698→
+   699→/// The `ed25519_program` verify instruction in the RUNTIME wire format
+   700→/// (byte-identical to `solana_ed25519_program`'s own builder, mirrored by
+
+[showing lines 1-700 of 1690; use offset=701 with limit to continue reading]
