@@ -55,18 +55,35 @@ for (const d of dumps) {
 console.log("pin_elfs: fetch_v4_fork_fixtures.mjs (real mainnet bytes)");
 execFileSync("node", [join(REPO_ROOT, "scripts", "fetch_v4_fork_fixtures.mjs")], {
   stdio: "inherit",
-  env: { ...process.env, RPC_URL: process.env.FORK_RPC_URL ?? "https://api.mainnet-beta.solana.com" },
+  env: {
+    ...process.env,
+    RPC_URL: process.env.FORK_RPC_URL ?? "https://api.mainnet-beta.solana.com",
+  },
   cwd: REPO_ROOT, // fetcher writes programs/grave-vault/tests/fixtures/ relative to repo root
 });
 
 // fetcher writes to programs/grave-vault/tests/fixtures/ — copy into our fixtures dir
 const fetchedDir = join(REPO_ROOT, "programs", "grave-vault", "tests", "fixtures");
 const wanted = [
-  "manifest.json", "pool.bin", "coin_vault.bin", "pc_vault.bin", "coin_mint.bin",
-  "pc_mint.bin", "lp_mint.bin", "wsol_mint.bin", "open_orders.bin", "market.bin",
-  "target_orders.bin", "market_coin_vault.bin", "market_pc_vault.bin",
-  "event_queue.bin", "bids.bin", "asks.bin", "vault_signer.bin",
-  "raydium_v4.so", "serum_dex.so",
+  "manifest.json",
+  "pool.bin",
+  "coin_vault.bin",
+  "pc_vault.bin",
+  "coin_mint.bin",
+  "pc_mint.bin",
+  "lp_mint.bin",
+  "wsol_mint.bin",
+  "open_orders.bin",
+  "market.bin",
+  "target_orders.bin",
+  "market_coin_vault.bin",
+  "market_pc_vault.bin",
+  "event_queue.bin",
+  "bids.bin",
+  "asks.bin",
+  "vault_signer.bin",
+  "raydium_v4.so",
+  "serum_dex.so",
 ];
 for (const f of wanted) {
   copyFileSync(join(fetchedDir, f), join(fixtures, f));
@@ -79,14 +96,40 @@ if (!manifest.pool_address || !manifest.accounts?.coin_vault?.pubkey) {
 
 // 3. pin table ---------------------------------------------------------------------
 const pins = {
-  scanner: { file: dumps[0].out, sha256: sha256File(dumps[0].out), bytes: statSync(dumps[0].out).size, source: `devnet program dump ${SCANNER_ID}` },
-  vault: { file: dumps[1].out, sha256: sha256File(dumps[1].out), bytes: statSync(dumps[1].out).size, source: `devnet program dump ${VAULT_ID}` },
-  raydium_v4: { file: join(fixtures, "raydium_v4.so"), sha256: sha256File(join(fixtures, "raydium_v4.so")), source: "mainnet fixture fetch" },
-  serum_dex: { file: join(fixtures, "serum_dex.so"), sha256: sha256File(join(fixtures, "serum_dex.so")), source: "mainnet fixture fetch" },
+  scanner: {
+    file: dumps[0].out,
+    sha256: sha256File(dumps[0].out),
+    bytes: statSync(dumps[0].out).size,
+    source: `devnet program dump ${SCANNER_ID}`,
+  },
+  vault: {
+    file: dumps[1].out,
+    sha256: sha256File(dumps[1].out),
+    bytes: statSync(dumps[1].out).size,
+    source: `devnet program dump ${VAULT_ID}`,
+  },
+  raydium_v4: {
+    file: join(fixtures, "raydium_v4.so"),
+    sha256: sha256File(join(fixtures, "raydium_v4.so")),
+    source: "mainnet fixture fetch",
+  },
+  serum_dex: {
+    file: join(fixtures, "serum_dex.so"),
+    sha256: sha256File(join(fixtures, "serum_dex.so")),
+    source: "mainnet fixture fetch",
+  },
   pool_accounts: Object.fromEntries(
-    Object.entries(manifest.accounts).map(([k, v]) => [k, { sha256: sha256File(join(fixtures, `${k}.bin`)), bytes: statSync(join(fixtures, `${k}.bin`)).size }]),
+    Object.entries(manifest.accounts).map(([k]) => [
+      k,
+      {
+        sha256: sha256File(join(fixtures, `${k}.bin`)),
+        bytes: statSync(join(fixtures, `${k}.bin`)).size,
+      },
+    ]),
   ),
 };
 writeFileSync(join(artifacts, "sha256.txt"), JSON.stringify(pins, null, 2) + "\n");
 console.log(`pin_elfs: pins written to ${join(artifacts, "sha256.txt")}`);
-console.log(`pin_elfs: DONE pool=${manifest.pool_address} base_is_coin_side=${manifest.base_is_coin_side}`);
+console.log(
+  `pin_elfs: DONE pool=${manifest.pool_address} base_is_coin_side=${manifest.base_is_coin_side}`,
+);

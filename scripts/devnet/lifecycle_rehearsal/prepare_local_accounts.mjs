@@ -14,7 +14,7 @@
 //  - loader_account_flags.txt is written ONCE, AFTER the holder section
 //    (fix 9: writing it before the holder dumps appended left 0 LP holders
 //    loaded and failed the snapshot completeness gate at 0 vs supply).
-import { readFileSync, writeFileSync, mkdirSync, statSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { initWeb3, initIds, IDS, getWeb3 } from "./lib.mjs";
 
@@ -69,7 +69,9 @@ function metaOf(name) {
 // --- 1. holder keypairs + LP amounts (C6) --------------------------------------------
 async function readKeypair(name) {
   // web3.js 3.x: Keypair.fromSecretKey is async (fix 3)
-  return W3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(join(keys, `${name}.json`), "utf8"))));
+  return W3.Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(readFileSync(join(keys, `${name}.json`), "utf8"))),
+  );
 }
 const salvor = await readKeypair("salvor");
 const claimantA = await readKeypair("claimant_a");
@@ -91,7 +93,10 @@ const holders = [
 const supply = holders.reduce((a, h) => a + h.balance, 0n);
 
 function holderAta(owner) {
-  return PublicKey.findProgramAddressSync([owner.toBytes(), TOKEN_PROGRAM.toBytes(), LP_MINT.toBytes()], ATA_PROGRAM)[0];
+  return PublicKey.findProgramAddressSync(
+    [owner.toBytes(), TOKEN_PROGRAM.toBytes(), LP_MINT.toBytes()],
+    ATA_PROGRAM,
+  )[0];
 }
 for (const h of holders) h.lp_ata = holderAta(h.kp.publicKey);
 
@@ -125,7 +130,12 @@ marketBytes.writeBigUInt64LE(BigInt(bump), MARKET_NONCE_OFFSET);
 writeFileSync(
   join(outDir, "market.json"),
   JSON.stringify(
-    accountJson({ pubkey: marketPk.toBase58(), owner: metaOf("market").owner, lamports: metaOf("market").lamports, data: marketBytes }),
+    accountJson({
+      pubkey: marketPk.toBase58(),
+      owner: metaOf("market").owner,
+      lamports: metaOf("market").lamports,
+      data: marketBytes,
+    }),
   ) + "\n",
 );
 
@@ -139,20 +149,34 @@ for (const [acct, file] of [
   bytes.subarray(VAULT_OWNER_OFFSET, VAULT_OWNER_OFFSET + 32).set(canonicalSigner.toBytes());
   writeFileSync(
     join(outDir, `${file}.json`),
-    JSON.stringify(accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: bytes })) + "\n",
+    JSON.stringify(
+      accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: bytes }),
+    ) + "\n",
   );
 }
 
 // --- 4. untouched pool accounts (real mainnet bytes) -------------------------------------
 const plainAccounts = [
-  "pool", "coin_vault", "pc_vault", "coin_mint", "pc_mint", "wsol_mint",
-  "open_orders", "target_orders", "event_queue", "bids", "asks", "vault_signer",
+  "pool",
+  "coin_vault",
+  "pc_vault",
+  "coin_mint",
+  "pc_mint",
+  "wsol_mint",
+  "open_orders",
+  "target_orders",
+  "event_queue",
+  "bids",
+  "asks",
+  "vault_signer",
 ];
 for (const name of plainAccounts) {
   const m = metaOf(name);
   writeFileSync(
     join(outDir, `${name}.json`),
-    JSON.stringify(accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: loadBin(name) })) + "\n",
+    JSON.stringify(
+      accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: loadBin(name) }),
+    ) + "\n",
   );
 }
 
@@ -170,7 +194,14 @@ for (const h of holders) {
   data.writeUInt32LE(0, 144); // close authority option: none
   writeFileSync(
     join(outDir, `${h.name}_lp_ata.json`),
-    JSON.stringify(accountJson({ pubkey: h.lp_ata.toBase58(), owner: TOKEN_PROGRAM.toBase58(), lamports: TOKEN_ACCOUNT_LAMPORTS, data })) + "\n",
+    JSON.stringify(
+      accountJson({
+        pubkey: h.lp_ata.toBase58(),
+        owner: TOKEN_PROGRAM.toBase58(),
+        lamports: TOKEN_ACCOUNT_LAMPORTS,
+        data,
+      }),
+    ) + "\n",
   );
 }
 
@@ -194,7 +225,14 @@ const plan = {
     note: "F3: real market nonce=1 was non-canonical; local market re-pinned to the canonical bump and both market vault token accounts re-pointed to the canonical signer",
   },
   holders: Object.fromEntries(
-    holders.map((h) => [h.name, { pubkey: h.kp.publicKey.toBase58(), lp_ata: h.lp_ata.toBase58(), balance: h.balance.toString() }]),
+    holders.map((h) => [
+      h.name,
+      {
+        pubkey: h.kp.publicKey.toBase58(),
+        lp_ata: h.lp_ata.toBase58(),
+        balance: h.balance.toString(),
+      },
+    ]),
   ),
   uncx_marker: PublicKey.findProgramAddressSync(
     [Buffer.from("global_lp_tracker", "utf8"), new PublicKey(manifest.pool_address).toBytes()],
@@ -208,11 +246,23 @@ const flagLines = [];
 const pushUnique = (line) => {
   if (!flagLines.includes(line)) flagLines.push(line);
 };
-pushUnique(`--bpf-program CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54 ${join(artifacts, "grave_scanner.so")}`);
-pushUnique(`--bpf-program Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg ${join(artifacts, "grave_vault.so")}`);
-pushUnique(`--bpf-program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 ${join(fixtures, "raydium_v4.so")}`);
+pushUnique(
+  `--bpf-program CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54 ${join(artifacts, "grave_scanner.so")}`,
+);
+pushUnique(
+  `--bpf-program Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg ${join(artifacts, "grave_vault.so")}`,
+);
+pushUnique(
+  `--bpf-program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 ${join(fixtures, "raydium_v4.so")}`,
+);
 pushUnique(`--bpf-program ${metaOf("market").owner} ${join(fixtures, "serum_dex.so")}`);
-for (const name of [...plainAccounts, "lp_mint", "market", "market_coin_vault", "market_pc_vault"]) {
+for (const name of [
+  ...plainAccounts,
+  "lp_mint",
+  "market",
+  "market_coin_vault",
+  "market_pc_vault",
+]) {
   const pkStr = name === "lp_mint" ? LP_MINT.toBase58() : metaOf(name).pubkey;
   const file = ["lp_mint", "market", "market_coin_vault", "market_pc_vault"].includes(name)
     ? join(outDir, `${name === "lp_mint" ? "lp_mint" : name}.json`)
@@ -225,7 +275,13 @@ for (const h of holders) {
 pushUnique("--account-index spl-token-mint");
 writeFileSync(join(artifacts, "loader_account_flags.txt"), flagLines.join("\n") + "\n");
 
-console.log(`prepare_local_accounts: supply=${supply} burn=${burnAmount} claimA=${claimA} claimB=${claimB}`);
-console.log(`prepare_local_accounts: market nonce ${oldNonce} → canonical bump ${bump} (signer ${canonicalSigner.toBase58()})`);
-console.log(`prepare_local_accounts: ${flagLines.length} loader flags → ${join(artifacts, "loader_account_flags.txt")}`);
+console.log(
+  `prepare_local_accounts: supply=${supply} burn=${burnAmount} claimA=${claimA} claimB=${claimB}`,
+);
+console.log(
+  `prepare_local_accounts: market nonce ${oldNonce} → canonical bump ${bump} (signer ${canonicalSigner.toBase58()})`,
+);
+console.log(
+  `prepare_local_accounts: ${flagLines.length} loader flags → ${join(artifacts, "loader_account_flags.txt")}`,
+);
 console.log("prepare_local_accounts: DONE");

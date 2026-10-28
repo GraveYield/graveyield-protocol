@@ -178,7 +178,10 @@ export async function sendTx(connection, ixs, signers, opts = {}) {
       for (const ix of ixs) tx.add(ix);
       await tx.partialSign(...signers); // async in 3.x (fix 3)
       const raw = await tx.serialize();
-      sig = await connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: attempt === 1 ? 0 : 4 });
+      sig = await connection.sendRawTransaction(raw, {
+        skipPreflight: true,
+        maxRetries: attempt === 1 ? 0 : 4,
+      });
     }
     try {
       const status = await confirmSig(connection, sig, lastValidBlockHeight);
@@ -202,7 +205,7 @@ export async function sendTx(connection, ixs, signers, opts = {}) {
   }
 }
 
-export async function confirmSig(connection, sig, lastValidBlockHeight) {
+export async function confirmSig(connection, sig, _lastValidBlockHeight) {
   for (let i = 0; i < 240; i++) {
     const r = await connection.getSignatureStatuses([sig]);
     const v = r && r.value && r.value[0];
@@ -407,11 +410,7 @@ export async function createAndFillAlt(connection, payer, addresses) {
       addresses: chunk,
     });
     // 3.x return shapes vary (array | {instruction} | single ix) — normalize.
-    const extIxs = Array.isArray(ext)
-      ? ext
-      : ext && ext.instruction
-        ? [ext.instruction]
-        : [ext];
+    const extIxs = Array.isArray(ext) ? ext : ext && ext.instruction ? [ext.instruction] : [ext];
     const r2 = await sendTx(connection, extIxs, [payer]);
     if (r2.err) throw new Error(`ALT extend failed: ${JSON.stringify(bigIntSafe(r2.err))}`);
   }

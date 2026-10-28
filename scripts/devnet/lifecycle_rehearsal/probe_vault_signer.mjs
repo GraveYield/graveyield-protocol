@@ -49,8 +49,7 @@ const verdict = {
   signer_from_stored_nonce: currentSigner.toBase58(),
   canonical_vault_signer: canonicalSigner.toBase58(),
   canonical_bump: String(bump),
-  matches_manifest_vault_signer:
-    manifest.accounts.vault_signer.pubkey === currentSigner.toBase58(),
+  matches_manifest_vault_signer: manifest.accounts.vault_signer.pubkey === currentSigner.toBase58(),
   finding:
     "F3: the real market's nonce (1) is not the canonical bump — the local fixture re-pins the nonce to the canonical bump and re-points both market vault token accounts to the canonical signer so fleet-core's fail-closed derivation accepts the fixture",
 };

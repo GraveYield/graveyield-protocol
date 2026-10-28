@@ -7,22 +7,30 @@
 //   both Some = 8 + 6 + 33 + 33 = 80 bytes
 //   accounts: [protocol_config PDA (mut), authority (signer)]
 import { createHash } from "node:crypto";
-import { sendTx, IDS, pk, bigIntSafe } from "./lib.mjs";
+import { sendTx, IDS, bigIntSafe } from "./lib.mjs";
 
 export function configPda(programId) {
   const PKC = IDS.scanner.constructor; // the salvor-checkout PublicKey class
   return PKC.findProgramAddressSync([Buffer.from("protocol_config", "utf8")], programId)[0];
 }
 
-export function buildRegisterOracleIx({ scannerProgramId, authority, activityOracle, launchPriceOracle }) {
+export function buildRegisterOracleIx({
+  scannerProgramId,
+  authority,
+  activityOracle,
+  launchPriceOracle,
+}) {
   const disc = createHash("sha256").update("global:update_protocol_config").digest().subarray(0, 8);
   const data = Buffer.concat([
     Buffer.from(disc),
     Buffer.alloc(6, 0x00), // 6× Option::None
-    Buffer.from([0x01]), activityOracle.toBytes(),
-    Buffer.from([0x01]), launchPriceOracle.toBytes(),
+    Buffer.from([0x01]),
+    activityOracle.toBytes(),
+    Buffer.from([0x01]),
+    launchPriceOracle.toBytes(),
   ]);
-  if (data.length !== 80) throw new Error(`update_protocol_config data must be 80B, got ${data.length}`);
+  if (data.length !== 80)
+    throw new Error(`update_protocol_config data must be 80B, got ${data.length}`);
   return {
     ix: {
       programId: scannerProgramId,
@@ -36,7 +44,12 @@ export function buildRegisterOracleIx({ scannerProgramId, authority, activityOra
   };
 }
 
-export async function registerOracles({ connection, authorityKeypair, activityOracle, launchPriceOracle }) {
+export async function registerOracles({
+  connection,
+  authorityKeypair,
+  activityOracle,
+  launchPriceOracle,
+}) {
   const { ix } = buildRegisterOracleIx({
     scannerProgramId: IDS.scanner,
     authority: authorityKeypair.publicKey,
@@ -44,19 +57,31 @@ export async function registerOracles({ connection, authorityKeypair, activityOr
     launchPriceOracle,
   });
   const r = await sendTx(connection, [ix], [authorityKeypair]);
-  if (r.err) throw new Error(`register_oracle failed: ${JSON.stringify(bigIntSafe(r.err))} logs=${(r.logs ?? []).slice(-4)}`);
+  if (r.err)
+    throw new Error(
+      `register_oracle failed: ${JSON.stringify(bigIntSafe(r.err))} logs=${(r.logs ?? []).slice(-4)}`,
+    );
   return r.sig;
 }
 
-export async function readbackAssertOracles({ connection, SDK, activityOracle, launchPriceOracle }) {
+export async function readbackAssertOracles({
+  connection,
+  SDK,
+  activityOracle,
+  launchPriceOracle,
+}) {
   const cfgPda = configPda(IDS.scanner);
   const cfg = await SDK.fetchScannerProtocolConfig(connection, cfgPda);
   if (!cfg) throw new Error("scanner ProtocolConfig not found after oracle registration");
   if (cfg.activityOracle?.toBase58?.() !== activityOracle.toBase58()) {
-    throw new Error(`activity oracle readback mismatch: ${cfg.activityOracle} vs ${activityOracle.toBase58()}`);
+    throw new Error(
+      `activity oracle readback mismatch: ${cfg.activityOracle} vs ${activityOracle.toBase58()}`,
+    );
   }
   if (cfg.launchPriceOracle?.toBase58?.() !== launchPriceOracle.toBase58()) {
-    throw new Error(`launch price oracle readback mismatch: ${cfg.launchPriceOracle} vs ${launchPriceOracle.toBase58()}`);
+    throw new Error(
+      `launch price oracle readback mismatch: ${cfg.launchPriceOracle} vs ${launchPriceOracle.toBase58()}`,
+    );
   }
   return cfg;
 }
