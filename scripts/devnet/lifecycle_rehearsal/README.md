@@ -82,6 +82,42 @@ validation but is never executed on-chain (skipped leg) · compressed clock ·
 `7002`/gap-1 timing may land fork-covered · fresh local keys (devnet payer
 custody NOT involved).
 
+## Rebuild findings (2026-10-28, runs 1–42)
+
+The harness was rebuilt from the engagement record after the third workspace
+reset destroyed the original verified commits; 20 fixes surfaced during the
+rebuild iterations, the load-bearing ones beyond F1–F3:
+
+- `AddressLookupTableProgram.createLookupTable` takes **`recentSlot`** (not
+  `slot`) in web3.js 3.x; `extendLookupTable` returns a non-array wrapper that
+  must be normalized.
+- The `SlotHashes` sysvar is **bincode** `Vec<(u64, [u8;32])>`: an 8-byte LE
+  length prefix, entries NEWEST-FIRST — a borsh-style 4-byte prefix
+  misaligns every read.
+- `Keypair.fromSecretKey` is **async** in web3.js 3.x; the salvor SDK's
+  `web3compat` restores `findProgramAddressSync`/`createProgramAddressSync`/
+  `toBuffer` — the driver's single web3 instance MUST come from the salvor
+  checkout (createRequire-anchored resolution; `import.meta.resolve` ignores
+  its parent argument).
+- `MessageV0.compile` needs fetched `{key, state}` lookup-table accounts —
+  bare PublicKeys crash `extractTableLookup`.
+- web3.js 3.x `simulateTransaction` rejects a config object on a legacy
+  Transaction ("Invalid arguments") and the legacy packet cannot carry the
+  salvage ix — the connection shim translates the config and simulates
+  oversized txs as **v0 over the ALT** ("enforced at simulate AND send").
+- The salvage tx CREATES the `lp_holder_pool` PDA: its balance is the LP leg
+  PLUS the account's rent-exempt reserve; claims are computed against the
+  **receipt's recorded LP leg** (not the running balance), the protocol leg is
+  the exact remainder (can deviate +2 from floor(20%) — the shipped monitor's
+  ±1 tolerance is tighter than the allocation; labeled boundary), and the
+  claim negatives must use a wallet with NO existing ClaimRecord (Anchor
+  `init` runs before the handler — an already-in-use allocate would mask the
+  7010).
+- The re-sweep reverts **3012** (closed-ATA decode) before the handler's 7021
+  on a live validator — recorded per red line 5.
+- `protocol_admin.mjs drill` gained `--expect-vault-dust` (default unchanged)
+  so the C3 `u64::MAX` initialization can be drilled honestly.
+
 ## Files
 
 - `lifecycle_rehearsal.sh` (repo `scripts/devnet/`) — orchestrator
