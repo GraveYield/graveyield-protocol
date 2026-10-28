@@ -48,6 +48,17 @@ canon outside this list is either superseded or unrelated to the project.
 | Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
 | Phase 0 baseline (verified on-chain + repo state, 2026-10-24; blocker register, devnet usability decision, next steps) | [`BASELINE_REPORT.md`](BASELINE_REPORT.md) |
 
+## Session assessments and handoff volumes
+
+Working session records — the historical engineering record, not canon. When
+anything below disagrees with the canonical spec set, the canonical set wins.
+
+| Topic | Document |
+|-------|----------|
+| Phase 3 readiness assessment (independent repo/CI/test verification before the P3-A pass) | [`assessments/phase3-assessment.md`](assessments/phase3-assessment.md) |
+| Next-milestone assessment, post-Phase 3 (state re-verification, on-chain account census, blocker register, W1 recommendation; 2026-10-27) | [`assessments/phase4-assessment.md`](assessments/phase4-assessment.md) |
+| Phase 2 engineering handoff volume (indexer pipeline architecture, oracle interface, live evidence; 2026-10-26, docx) | [`handoffs/GraveYield_Engineering_Handoff_Phase2_2026-10-26.docx`](handoffs/GraveYield_Engineering_Handoff_Phase2_2026-10-26.docx) |
+
 ## Operations
 
 | Topic | Document |
