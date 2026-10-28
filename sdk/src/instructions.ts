@@ -27,8 +27,8 @@ import {
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { writer } from "./borsh.js";
 import { ScannerIx, VaultIx } from "./discriminators.js";
-import {
 import { createRequire } from "node:module";
+import {
   scannerProtocolConfigPda,
   vaultProtocolConfigPda,
   eligibilityAnchorPda,
