@@ -7,7 +7,9 @@
 // The driver asserts root/supply/holder equality between this artifact and
 // the SDK snapshot fleet-core feeds into the salvage.
 use grave_snapshotter::rpc::RpcLpAccountSource;
-use grave_snapshotter::{InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotRequest, SnapshotMerkleTree};
+use grave_snapshotter::{
+    InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest,
+};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
@@ -33,9 +35,18 @@ fn parse_args() -> Args {
         };
         match a.as_str() {
             "--url" => take(&mut url),
-            "--pool" => pool = Some(Pubkey::from_str(&it.next().expect("--pool value")).expect("pool pubkey")),
-            "--amm" => amm = Some(Pubkey::from_str(&it.next().expect("--amm value")).expect("amm pubkey")),
-            "--lp-mint" => lp_mint = Some(Pubkey::from_str(&it.next().expect("--lp-mint value")).expect("lp mint pubkey")),
+            "--pool" => {
+                pool =
+                    Some(Pubkey::from_str(&it.next().expect("--pool value")).expect("pool pubkey"))
+            }
+            "--amm" => {
+                amm = Some(Pubkey::from_str(&it.next().expect("--amm value")).expect("amm pubkey"))
+            }
+            "--lp-mint" => {
+                lp_mint = Some(
+                    Pubkey::from_str(&it.next().expect("--lp-mint value")).expect("lp mint pubkey"),
+                )
+            }
             "--out" => take(&mut out),
             other => {
                 eprintln!("unknown arg {other}; usage: grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json>");
