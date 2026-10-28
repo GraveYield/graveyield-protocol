@@ -5,7 +5,6 @@
 // agave 3.0.10 — which is why the harness reads canonical (slot,hash) pairs
 // from the sysvar itself (lib.readSlotHashesEntry) and feeds those to the
 // 112B C1 attestation. An SDK-sourced hash reverts 6030 on phase_1.
-import { readFileSync } from "node:fs";
 import { initWeb3, getWeb3, importSdk, readSlotHashesEntry } from "./lib.mjs";
 
 const args = {};
@@ -34,7 +33,8 @@ const verdict = {
   sdk_fetchSlotHash_hex: sdkHex,
   sysvar_SlotHashes_hex: sysHex,
   equal: sdkHex !== null && sdkHex === sysHex,
-  finding: "F1: getBlock(slot).blockhash never equals the SlotHashes sysvar entry on agave 3.0.10 — the attestation must anchor to the SYSVAR pair (6030 otherwise)",
+  finding:
+    "F1: getBlock(slot).blockhash never equals the SlotHashes sysvar entry on agave 3.0.10 — the attestation must anchor to the SYSVAR pair (6030 otherwise)",
 };
 console.log(JSON.stringify(verdict, null, 2));
 if (args.out) {

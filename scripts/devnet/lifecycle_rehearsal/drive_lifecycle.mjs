@@ -39,9 +39,9 @@
 //  written after holder dumps;  10 SLOT-HASH from the sysvar (F1);  11 v0/ALT
 //  salvage tx (F2);  12 market nonce re-pin (F3, in prepare_local_accounts);
 //  13 single web3 instance from the salvor checkout + 3.x simulate adapter.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import nacl from "tweetnacl";
 import {
@@ -67,16 +67,10 @@ import {
   createAndFillAlt,
   applySimCompat,
   uncxMarkerPda,
-  bigIntSafe,
   jsonSafe,
   join as pjoin,
 } from "./lib.mjs";
-import {
-  buildRegisterOracleIx,
-  configPda,
-  registerOracles,
-  readbackAssertOracles,
-} from "./register_oracle.mjs";
+import { registerOracles, readbackAssertOracles } from "./register_oracle.mjs";
 
 // --- args --------------------------------------------------------------------
 const args = {};
@@ -112,7 +106,6 @@ const elfPins = JSON.parse(readFileSync(pjoin(artifacts, "sha256.txt"), "utf8"))
 const POOL = pk(manifest.pool_address);
 const AMM = pk(manifest.amm_program);
 const LP_MINT = pk(localPlan.lp_mint);
-const WSOL = pk(manifest.wsol_mint);
 const MEMECOIN = pk(localPlan.memecoin_mint);
 const COIN_VAULT = pk(manifest.accounts.coin_vault.pubkey);
 const PC_VAULT = pk(manifest.accounts.pc_vault.pubkey);
@@ -169,24 +162,19 @@ const TREASURY_MEMECOIN_ATA = PublicKey.findProgramAddressSync(
   ATA_PROGRAM,
 )[0];
 const UNCX_MARKER = uncxMarkerPda(POOL);
-const CLAIM_RECORD_A = SDK.claimRecordPda(IDS.vault, POOL, K.claimantA.publicKey);
-
-// The wallet / PDA set whose silence proves "no state movement" on reverts.
-const SETTLEMENT_PDAS = () => [
-  ["pool_registry", POOL_REGISTRY],
-  ["salvage_receipt", SALVAGE_RECEIPT],
-  ["lp_holder_pool", LP_HOLDER_POOL],
-  ["eligibility_anchor", ANCHOR_PDA],
-  ["eligibility_cert", CERT_PDA],
-];
 
 // --- report ---------------------------------------------------------------------
 const ts = new Date().toISOString().replace(/[:.]/g, "-");
 const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
-  authorization: "W1 Lifecycle Rehearsal Harness — owner authorization, Handoff Vol IV §8 (verbatim)",
+  authorization:
+    "W1 Lifecycle Rehearsal Harness — owner authorization, Handoff Vol IV §8 (verbatim)",
   cluster: "solana-test-validator (local, --slots-per-epoch 32)",
   url,
-  program_ids: { scanner: IDS.scanner.toBase58(), vault: IDS.vault.toBase58(), raydium_v4: IDS.raydiumV4.toBase58() },
+  program_ids: {
+    scanner: IDS.scanner.toBase58(),
+    vault: IDS.vault.toBase58(),
+    raydium_v4: IDS.raydiumV4.toBase58(),
+  },
   elf_pins: elfPins,
   local_plan: localPlan,
   fixture_manifest: {
@@ -261,8 +249,7 @@ async function expectRevert({
     fee_ok: feeOk,
     tokens_unchanged: tokensSame,
     pdas_absent: absentChecks,
-    note:
-      "fee-only debit on the submitter is the expected real cost of a failed transaction and is recorded, not normalized away; every other tracked balance and the settlement PDA set must be unchanged",
+    note: "fee-only debit on the submitter is the expected real cost of a failed transaction and is recorded, not normalized away; every other tracked balance and the settlement PDA set must be unchanged",
   };
   report.adversarial({
     id,
@@ -339,7 +326,14 @@ function scannerRemainingAccounts() {
   }));
 }
 
-function salvageIxInput({ merkleRoot, supply, salvorLpAmount, minQuoteOutputLamports = 0n, routeData = new Uint8Array(0), routeAccounts = [] }) {
+function salvageIxInput({
+  merkleRoot,
+  supply,
+  salvorLpAmount,
+  minQuoteOutputLamports = 0n,
+  routeData = new Uint8Array(0),
+  routeAccounts = [],
+}) {
   return {
     vaultProgramId: IDS.vault,
     scannerProgramId: IDS.scanner,
@@ -397,7 +391,8 @@ function shiftedPrecompileIx({ signature, oraclePublicKey, message, scannerInstr
   Buffer.from(oraclePublicKey.toBytes()).copy(data, 16);
   Buffer.from(signature).copy(data, 56);
   return new TransactionInstruction({
-    programId: SDK.ED25519_PROGRAM_ID ?? new PublicKey("Ed25519SigVerify111111111111111111111111111"),
+    programId:
+      SDK.ED25519_PROGRAM_ID ?? new PublicKey("Ed25519SigVerify111111111111111111111111111"),
     keys: [],
     data,
   });
@@ -408,12 +403,18 @@ function canonicalPrecompileIx({ signature, oraclePublicKey, message, scannerIns
   const data = Buffer.alloc(16 + 32 + 64);
   data[0] = 1;
   const wr = (off, v) => data.writeUInt16LE(v, off);
-  wr(2, 48); wr(4, 0xffff); wr(6, 16); wr(8, 0xffff);
-  wr(10, 72); wr(12, message.length); wr(14, scannerInstructionIndex);
+  wr(2, 48);
+  wr(4, 0xffff);
+  wr(6, 16);
+  wr(8, 0xffff);
+  wr(10, 72);
+  wr(12, message.length);
+  wr(14, scannerInstructionIndex);
   Buffer.from(oraclePublicKey.toBytes()).copy(data, 16);
   Buffer.from(signature).copy(data, 48);
   return new TransactionInstruction({
-    programId: SDK.ED25519_PROGRAM_ID ?? new PublicKey("Ed25519SigVerify111111111111111111111111111"),
+    programId:
+      SDK.ED25519_PROGRAM_ID ?? new PublicKey("Ed25519SigVerify111111111111111111111111111"),
     keys: [],
     data,
   });
@@ -438,8 +439,16 @@ function malformedPhase1Ix({ ammProgramId, poolAddress, shortMsg, writer }) {
       { pubkey: ANCHOR_PDA, isSigner: false, isWritable: true },
       { pubkey: LAUNCH_PRICE_PDA, isSigner: false, isWritable: false },
       { pubkey: POOL, isSigner: false, isWritable: true },
-      { pubkey: new PublicKey("Sysvar1nstructions1111111111111111111111111"), isSigner: false, isWritable: false },
-      { pubkey: new PublicKey("SysvarS1otHashes111111111111111111111111111"), isSigner: false, isWritable: false },
+      {
+        pubkey: new PublicKey("Sysvar1nstructions1111111111111111111111111"),
+        isSigner: false,
+        isWritable: false,
+      },
+      {
+        pubkey: new PublicKey("SysvarS1otHashes111111111111111111111111111"),
+        isSigner: false,
+        isWritable: false,
+      },
       { pubkey: writer, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ...scannerRemainingAccounts(),
@@ -451,13 +460,14 @@ function malformedPhase1Ix({ ammProgramId, poolAddress, shortMsg, writer }) {
 // --- [stage 1] validator + ELF provenance ---------------------------------------------
 await stage(1, "validator boot + ELF load at NS-2 IDs (sha256 pins)", async () => {
   const checks = [];
-  for (const [label, id, pinKey] of [
-    ["scanner", IDS.scanner, "scanner"],
-    ["vault", IDS.vault, "vault"],
-    ["raydium_v4", IDS.raydiumV4, "raydium_v4"],
+  for (const [label, id] of [
+    ["scanner", IDS.scanner],
+    ["vault", IDS.vault],
+    ["raydium_v4", IDS.raydiumV4],
   ]) {
     const info = await connection.getAccountInfo(id);
-    if (!info || !info.executable) throw new Error(`${label} program not loaded/executable at ${id.toBase58()}`);
+    if (!info || !info.executable)
+      throw new Error(`${label} program not loaded/executable at ${id.toBase58()}`);
     checks.push({ label, loaded: true, bytes: info.data.length });
   }
   const serumProgram = pk(manifest.market_program);
@@ -468,7 +478,8 @@ await stage(1, "validator boot + ELF load at NS-2 IDs (sha256 pins)", async () =
   const mintInfo = await connection.getAccountInfo(LP_MINT);
   if (!mintInfo) throw new Error("lp_mint account missing");
   return {
-    detail: "all programs executable at the NS-2 IDs; pool + re-pinned lp_mint loaded from real mainnet bytes",
+    detail:
+      "all programs executable at the NS-2 IDs; pool + re-pinned lp_mint loaded from real mainnet bytes",
     programs: checks,
     pins: elfPins,
   };
@@ -504,33 +515,39 @@ await stage(2, "ProtocolConfig initialize (SDK builders; vault dust = u64::MAX)"
     vc.salvorShareBps === 4000 &&
     vc.protocolShareBps === 2000 &&
     vc.jupiterDustThresholdLamports === U64_MAX;
-  if (!defaultsOk) throw new Error(`config defaults mismatch: scanner=${jsonSafe(sc)} vault=${jsonSafe(vc)}`);
+  if (!defaultsOk)
+    throw new Error(`config defaults mismatch: scanner=${jsonSafe(sc)} vault=${jsonSafe(vc)}`);
   return {
     tx: r1.sig,
     tx2: r2.sig,
-    detail: "scanner at spec defaults; vault at spec defaults with jupiter_dust_threshold = u64::MAX (conversion leg skipped by config — labeled boundary C3)",
+    detail:
+      "scanner at spec defaults; vault at spec defaults with jupiter_dust_threshold = u64::MAX (conversion leg skipped by config — labeled boundary C3)",
   };
 });
 
 // --- [stage 3] oracle registration (80-byte governance action) -----------------------
-await stage(3, "oracle registration via 80-byte update_protocol_config (ORACLE_CUSTODY.md steps 1–2)", async () => {
-  const sig = await registerOracles({
-    connection,
-    authorityKeypair: K.authority,
-    activityOracle: K.activityOracle.publicKey,
-    launchPriceOracle: K.launchOracle.publicKey,
-  });
-  const cfg = await readbackAssertOracles({
-    connection,
-    SDK,
-    activityOracle: K.activityOracle.publicKey,
-    launchPriceOracle: K.launchOracle.publicKey,
-  });
-  return {
-    tx: sig,
-    detail: `activity_oracle=${cfg.activityOracle.toBase58()} launch_price_oracle=${cfg.launchPriceOracle.toBase58()} — local runbook validation (fresh local keys), NOT the devnet custody situation`,
-  };
-});
+await stage(
+  3,
+  "oracle registration via 80-byte update_protocol_config (ORACLE_CUSTODY.md steps 1–2)",
+  async () => {
+    const sig = await registerOracles({
+      connection,
+      authorityKeypair: K.authority,
+      activityOracle: K.activityOracle.publicKey,
+      launchPriceOracle: K.launchOracle.publicKey,
+    });
+    const cfg = await readbackAssertOracles({
+      connection,
+      SDK,
+      activityOracle: K.activityOracle.publicKey,
+      launchPriceOracle: K.launchOracle.publicKey,
+    });
+    return {
+      tx: sig,
+      detail: `activity_oracle=${cfg.activityOracle.toBase58()} launch_price_oracle=${cfg.launchPriceOracle.toBase58()} — local runbook validation (fresh local keys), NOT the devnet custody situation`,
+    };
+  },
+);
 
 // --- [stage 4] discovery wiring smoke (SDK evaluatePool, tolerant) --------------------
 await stage(4, "discovery/evaluation wiring smoke (SDK evaluatePool — C5 label)", async () => {
@@ -543,62 +560,74 @@ await stage(4, "discovery/evaluation wiring smoke (SDK evaluatePool — C5 label
   }
   // Tolerant per devnetSmoke precedent: the wiring must respond (result or a
   // known wiring error) — the C1/C5 derivation yield gap is a labeled boundary.
-  const wired = outcome !== null || /not found|not a canonical|owned by|No Signers|Raydium V4|signature|history/i.test(err ?? "");
+  const wired =
+    outcome !== null ||
+    /not found|not a canonical|owned by|No Signers|Raydium V4|signature|history/i.test(err ?? "");
   if (!wired) throw new Error(`evaluatePool wiring smoke failed unexpectedly: ${err}`);
-  return { detail: "evaluatePool against the local fixture pool responded (wiring proven; last-swap history is intentionally absent — C5/C6 boundary)", outcome: outcome ? "derived" : `tolerant-error: ${err}` };
+  return {
+    detail:
+      "evaluatePool against the local fixture pool responded (wiring proven; last-swap history is intentionally absent — C5/C6 boundary)",
+    outcome: outcome ? "derived" : `tolerant-error: ${err}`,
+  };
 });
 
 // --- [stage 5] record_launch_price (168B C2, real precompile) -------------------------
-let LAUNCH_PRICE_Q = null;
-await stage(5, "record_launch_price (168B C2 attestation; launch price = current × 200)", async () => {
-  const pool = await SDK.fetchV4Pool(connection, POOL);
-  const reserves = await readReserves();
-  // The on-chain Raydium V4 adapter maps base = coin, quote = pc
-  // unconditionally; SDK quotePerBaseQ64x64 mirrors that mapping.
-  const currentPrice = SDK.quotePerBaseQ64x64(reserves.coin, reserves.pc);
-  const launchPrice = currentPrice * 200n; // 99.5% collapse — fork-precedented
-  LAUNCH_PRICE_Q = launchPrice;
-  const firstSwapSlot = 1; // deterministic synthetic reference (labeled boundary)
-  const firstSwapUnixTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400);
-  const issuedSlot = Math.max(1, Number(await connection.getSlot()) - 4);
-  const msg = SDK.buildLaunchPriceMessage({
-    ammProgramId: IDS.raydiumV4,
-    poolAddress: POOL,
-    baseMint: pool.baseMint,
-    quoteMint: pool.quoteMint,
-    firstSwapSlot: BigInt(firstSwapSlot),
-    firstSwapUnixTs,
-    launchPriceQ64x64: launchPrice,
-    issuedSlot: BigInt(issuedSlot),
-  });
-  if (msg.length !== 168) throw new Error(`C2 msg must be 168B, got ${msg.length}`);
-  const signature = nacl.sign.detached(msg, K.launchOracle.secretKey);
-  const { precompileIx, recordIx } = client.buildRecordLaunchPriceIx({
-    ammProgramId: IDS.raydiumV4,
-    poolAddress: POOL,
-    derivation: {
-      launchPriceQ64x64: launchPrice,
-      firstSwapSlot: BigInt(firstSwapSlot),
-      firstSwapUnixTs,
+await stage(
+  5,
+  "record_launch_price (168B C2 attestation; launch price = current × 200)",
+  async () => {
+    const pool = await SDK.fetchV4Pool(connection, POOL);
+    const reserves = await readReserves();
+    // The on-chain Raydium V4 adapter maps base = coin, quote = pc
+    // unconditionally; SDK quotePerBaseQ64x64 mirrors that mapping.
+    const currentPrice = SDK.quotePerBaseQ64x64(reserves.coin, reserves.pc);
+    const launchPrice = currentPrice * 200n; // 99.5% collapse — fork-precedented
+    const firstSwapSlot = 1; // deterministic synthetic reference (labeled boundary)
+    const firstSwapUnixTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400);
+    const issuedSlot = Math.max(1, Number(await connection.getSlot()) - 4);
+    const msg = SDK.buildLaunchPriceMessage({
+      ammProgramId: IDS.raydiumV4,
+      poolAddress: POOL,
       baseMint: pool.baseMint,
       quoteMint: pool.quoteMint,
-      signature: "",
-    },
-    issuedSlot,
-    signature,
-    oraclePublicKey: K.launchOracle.publicKey,
-    msg,
-    payer: K.authority.publicKey,
-  });
-  const r = await sendTx(connection, [precompileIx, recordIx], [K.authority]);
-  if (r.err) throw new Error(`record_launch_price failed: ${jsonSafe(r.err)} logs: ${(r.logs ?? []).slice(-5)}`);
-  const lp = await SDK.fetchLaunchPrice(connection, LAUNCH_PRICE_PDA);
-  if (!lp || lp.launchPriceQ64x64 !== launchPrice) throw new Error("LaunchPrice PDA readback mismatch");
-  return {
-    tx: r.sig,
-    detail: `launch price pinned at ${launchPrice} q64x64 (current × 200 → 99.5% collapse vs real fixture reserves)`,
-  };
-});
+      firstSwapSlot: BigInt(firstSwapSlot),
+      firstSwapUnixTs,
+      launchPriceQ64x64: launchPrice,
+      issuedSlot: BigInt(issuedSlot),
+    });
+    if (msg.length !== 168) throw new Error(`C2 msg must be 168B, got ${msg.length}`);
+    const signature = nacl.sign.detached(msg, K.launchOracle.secretKey);
+    const { precompileIx, recordIx } = client.buildRecordLaunchPriceIx({
+      ammProgramId: IDS.raydiumV4,
+      poolAddress: POOL,
+      derivation: {
+        launchPriceQ64x64: launchPrice,
+        firstSwapSlot: BigInt(firstSwapSlot),
+        firstSwapUnixTs,
+        baseMint: pool.baseMint,
+        quoteMint: pool.quoteMint,
+        signature: "",
+      },
+      issuedSlot,
+      signature,
+      oraclePublicKey: K.launchOracle.publicKey,
+      msg,
+      payer: K.authority.publicKey,
+    });
+    const r = await sendTx(connection, [precompileIx, recordIx], [K.authority]);
+    if (r.err)
+      throw new Error(
+        `record_launch_price failed: ${jsonSafe(r.err)} logs: ${(r.logs ?? []).slice(-5)}`,
+      );
+    const lp = await SDK.fetchLaunchPrice(connection, LAUNCH_PRICE_PDA);
+    if (!lp || lp.launchPriceQ64x64 !== launchPrice)
+      throw new Error("LaunchPrice PDA readback mismatch");
+    return {
+      tx: r.sig,
+      detail: `launch price pinned at ${launchPrice} q64x64 (current × 200 → 99.5% collapse vs real fixture reserves)`,
+    };
+  },
+);
 
 // --- [adversarial A1–A5] attestation prologue battery (program-live, phase_1) --------
 // Per ORACLE_PIPELINE.md §2.3 the scanner's as-implemented check order is
@@ -612,7 +641,10 @@ await stage(5, "record_launch_price (168B C2 attestation; launch price = current
 
   // A1: missing precompile → 6024 (AttestationMissing)
   {
-    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+    const att = await buildC1Attestation({
+      oracleKeypair: K.activityOracle,
+      lastSwapUnixTs: lastSwapTs,
+    });
     const { phase1Ix } = client.buildPhase1Ix({
       ammProgramId: IDS.raydiumV4,
       poolAddress: POOL,
@@ -636,7 +668,10 @@ await stage(5, "record_launch_price (168B C2 attestation; launch price = current
   // A2: tampered signature → the ed25519 precompile itself rejects
   //     (no GraveYield custom code can be reached — verify-path precedent).
   {
-    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+    const att = await buildC1Attestation({
+      oracleKeypair: K.activityOracle,
+      lastSwapUnixTs: lastSwapTs,
+    });
     const badSig = Uint8Array.from(att.signature);
     badSig[0] ^= 0x01;
     const { precompileIx, phase1Ix } = client.buildPhase1Ix({
@@ -661,7 +696,10 @@ await stage(5, "record_launch_price (168B C2 attestation; launch price = current
 
   // A3: non-canonical precompile offsets (sig@56 ≠ 48) → 6025
   {
-    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+    const att = await buildC1Attestation({
+      oracleKeypair: K.activityOracle,
+      lastSwapUnixTs: lastSwapTs,
+    });
     const { phase1Ix } = client.buildPhase1Ix({
       ammProgramId: IDS.raydiumV4,
       poolAddress: POOL,
@@ -716,7 +754,10 @@ await stage(5, "record_launch_price (168B C2 attestation; launch price = current
   // truncated message — so the signature MUST be over the 111-byte msg),
   // then Anchor's [u8; 112] decode dies on the scanner ix.
   {
-    const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+    const att = await buildC1Attestation({
+      oracleKeypair: K.activityOracle,
+      lastSwapUnixTs: lastSwapTs,
+    });
     const shortMsg = att.msg.slice(0, 111);
     const shortSig = nacl.sign.detached(shortMsg, K.activityOracle.secretKey); // fix 6
     const pre111 = canonicalPrecompileIx({
@@ -747,27 +788,48 @@ await stage(5, "record_launch_price (168B C2 attestation; launch price = current
 // 1232-byte packet. The SAME instructions compile into v0 over this REAL local
 // address lookup table. Created + filled NOW — before the adversarial battery —
 // so creation costs never enter a zero-movement window.
-const ALT_ADDRESS = await createAndFillAlt(
-  connection,
-  K.authority,
-  [
-    POOL, COIN_VAULT, PC_VAULT, LP_MINT, MEMECOIN, IDS.wsolMint,
-    VAULT_AUTHORITY, TREASURY, POOL_REGISTRY, SALVAGE_RECEIPT, LP_HOLDER_POOL,
-    CERT_PDA, ANCHOR_PDA, LAUNCH_PRICE_PDA, SCANNER_CFG, VAULT_CFG,
-    VAULT_WSOL_ATA, VAULT_MEMECOIN_ATA, TREASURY_MEMECOIN_ATA, SALVOR_LP_ATA,
-    pk(manifest.accounts.open_orders.pubkey), pk(manifest.accounts.target_orders.pubkey),
-    pk(manifest.accounts.market.pubkey), pk(manifest.accounts.market_coin_vault.pubkey),
-    pk(manifest.accounts.market_pc_vault.pubkey), pk(manifest.accounts.vault_signer.pubkey),
-    pk(manifest.accounts.event_queue.pubkey), pk(manifest.accounts.bids.pubkey),
-    pk(manifest.accounts.asks.pubkey),
-    IDS.scanner, IDS.vault, IDS.raydiumV4, AMM,
-    new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-    ATA_PROGRAM, SystemProgram.programId,
-    new PublicKey("Ed25519SigVerify111111111111111111111111111"),
-    new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"),
-    K.salvor.publicKey, K.authority.publicKey,
-  ],
-);
+const ALT_ADDRESS = await createAndFillAlt(connection, K.authority, [
+  POOL,
+  COIN_VAULT,
+  PC_VAULT,
+  LP_MINT,
+  MEMECOIN,
+  IDS.wsolMint,
+  VAULT_AUTHORITY,
+  TREASURY,
+  POOL_REGISTRY,
+  SALVAGE_RECEIPT,
+  LP_HOLDER_POOL,
+  CERT_PDA,
+  ANCHOR_PDA,
+  LAUNCH_PRICE_PDA,
+  SCANNER_CFG,
+  VAULT_CFG,
+  VAULT_WSOL_ATA,
+  VAULT_MEMECOIN_ATA,
+  TREASURY_MEMECOIN_ATA,
+  SALVOR_LP_ATA,
+  pk(manifest.accounts.open_orders.pubkey),
+  pk(manifest.accounts.target_orders.pubkey),
+  pk(manifest.accounts.market.pubkey),
+  pk(manifest.accounts.market_coin_vault.pubkey),
+  pk(manifest.accounts.market_pc_vault.pubkey),
+  pk(manifest.accounts.vault_signer.pubkey),
+  pk(manifest.accounts.event_queue.pubkey),
+  pk(manifest.accounts.bids.pubkey),
+  pk(manifest.accounts.asks.pubkey),
+  IDS.scanner,
+  IDS.vault,
+  IDS.raydiumV4,
+  AMM,
+  new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+  ATA_PROGRAM,
+  SystemProgram.programId,
+  new PublicKey("Ed25519SigVerify111111111111111111111111111"),
+  new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"),
+  K.salvor.publicKey,
+  K.authority.publicKey,
+]);
 report.event(`ALT pre-warmed at ${ALT_ADDRESS.toBase58()} (fix 11 / F2)`);
 
 // --- [adversarial A10] phase2 before anchor (fix 7: observed 3012) ----------------------
@@ -799,88 +861,114 @@ report.event(`ALT pre-warmed at ${ALT_ADDRESS.toBase58()} (fix 11 / F2)`);
     ixs: [precompileIx, phase2Ix],
     signers: [K.salvor],
     expectCode: 3012,
-    pdaMustStayAbsent: [["eligibility_anchor", ANCHOR_PDA], ["eligibility_cert", CERT_PDA]],
+    pdaMustStayAbsent: [
+      ["eligibility_anchor", ANCHOR_PDA],
+      ["eligibility_cert", CERT_PDA],
+    ],
   });
 }
 
 // --- [stage 6] evaluate_pool_phase_1 → EligibilityAnchorWritten -------------------------
 let ANCHOR_FIRST_EPOCH = null;
-await stage(6, "evaluate_pool_phase_1 via SDK (112B attestation) → EligibilityAnchorWritten", async () => {
-  const lastSwapTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400); // synthetic-old (fork-precedented)
-  const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
-  const { precompileIx, phase1Ix } = client.buildPhase1Ix({
-    ammProgramId: IDS.raydiumV4,
-    poolAddress: POOL,
-    derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
-    slotHash: att.slotHash,
-    signature: att.signature,
-    oraclePublicKey: K.activityOracle.publicKey,
-    writer: K.salvor.publicKey,
-    remainingAccounts: scannerRemainingAccounts(),
-  });
-  const r = await sendTx(connection, [precompileIx, phase1Ix], [K.salvor]);
-  if (r.err) throw new Error(`phase_1 failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-6)}`);
-  const anchor = await SDK.fetchEligibilityAnchor(connection, ANCHOR_PDA);
-  if (!anchor) throw new Error("EligibilityAnchor PDA not found after phase_1");
-  ANCHOR_FIRST_EPOCH = anchor.firstEligibleEpoch ?? null;
-  const events = eventsFromLogs(r.logs, ["EligibilityAnchorWritten"]);
-  return {
-    tx: r.sig,
-    events: events,
-    anchor_epoch: ANCHOR_FIRST_EPOCH === null ? null : ANCHOR_FIRST_EPOCH.toString(),
-    detail: "C1 anchor written from a real local-slot-anchored 112B attestation (slot hash read from the sysvar — F1)",
-  };
-});
-
-// --- [stage 7] compressed 2-epoch confirmation + 6016-at-gap-1 --------------------------
-await stage(7, "compressed 2-epoch confirmation (--slots-per-epoch 32) + 6016-at-gap-1", async () => {
-  // The cert gate is CURRENT ≥ anchor.firstEligibleEpoch + 2 — not absolute
-  // epoch 2 (run-18 finding: the anchor can land at epoch 1 under the
-  // compressed clock).
-  const targetEpoch = (ANCHOR_FIRST_EPOCH !== null ? Number(ANCHOR_FIRST_EPOCH) : 0) + 2;
-  const info = await connection.getEpochInfo();
-  const currentEpoch = Number(info.epoch);
-  let gapCase = null;
-  if (currentEpoch < targetEpoch) {
-    // We are in the gap (epoch 0 or 1): phase_2 MUST revert 6016 EpochConfirmationPending.
+await stage(
+  6,
+  "evaluate_pool_phase_1 via SDK (112B attestation) → EligibilityAnchorWritten",
+  async () => {
+    const lastSwapTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400); // synthetic-old (fork-precedented)
     const att = await buildC1Attestation({
       oracleKeypair: K.activityOracle,
-      lastSwapUnixTs: BigInt(Math.floor(Date.now() / 1000) - 91 * 86400),
+      lastSwapUnixTs: lastSwapTs,
     });
-    const { precompileIx, phase2Ix } = client.buildPhase2Ix({
+    const { precompileIx, phase1Ix } = client.buildPhase1Ix({
       ammProgramId: IDS.raydiumV4,
       poolAddress: POOL,
-      derivation: { lastSwapUnixTs: Number(Math.floor(Date.now() / 1000) - 91 * 86400), slot: att.issuedSlot, signature: "" },
+      derivation: { lastSwapUnixTs: Number(lastSwapTs), slot: att.issuedSlot, signature: "" },
       slotHash: att.slotHash,
       signature: att.signature,
       oraclePublicKey: K.activityOracle.publicKey,
       writer: K.salvor.publicKey,
       remainingAccounts: scannerRemainingAccounts(),
     });
-    const res = await expectRevert({
-      id: "S7-gap1",
-      name: "evaluate_pool_phase_2 inside the 2-epoch confirmation gap → 6016",
-      ixs: [precompileIx, phase2Ix],
-      signers: [K.salvor],
-      expectCode: 6016,
-      pdaMustStayAbsent: [["eligibility_cert", CERT_PDA]],
-    });
-    gapCase = { asserted: true, code: res.code };
-  } else {
-    gapCase = { asserted: false, note: "already past the gap when stage 7 ran (fork-covered timing boundary — the 6016 negative is asserted in-VM by scanner_windows_fork)" };
-  }
-  const epoch = await waitUntilEpoch(targetEpoch, "2-epoch confirmation from the anchor");
-  return {
-    detail: `confirmed to epoch ${epoch} with --slots-per-epoch 32 (compressed clock — labeled boundary)`,
-    gap_case: gapCase,
-    epoch,
-  };
-});
+    const r = await sendTx(connection, [precompileIx, phase1Ix], [K.salvor]);
+    if (r.err)
+      throw new Error(`phase_1 failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-6)}`);
+    const anchor = await SDK.fetchEligibilityAnchor(connection, ANCHOR_PDA);
+    if (!anchor) throw new Error("EligibilityAnchor PDA not found after phase_1");
+    ANCHOR_FIRST_EPOCH = anchor.firstEligibleEpoch ?? null;
+    const events = eventsFromLogs(r.logs, ["EligibilityAnchorWritten"]);
+    return {
+      tx: r.sig,
+      events: events,
+      anchor_epoch: ANCHOR_FIRST_EPOCH === null ? null : ANCHOR_FIRST_EPOCH.toString(),
+      detail:
+        "C1 anchor written from a real local-slot-anchored 112B attestation (slot hash read from the sysvar — F1)",
+    };
+  },
+);
+
+// --- [stage 7] compressed 2-epoch confirmation + 6016-at-gap-1 --------------------------
+await stage(
+  7,
+  "compressed 2-epoch confirmation (--slots-per-epoch 32) + 6016-at-gap-1",
+  async () => {
+    // The cert gate is CURRENT ≥ anchor.firstEligibleEpoch + 2 — not absolute
+    // epoch 2 (run-18 finding: the anchor can land at epoch 1 under the
+    // compressed clock).
+    const targetEpoch = (ANCHOR_FIRST_EPOCH !== null ? Number(ANCHOR_FIRST_EPOCH) : 0) + 2;
+    const info = await connection.getEpochInfo();
+    const currentEpoch = Number(info.epoch);
+    let gapCase = null;
+    if (currentEpoch < targetEpoch) {
+      // We are in the gap (epoch 0 or 1): phase_2 MUST revert 6016 EpochConfirmationPending.
+      const att = await buildC1Attestation({
+        oracleKeypair: K.activityOracle,
+        lastSwapUnixTs: BigInt(Math.floor(Date.now() / 1000) - 91 * 86400),
+      });
+      const { precompileIx, phase2Ix } = client.buildPhase2Ix({
+        ammProgramId: IDS.raydiumV4,
+        poolAddress: POOL,
+        derivation: {
+          lastSwapUnixTs: Number(Math.floor(Date.now() / 1000) - 91 * 86400),
+          slot: att.issuedSlot,
+          signature: "",
+        },
+        slotHash: att.slotHash,
+        signature: att.signature,
+        oraclePublicKey: K.activityOracle.publicKey,
+        writer: K.salvor.publicKey,
+        remainingAccounts: scannerRemainingAccounts(),
+      });
+      const res = await expectRevert({
+        id: "S7-gap1",
+        name: "evaluate_pool_phase_2 inside the 2-epoch confirmation gap → 6016",
+        ixs: [precompileIx, phase2Ix],
+        signers: [K.salvor],
+        expectCode: 6016,
+        pdaMustStayAbsent: [["eligibility_cert", CERT_PDA]],
+      });
+      gapCase = { asserted: true, code: res.code };
+    } else {
+      gapCase = {
+        asserted: false,
+        note: "already past the gap when stage 7 ran (fork-covered timing boundary — the 6016 negative is asserted in-VM by scanner_windows_fork)",
+      };
+    }
+    const epoch = await waitUntilEpoch(targetEpoch, "2-epoch confirmation from the anchor");
+    return {
+      detail: `confirmed to epoch ${epoch} with --slots-per-epoch 32 (compressed clock — labeled boundary)`,
+      gap_case: gapCase,
+      epoch,
+    };
+  },
+);
 
 // --- [stage 8] evaluate_pool_phase_2 → EligibilityCertIssued ----------------------------
 await stage(8, "evaluate_pool_phase_2 via SDK (112B) → EligibilityCertIssued", async () => {
   const lastSwapTs = BigInt(Math.floor(Date.now() / 1000) - 91 * 86400);
-  const att = await buildC1Attestation({ oracleKeypair: K.activityOracle, lastSwapUnixTs: lastSwapTs });
+  const att = await buildC1Attestation({
+    oracleKeypair: K.activityOracle,
+    lastSwapUnixTs: lastSwapTs,
+  });
   const { precompileIx, phase2Ix } = client.buildPhase2Ix({
     ammProgramId: IDS.raydiumV4,
     poolAddress: POOL,
@@ -906,28 +994,37 @@ await stage(8, "evaluate_pool_phase_2 via SDK (112B) → EligibilityCertIssued",
 
 // --- [stage 9] REAL snapshotter (Rust bin) + SDK root-equality --------------------------
 let ARTIFACT = null;
-let SDK_SNAPSHOT = null;
 await stage(9, "REAL snapshotter (Rust bin) + SDK snapshot root-equality", async () => {
   const bin = pjoin(REPO_ROOT, "target", "debug", "grave-snapshotter-cli");
   if (!existsSync(bin)) throw new Error(`snapshotter bin missing at ${bin} (cargo build first)`);
   const outPath = pjoin(artifacts, "snapshot-artifact.json");
-  const res = spawnSync(bin, [
-    "--url", url,
-    "--pool", POOL.toBase58(),
-    "--amm", IDS.raydiumV4.toBase58(),
-    "--lp-mint", LP_MINT.toBase58(),
-    "--out", outPath,
-  ], { encoding: "utf8" });
+  const res = spawnSync(
+    bin,
+    [
+      "--url",
+      url,
+      "--pool",
+      POOL.toBase58(),
+      "--amm",
+      IDS.raydiumV4.toBase58(),
+      "--lp-mint",
+      LP_MINT.toBase58(),
+      "--out",
+      outPath,
+    ],
+    { encoding: "utf8" },
+  );
   if (res.status !== 0) throw new Error(`grave-snapshotter-cli failed: ${res.stderr?.slice(-800)}`);
   ARTIFACT = JSON.parse(readFileSync(outPath, "utf8"));
   const sdkSnap = await client.snapshotLpHolders(POOL);
-  SDK_SNAPSHOT = sdkSnap;
   const sdkRootHex = Buffer.from(sdkSnap.snapshot.merkleRoot).toString("hex");
   if (sdkRootHex !== ARTIFACT.merkle_root) {
     throw new Error(`merkle root mismatch: rust=${ARTIFACT.merkle_root} sdk=${sdkRootHex}`);
   }
   const rustSupply = BigInt(ARTIFACT.lp_total_supply_at_snapshot);
-  const sdkSupply = BigInt(sdkSnap.snapshot.totalSupply.toString?.() ?? sdkSnap.snapshot.totalSupply);
+  const sdkSupply = BigInt(
+    sdkSnap.snapshot.totalSupply.toString?.() ?? sdkSnap.snapshot.totalSupply,
+  );
   if (rustSupply !== sdkSupply) {
     throw new Error(`supply mismatch: rust=${rustSupply} sdk=${sdkSupply}`);
   }
@@ -938,7 +1035,8 @@ await stage(9, "REAL snapshotter (Rust bin) + SDK snapshot root-equality", async
     leaf_count: ARTIFACT.leaf_count,
     tree_depth: ARTIFACT.tree_depth,
     supply: ARTIFACT.lp_total_supply_at_snapshot,
-    detail: "Rust SnapshotBuilder+SnapshotArtifact::seal output equals the SDK snapshot fleet-core feeds into salvage (root + supply + holders)",
+    detail:
+      "Rust SnapshotBuilder+SnapshotArtifact::seal output equals the SDK snapshot fleet-core feeds into salvage (root + supply + holders)",
   };
 });
 
@@ -954,31 +1052,40 @@ async function currentSalvageInput() {
   // Jupiter-shaped route carrying the vault WSOL ATA as a writable entry. The
   // on-chain program parses but never executes the route on this path.
   const shimQuote = (req) => {
-    console.error(`[shim] expect vault WSOL ATA=${VAULT_WSOL_ATA.toBase58()} req.dest=${String(req.destinationTokenAccount?.toBase58?.() ?? req.destinationTokenAccount)} amt=${req.amount}`);
-    return ({
-    inputMint: req.inputMint?.toBase58?.() ?? String(req.inputMint),
-    outputMint: req.outputMint?.toBase58?.() ?? String(req.outputMint),
-    inAmount: req.amount,
-    // Positive on both legs (estimator gate); the conversion leg is
-    // config-skipped on-chain (dust = u64::MAX) so this number is never
-    // executed — fleet-core-side validation shim only (labeled boundary).
-    outAmount: req.amount,
-    slippageBps: req.slippageBps,
-    routeData: new Uint8Array([0x00]),
-    routeAccounts: [{ pubkey: VAULT_WSOL_ATA, isSigner: false, isWritable: true }],
-    quotedAtMs: Date.now(),
-    adapter: "w1-route-shim",
-  });
+    console.error(
+      `[shim] expect vault WSOL ATA=${VAULT_WSOL_ATA.toBase58()} req.dest=${String(req.destinationTokenAccount?.toBase58?.() ?? req.destinationTokenAccount)} amt=${req.amount}`,
+    );
+    return {
+      inputMint: req.inputMint?.toBase58?.() ?? String(req.inputMint),
+      outputMint: req.outputMint?.toBase58?.() ?? String(req.outputMint),
+      inAmount: req.amount,
+      // Positive on both legs (estimator gate); the conversion leg is
+      // config-skipped on-chain (dust = u64::MAX) so this number is never
+      // executed — fleet-core-side validation shim only (labeled boundary).
+      outAmount: req.amount,
+      slippageBps: req.slippageBps,
+      routeData: new Uint8Array([0x00]),
+      routeAccounts: [{ pubkey: VAULT_WSOL_ATA, isSigner: false, isWritable: true }],
+      quotedAtMs: Date.now(),
+      adapter: "w1-route-shim",
+    };
   };
-  return { root, supply, salvorLpAmount, routeAdapter: { name: "w1-route-shim", quote: shimQuote } };
+  return {
+    root,
+    supply,
+    salvorLpAmount,
+    routeAdapter: { name: "w1-route-shim", quote: shimQuote },
+  };
 }
 
 function buildSalvageIx(input) {
-  return SDK.buildSalvagePoolIx(salvageIxInput({
-    merkleRoot: input.root,
-    supply: input.supply,
-    salvorLpAmount: input.salvorLpAmount,
-  }));
+  return SDK.buildSalvagePoolIx(
+    salvageIxInput({
+      merkleRoot: input.root,
+      supply: input.supply,
+      salvorLpAmount: input.salvorLpAmount,
+    }),
+  );
 }
 
 const SALVAGE_TOKEN_WATCH = () => ({
@@ -1004,7 +1111,10 @@ const SALVAGE_TOKEN_WATCH = () => ({
       ixs: [buildSalvageIx({ root, supply, salvorLpAmount })],
       signers: [K.salvor],
       expectCode: 7003,
-      pdaMustStayAbsent: [["salvage_receipt", SALVAGE_RECEIPT], ["pool_registry", POOL_REGISTRY]],
+      pdaMustStayAbsent: [
+        ["salvage_receipt", SALVAGE_RECEIPT],
+        ["pool_registry", POOL_REGISTRY],
+      ],
       tokenAccounts: SALVAGE_TOKEN_WATCH(),
       viaAlt: true, // F2: the salvage ix exceeds the 1232-byte legacy packet
       altAddress: ALT_ADDRESS,
@@ -1029,7 +1139,10 @@ const SALVAGE_TOKEN_WATCH = () => ({
     ixs: [buildSalvageIx({ root, supply: supply + 1n, salvorLpAmount })],
     signers: [K.salvor],
     expectCode: 7018,
-    pdaMustStayAbsent: [["salvage_receipt", SALVAGE_RECEIPT], ["pool_registry", POOL_REGISTRY]],
+    pdaMustStayAbsent: [
+      ["salvage_receipt", SALVAGE_RECEIPT],
+      ["pool_registry", POOL_REGISTRY],
+    ],
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
     viaAlt: true, // F2
     altAddress: ALT_ADDRESS,
@@ -1043,7 +1156,7 @@ const eventSink = {
   emit(event) {
     fleetEvents.push(event);
     try {
-      require("node:fs").appendFileSync(FLEET_EVENTS_PATH, jsonSafe(event) + "\n");
+      appendFileSync(FLEET_EVENTS_PATH, jsonSafe(event) + "\n");
     } catch {}
   },
 };
@@ -1063,7 +1176,10 @@ const altTxSender = async (conn, tx, signers) => {
   }).compileToV0Message([altFetched.value]);
   const vtx = new W3.VersionedTransaction(msg);
   await vtx.sign(signers);
-  const sig = await conn.sendRawTransaction(vtx.serialize(), { skipPreflight: true, maxRetries: 0 });
+  const sig = await conn.sendRawTransaction(vtx.serialize(), {
+    skipPreflight: true,
+    maxRetries: 0,
+  });
   await confirmSig(conn, sig);
   return sig;
 };
@@ -1072,99 +1188,128 @@ let PIPELINE = null;
 let FLEET_SIGNATURE = null;
 let FLEET_IDENTITY = null;
 
-await stage(10, "fleet-core salvage-only prepare + simulate (mode:\"live\", real pipeline)", async () => {
-  const { root, supply, salvorLpAmount, routeAdapter } = await currentSalvageInput();
-  FLEET_IDENTITY = {
-    cluster: "localnet",
-    ammProgramId: IDS.raydiumV4.toBase58(),
-    poolAddress: POOL.toBase58(),
-  };
-  const cert = await SDK.fetchEligibilityCert(connection, CERT_PDA);
-  const env = FC.buildEnvelope({
-    identity: FLEET_IDENTITY,
-    kind: "salvageable",
-    sourceBot: "w1-rehearsal",
-    detectedAtMs: Date.now(),
-    score: null,
-    firstEligibleEpoch: null,
-    certExpiresAt: cert?.expiresAt != null ? BigInt(cert.expiresAt) : null,
-  });
-  FC.validateEnvelope(env);
-  const store = new FC.InMemoryFleetStore();
-  const admitted = await FC.admitDelivery(store, "w1-rehearsal", env);
-  if (!admitted) throw new Error("envelope admission returned duplicate — at-most-once gate tripped unexpectedly");
+await stage(
+  10,
+  'fleet-core salvage-only prepare + simulate (mode:"live", real pipeline)',
+  async () => {
+    const { routeAdapter } = await currentSalvageInput();
+    FLEET_IDENTITY = {
+      cluster: "localnet",
+      ammProgramId: IDS.raydiumV4.toBase58(),
+      poolAddress: POOL.toBase58(),
+    };
+    const cert = await SDK.fetchEligibilityCert(connection, CERT_PDA);
+    const env = FC.buildEnvelope({
+      identity: FLEET_IDENTITY,
+      kind: "salvageable",
+      sourceBot: "w1-rehearsal",
+      detectedAtMs: Date.now(),
+      score: null,
+      firstEligibleEpoch: null,
+      certExpiresAt: cert?.expiresAt != null ? BigInt(cert.expiresAt) : null,
+    });
+    FC.validateEnvelope(env);
+    const store = new FC.InMemoryFleetStore();
+    const admitted = await FC.admitDelivery(store, "w1-rehearsal", env);
+    if (!admitted)
+      throw new Error(
+        "envelope admission returned duplicate — at-most-once gate tripped unexpectedly",
+      );
 
-  const policy = {
-    botId: "w1-rehearsal",
-    cluster: "localnet",
-    mode: "live",
-    accepts: { kinds: ["salvageable"] },
-    retryBackoffMs: 1000,
-    minNetProfitLamports: 0n,
-    feeMarginRatio: 0.25,
-    computeUnitLimit: 1_400_000,
-    slippageBpsOverride: null,
-    maxSubmitAttempts: 3,
-    leaseTtlMs: 120_000,
-    quoteMaxAgeMs: 15_000,
-    minCertRemainingMs: 120_000,
-    maxOpportunityAgeMs: 21_600_000,
-  };
-  PIPELINE = new FC.ExecutionPipeline({
-    client,
-    policy,
-    liveEnablement: { enabled: true, acknowledgedBy: "owner authorization — W1 rehearsal, Handoff Vol IV §8 (verbatim)" },
-    routeAdapter,
-    eventSink,
-    txSender: altTxSender,
-  });
-  const preparedOutcome = await PIPELINE.prepare({ envelope: env, salvor: K.salvor.publicKey });
-  if (!preparedOutcome.ok || !preparedOutcome.prepared) {
-    throw new Error(`fleet-core prepare failed: stage=${preparedOutcome.stage} class=${preparedOutcome.failureClass} reason=${preparedOutcome.reason}`);
-  }
-  const simulated = await PIPELINE.simulate(preparedOutcome.prepared, FLEET_IDENTITY);
-  if (!simulated.ok) {
-    throw new Error(`fleet-core simulate failed: stage=${simulated.stage} class=${simulated.failureClass} reason=${simulated.reason} logs=${jsonSafe(simulated.simulation?.logs?.slice?.(-4) ?? null)}`);
-  }
-  globalThis.__fleetPrepared = preparedOutcome.prepared; // stash for stage 11
-  return {
-    kind: preparedOutcome.prepared.kind,
-    snapshot_summary: {
-      merkle_root: Buffer.from(preparedOutcome.prepared.snapshotSummary.merkleRoot).toString("hex"),
-      total_supply: preparedOutcome.prepared.snapshotSummary.totalSupply.toString(),
-      salvor_lp_amount: preparedOutcome.prepared.snapshotSummary.salvorLpAmount.toString(),
-      holder_count: preparedOutcome.prepared.snapshotSummary.holderCount,
-    },
-    fee_micro_lamports_per_cu: preparedOutcome.prepared.feeMicroLamportsPerCu?.toString?.() ?? null,
-    detail: "revalidate → 13-account V4 derivation → LP snapshot → estimator → route validation → assemble; simulated through the salvor SDK path",
-  };
-});
+    const policy = {
+      botId: "w1-rehearsal",
+      cluster: "localnet",
+      mode: "live",
+      accepts: { kinds: ["salvageable"] },
+      retryBackoffMs: 1000,
+      minNetProfitLamports: 0n,
+      feeMarginRatio: 0.25,
+      computeUnitLimit: 1_400_000,
+      slippageBpsOverride: null,
+      maxSubmitAttempts: 3,
+      leaseTtlMs: 120_000,
+      quoteMaxAgeMs: 15_000,
+      minCertRemainingMs: 120_000,
+      maxOpportunityAgeMs: 21_600_000,
+    };
+    PIPELINE = new FC.ExecutionPipeline({
+      client,
+      policy,
+      liveEnablement: {
+        enabled: true,
+        acknowledgedBy: "owner authorization — W1 rehearsal, Handoff Vol IV §8 (verbatim)",
+      },
+      routeAdapter,
+      eventSink,
+      txSender: altTxSender,
+    });
+    const preparedOutcome = await PIPELINE.prepare({ envelope: env, salvor: K.salvor.publicKey });
+    if (!preparedOutcome.ok || !preparedOutcome.prepared) {
+      throw new Error(
+        `fleet-core prepare failed: stage=${preparedOutcome.stage} class=${preparedOutcome.failureClass} reason=${preparedOutcome.reason}`,
+      );
+    }
+    const simulated = await PIPELINE.simulate(preparedOutcome.prepared, FLEET_IDENTITY);
+    if (!simulated.ok) {
+      throw new Error(
+        `fleet-core simulate failed: stage=${simulated.stage} class=${simulated.failureClass} reason=${simulated.reason} logs=${jsonSafe(simulated.simulation?.logs?.slice?.(-4) ?? null)}`,
+      );
+    }
+    globalThis.__fleetPrepared = preparedOutcome.prepared; // stash for stage 11
+    return {
+      kind: preparedOutcome.prepared.kind,
+      snapshot_summary: {
+        merkle_root: Buffer.from(preparedOutcome.prepared.snapshotSummary.merkleRoot).toString(
+          "hex",
+        ),
+        total_supply: preparedOutcome.prepared.snapshotSummary.totalSupply.toString(),
+        salvor_lp_amount: preparedOutcome.prepared.snapshotSummary.salvorLpAmount.toString(),
+        holder_count: preparedOutcome.prepared.snapshotSummary.holderCount,
+      },
+      fee_micro_lamports_per_cu:
+        preparedOutcome.prepared.feeMicroLamportsPerCu?.toString?.() ?? null,
+      detail:
+        "revalidate → 13-account V4 derivation → LP snapshot → estimator → route validation → assemble; simulated through the salvor SDK path",
+    };
+  },
+);
 
-await stage(11, "fleet-core salvage submit through the REAL live submit path (v0/ALT)", async () => {
-  const prepared = fleetPrepared();
-  const submitted = await PIPELINE.submit({ prepared, signer: K.salvor, identity: FLEET_IDENTITY });
-  if (!submitted.ok || !submitted.signature) {
-    throw new Error(`fleet-core submit failed: stage=${submitted.stage} class=${submitted.failureClass} reason=${submitted.reason}`);
-  }
-  FLEET_SIGNATURE = submitted.signature;
-  const logs = (await txLogs(FLEET_SIGNATURE)) ?? [];
-  const receipt = await SDK.fetchSalvageReceipt(connection, SALVAGE_RECEIPT);
-  if (!receipt) throw new Error("SalvageReceipt PDA missing after the live salvage submit");
-  const events = eventsFromLogs(logs, ["PoolSalvaged", "SalvageCompleted"]);
-  return {
-    signature: FLEET_SIGNATURE,
-    receipt: {
-      total: receipt.totalProceedsLamports?.toString?.(),
-      salvor: receipt.salvorAmountLamports?.toString?.(),
-      lp_holders: receipt.lpHolderAmountLamports?.toString?.(),
-      protocol: receipt.protocolAmountLamports?.toString?.(),
-      dust_memecoin: receipt.dustMemecoinLamports?.toString?.(),
-      slot: receipt.issuedAtSlot?.toString?.(),
-    },
-    events,
-    detail: "first-ever real submit-path execution: prepare→simulate→submit through fleet-core mode:\"live\" with at-most-once admission; conversion leg skipped by config (C3), dust recorded for sweep_dust",
-  };
-});
+await stage(
+  11,
+  "fleet-core salvage submit through the REAL live submit path (v0/ALT)",
+  async () => {
+    const prepared = fleetPrepared();
+    const submitted = await PIPELINE.submit({
+      prepared,
+      signer: K.salvor,
+      identity: FLEET_IDENTITY,
+    });
+    if (!submitted.ok || !submitted.signature) {
+      throw new Error(
+        `fleet-core submit failed: stage=${submitted.stage} class=${submitted.failureClass} reason=${submitted.reason}`,
+      );
+    }
+    FLEET_SIGNATURE = submitted.signature;
+    const logs = (await txLogs(FLEET_SIGNATURE)) ?? [];
+    const receipt = await SDK.fetchSalvageReceipt(connection, SALVAGE_RECEIPT);
+    if (!receipt) throw new Error("SalvageReceipt PDA missing after the live salvage submit");
+    const events = eventsFromLogs(logs, ["PoolSalvaged", "SalvageCompleted"]);
+    return {
+      signature: FLEET_SIGNATURE,
+      receipt: {
+        total: receipt.totalProceedsLamports?.toString?.(),
+        salvor: receipt.salvorAmountLamports?.toString?.(),
+        lp_holders: receipt.lpHolderAmountLamports?.toString?.(),
+        protocol: receipt.protocolAmountLamports?.toString?.(),
+        dust_memecoin: receipt.dustMemecoinLamports?.toString?.(),
+        slot: receipt.issuedAtSlot?.toString?.(),
+      },
+      events,
+      detail:
+        'first-ever real submit-path execution: prepare→simulate→submit through fleet-core mode:"live" with at-most-once admission; conversion leg skipped by config (C3), dust recorded for sweep_dust',
+    };
+  },
+);
 function fleetPrepared() {
   // stage 11 re-fetches the prepared tx from the stage-10 closure via the report
   // pipeline — kept simple: the pipeline object holds no state we need beyond
@@ -1172,7 +1317,8 @@ function fleetPrepared() {
   return globalThis.__fleetPrepared;
 }
 function txLogs(sig) {
-  return connection.getTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: "confirmed" })
+  return connection
+    .getTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: "confirmed" })
     .then((r) => r?.meta?.logMessages ?? null);
 }
 
@@ -1189,21 +1335,30 @@ await stage(12, "settlement shares 40/40/20 ±1 lamport (receipt)", async () => 
     salvor: BigInt(receipt.salvorAmountLamports),
     protocol: BigInt(receipt.protocolAmountLamports),
   };
-  if (legs.lpHolder + legs.salvor + legs.protocol !== total) throw new Error("settlement legs do not sum to total");
+  if (legs.lpHolder + legs.salvor + legs.protocol !== total)
+    throw new Error("settlement legs do not sum to total");
   // The program's split: LP and salvor legs are FLOORS of 40% each; the
   // protocol leg takes the exact remainder (run-36 finding: the 20% leg can
   // deviate from floor(20%) by up to +2 lamports — the rounding remainder).
   const floorLeg = (total * 4000n) / 10_000n;
   const protocolRemainder = total - floorLeg - floorLeg;
-  const ok = legs.lpHolder === floorLeg && legs.salvor === floorLeg && legs.protocol === protocolRemainder;
-  if (!ok) throw new Error(`shares out of tolerance: ${jsonSafe({ total: total.toString(), expected: { lp: floorLeg.toString(), salvor: floorLeg.toString(), protocol: protocolRemainder.toString() }, ...Object.fromEntries(Object.entries(legs).map(([k, v]) => [k, v.toString()])) })}`);
+  const ok =
+    legs.lpHolder === floorLeg && legs.salvor === floorLeg && legs.protocol === protocolRemainder;
+  if (!ok)
+    throw new Error(
+      `shares out of tolerance: ${jsonSafe({ total: total.toString(), expected: { lp: floorLeg.toString(), salvor: floorLeg.toString(), protocol: protocolRemainder.toString() }, ...Object.fromEntries(Object.entries(legs).map(([k, v]) => [k, v.toString()])) })}`,
+    );
   const poolInfo = await connection.getAccountInfo(LP_HOLDER_POOL);
   const poolBal = BigInt(await connection.getBalance(LP_HOLDER_POOL));
   // The salvage tx CREATES the lp_holder_pool PDA — its balance is the LP
   // leg plus the account's own rent-exempt reserve (run-33 finding).
-  const rent = poolInfo ? BigInt(await connection.getMinimumBalanceForRentExemption(poolInfo.data.length)) : 0n;
+  const rent = poolInfo
+    ? BigInt(await connection.getMinimumBalanceForRentExemption(poolInfo.data.length))
+    : 0n;
   if (poolBal !== legs.lpHolder + rent) {
-    throw new Error(`lp_holder_pool balance ${poolBal} != lpHolder leg ${legs.lpHolder} + rent ${rent}`);
+    throw new Error(
+      `lp_holder_pool balance ${poolBal} != lpHolder leg ${legs.lpHolder} + rent ${rent}`,
+    );
   }
   return {
     total_lamports: total.toString(),
@@ -1242,16 +1397,23 @@ await stage(13, "salvor-bots monitor reconcile (file: import @graveyield/monitor
       if (!r) return false;
       const total = BigInt(r.totalProceedsLamports);
       const floor40 = (total * 4000n) / 10_000n;
-      return BigInt(r.protocolAmountLamports) === total - floor40 - floor40 &&
-             BigInt(r.lpHolderAmountLamports) === floor40 &&
-             BigInt(r.salvorAmountLamports) === floor40;
+      return (
+        BigInt(r.protocolAmountLamports) === total - floor40 - floor40 &&
+        BigInt(r.lpHolderAmountLamports) === floor40 &&
+        BigInt(r.salvorAmountLamports) === floor40
+      );
     })();
   if (rec.status !== "receipt-verified" && !remainderOk) {
-    throw new Error(`monitor status=${rec.status} detail=${jsonSafe(rec.detail)} receipt=${jsonSafe(rec.receipt)}`);
+    throw new Error(
+      `monitor status=${rec.status} detail=${jsonSafe(rec.detail)} receipt=${jsonSafe(rec.receipt)}`,
+    );
   }
   return {
     status: rec.status,
-    remainder_boundary: rec.status === "receipt-anomaly" ? "monitor ±1 tolerance vs the program's exact-remainder protocol leg (≤2 lamports) — labeled" : null,
+    remainder_boundary:
+      rec.status === "receipt-anomaly"
+        ? "monitor ±1 tolerance vs the program's exact-remainder protocol leg (≤2 lamports) — labeled"
+        : null,
     detail: rec.detail,
     receipt: rec.receipt,
     identity_key: identityKey,
@@ -1278,53 +1440,70 @@ await stage(13, "salvor-bots monitor reconcile (file: import @graveyield/monitor
 }
 
 // --- [stage 14] claim_lp_proceeds ×N from the Rust artifact proofs -------------------------
-await stage(14, "claim_lp_proceeds ×N from Rust artifact proofs (+ dup/7010 negatives)", async () => {
-  const supply = BigInt(ARTIFACT.lp_total_supply_at_snapshot);
-  const entriesByOwner = new Map(
-    (ARTIFACT.entries ?? []).map((e) => [String(e.owner), e]),
-  );
-  const claimants = [
-    { name: "claimant_a", kp: K.claimantA },
-    { name: "claimant_b", kp: K.claimantB },
-    { name: "salvor", kp: K.salvor },
-  ];
-  const claims = [];
-  // Each claim is computed against the RECEIPT's recorded LP leg (fixed at
-  // salvage time), NOT the running PDA balance — run-35 finding, verified
-  // numerically against both paid claims.
-  const receiptForClaims = await SDK.fetchSalvageReceipt(connection, SALVAGE_RECEIPT);
-  if (!receiptForClaims) throw new Error("receipt missing before claims");
-  const lpLeg = BigInt(receiptForClaims.lpHolderAmountLamports);
-  for (const c of claimants) {
-    const entry = entriesByOwner.get(c.kp.publicKey.toBase58());
-    if (!entry) throw new Error(`snapshot artifact has no entry for ${c.name}`);
-    const proof = (entry.proof ?? []).map((h) => new Uint8Array(Buffer.from(h, "hex")));
-    const poolBefore = BigInt(await connection.getBalance(LP_HOLDER_POOL));
-    const ix = SDK.buildClaimLpProceedsIx({
-      vaultProgramId: IDS.vault,
-      poolAddress: POOL,
-      lpHolder: c.kp.publicKey,
-      lpBalanceAtSnapshot: BigInt(entry.lp_balance),
-      merkleProof: proof,
-    });
-    const r = await sendTx(connection, [ix], [c.kp]);
-    if (r.err) throw new Error(`claim ${c.name} failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-5)}`);
-    const poolAfter = BigInt(await connection.getBalance(LP_HOLDER_POOL));
-    const expected = (lpLeg * BigInt(entry.lp_balance)) / supply;
-    if (poolBefore - poolAfter !== expected) {
-      throw new Error(`claim ${c.name}: paid ${poolBefore - poolAfter} expected ${expected}`);
+await stage(
+  14,
+  "claim_lp_proceeds ×N from Rust artifact proofs (+ dup/7010 negatives)",
+  async () => {
+    const supply = BigInt(ARTIFACT.lp_total_supply_at_snapshot);
+    const entriesByOwner = new Map((ARTIFACT.entries ?? []).map((e) => [String(e.owner), e]));
+    const claimants = [
+      { name: "claimant_a", kp: K.claimantA },
+      { name: "claimant_b", kp: K.claimantB },
+      { name: "salvor", kp: K.salvor },
+    ];
+    const claims = [];
+    // Each claim is computed against the RECEIPT's recorded LP leg (fixed at
+    // salvage time), NOT the running PDA balance — run-35 finding, verified
+    // numerically against both paid claims.
+    const receiptForClaims = await SDK.fetchSalvageReceipt(connection, SALVAGE_RECEIPT);
+    if (!receiptForClaims) throw new Error("receipt missing before claims");
+    const lpLeg = BigInt(receiptForClaims.lpHolderAmountLamports);
+    for (const c of claimants) {
+      const entry = entriesByOwner.get(c.kp.publicKey.toBase58());
+      if (!entry) throw new Error(`snapshot artifact has no entry for ${c.name}`);
+      const proof = (entry.proof ?? []).map((h) => new Uint8Array(Buffer.from(h, "hex")));
+      const poolBefore = BigInt(await connection.getBalance(LP_HOLDER_POOL));
+      const ix = SDK.buildClaimLpProceedsIx({
+        vaultProgramId: IDS.vault,
+        poolAddress: POOL,
+        lpHolder: c.kp.publicKey,
+        lpBalanceAtSnapshot: BigInt(entry.lp_balance),
+        merkleProof: proof,
+      });
+      const r = await sendTx(connection, [ix], [c.kp]);
+      if (r.err)
+        throw new Error(
+          `claim ${c.name} failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-5)}`,
+        );
+      const poolAfter = BigInt(await connection.getBalance(LP_HOLDER_POOL));
+      const expected = (lpLeg * BigInt(entry.lp_balance)) / supply;
+      if (poolBefore - poolAfter !== expected) {
+        throw new Error(`claim ${c.name}: paid ${poolBefore - poolAfter} expected ${expected}`);
+      }
+      claims.push({
+        holder: c.name,
+        paid: (poolBefore - poolAfter).toString(),
+        expected: expected.toString(),
+      });
     }
-    claims.push({ holder: c.name, paid: (poolBefore - poolAfter).toString(), expected: expected.toString() });
-  }
-  if (!(await SDK.fetchClaimRecord(connection, SDK.claimRecordPda(IDS.vault, POOL, K.claimantA.publicKey)))) {
-    throw new Error("ClaimRecord for claimant_a missing after claim");
-  }
-  return { claims, detail: "every holder paid exactly floor(pool × balance / supply) per the Rust artifact proofs; ClaimRecords initialized" };
-});
+    if (
+      !(await SDK.fetchClaimRecord(
+        connection,
+        SDK.claimRecordPda(IDS.vault, POOL, K.claimantA.publicKey),
+      ))
+    ) {
+      throw new Error("ClaimRecord for claimant_a missing after claim");
+    }
+    return {
+      claims,
+      detail:
+        "every holder paid exactly floor(pool × balance / supply) per the Rust artifact proofs; ClaimRecords initialized",
+    };
+  },
+);
 
 // --- [adversarial A9] claim battery: duplicate / bad proof / inflated -----------------------
 {
-  const supply = BigInt(ARTIFACT.lp_total_supply_at_snapshot);
   const entriesByOwner = new Map((ARTIFACT.entries ?? []).map((e) => [String(e.owner), e]));
   const entryA = entriesByOwner.get(K.claimantA.publicKey.toBase58());
   const entryB = entriesByOwner.get(K.claimantB.publicKey.toBase58());
@@ -1406,7 +1585,9 @@ await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative",
   // The treasury ATA is created BY the sweep (init_if_needed) — absent before it.
   let treasuryBefore = 0n;
   try {
-    treasuryBefore = BigInt((await connection.getTokenAccountBalance(TREASURY_MEMECOIN_ATA)).value.amount);
+    treasuryBefore = BigInt(
+      (await connection.getTokenAccountBalance(TREASURY_MEMECOIN_ATA)).value.amount,
+    );
   } catch {
     treasuryBefore = 0n;
   }
@@ -1417,29 +1598,43 @@ await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative",
     sweeper: K.salvor.publicKey,
   });
   const r = await sendTx(connection, [ix], [K.salvor]);
-  if (r.err) throw new Error(`sweep_dust failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-5)}`);
-  const treasuryAfter = BigInt((await connection.getTokenAccountBalance(TREASURY_MEMECOIN_ATA)).value.amount);
-  if (treasuryAfter - treasuryBefore !== dust) throw new Error(`treasury delta ${treasuryAfter - treasuryBefore} != dust ${dust}`);
+  if (r.err)
+    throw new Error(`sweep_dust failed: ${jsonSafe(r.err)} logs=${(r.logs ?? []).slice(-5)}`);
+  const treasuryAfter = BigInt(
+    (await connection.getTokenAccountBalance(TREASURY_MEMECOIN_ATA)).value.amount,
+  );
+  if (treasuryAfter - treasuryBefore !== dust)
+    throw new Error(`treasury delta ${treasuryAfter - treasuryBefore} != dust ${dust}`);
   let vaultAtaGone = false;
   try {
     await connection.getTokenAccountBalance(VAULT_MEMECOIN_ATA);
   } catch {
     vaultAtaGone = true;
   }
-  if (!vaultAtaGone) throw new Error("vault memecoin ATA still exists after sweep (should be closed)");
+  if (!vaultAtaGone)
+    throw new Error("vault memecoin ATA still exists after sweep (should be closed)");
   // negative: second sweep. FIX (recorded per red line 5, run-39 finding):
   // the first sweep CLOSED the vault memecoin ATA, so the re-sweep's Anchor
   // TokenAccount decode dies with 3012 (AccountNotInitialized) BEFORE the
   // handler's 7021 DustAlreadySwept — the one-shot guard is provably intact
   // either way (the account cannot be swept twice; the state is destroyed).
-  const r2 = await sendTx(connection, [SDK.buildSweepDustIx({
-    vaultProgramId: IDS.vault,
-    poolAddress: POOL,
-    memecoinMint: MEMECOIN,
-    sweeper: K.salvor.publicKey,
-  })], [K.salvor]);
+  const r2 = await sendTx(
+    connection,
+    [
+      SDK.buildSweepDustIx({
+        vaultProgramId: IDS.vault,
+        poolAddress: POOL,
+        memecoinMint: MEMECOIN,
+        sweeper: K.salvor.publicKey,
+      }),
+    ],
+    [K.salvor],
+  );
   const code2 = customCodeFromErr(r2.err);
-  if (code2 !== 3012) throw new Error(`re-sweep expected 3012 (closed-ATA decode precedes the handler's 7021), got ${jsonSafe(r2.err)}`);
+  if (code2 !== 3012)
+    throw new Error(
+      `re-sweep expected 3012 (closed-ATA decode precedes the handler's 7021), got ${jsonSafe(r2.err)}`,
+    );
   report.adversarial({
     id: "S15-resweep",
     name: "second sweep_dust → 3012 (closed vault ATA; one-shot guard intact — 7021 unreachable on a live validator)",
@@ -1448,7 +1643,8 @@ await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative",
     pass: true,
     tx: r2.sig,
     zero_movement: { proved: true, note: "one-shot guard; fee-only debit" },
-    boundary_note: "fork-covered: the fork suites assert 7021 in-VM where the ATA can be re-funded; on a live validator the closed account decode precedes the handler",
+    boundary_note:
+      "fork-covered: the fork suites assert 7021 in-VM where the ATA can be re-funded; on a live validator the closed account decode precedes the handler",
   });
   return {
     dust_memecoin_lamports: dust.toString(),
@@ -1462,24 +1658,36 @@ await stage(16, "emergency-control drills via protocol_admin.mjs (scanner + vaul
   const adminScript = pjoin(REPO_ROOT, "scripts", "devnet", "protocol_admin.mjs");
   const results = [];
   for (const program of ["scanner", "vault"]) {
-    const res = spawnSync("node", [
-      adminScript, "drill",
-      "--url", url,
-      "--authority", pjoin(keys, "authority.json"),
-      "--intruder", pjoin(keys, "intruder.json"),
-      "--program", program,
-      // C3: the vault was initialized with dust = u64::MAX (conversion leg
-      // config-skipped) — tell the drill what the honest expected value is.
-      ...(program === "vault" ? ["--expect-vault-dust", U64_MAX.toString()] : []),
-    ], { encoding: "utf8" });
+    const res = spawnSync(
+      "node",
+      [
+        adminScript,
+        "drill",
+        "--url",
+        url,
+        "--authority",
+        pjoin(keys, "authority.json"),
+        "--intruder",
+        pjoin(keys, "intruder.json"),
+        "--program",
+        program,
+        // C3: the vault was initialized with dust = u64::MAX (conversion leg
+        // config-skipped) — tell the drill what the honest expected value is.
+        ...(program === "vault" ? ["--expect-vault-dust", U64_MAX.toString()] : []),
+      ],
+      { encoding: "utf8" },
+    );
     if (res.status !== 0) {
-      throw new Error(`drill ${program} exited ${res.status}: ${(res.stderr || res.stdout || "").slice(-600)}`);
+      throw new Error(
+        `drill ${program} exited ${res.status}: ${(res.stderr || res.stdout || "").slice(-600)}`,
+      );
     }
     results.push({ program, ok: true });
   }
   return {
     drills: results,
-    detail: "production emergency-control drill green on both programs: init-assert → pause → assert → intruder-must-revert (6000/7000) → unpause",
+    detail:
+      "production emergency-control drill green on both programs: init-assert → pause → assert → intruder-must-revert (6000/7000) → unpause",
   };
 });
 
@@ -1501,4 +1709,6 @@ const doc = report.finish({
   fleet_events: fleetEvents.length,
 });
 if (!doc.all_pass) process.exit(1);
-console.log(`W1 LIFECYCLE REHEARSAL COMPLETE — 16 stages + adversarial battery all green (ALT ${ALT_ADDRESS.toBase58()}, salvage ${FLEET_SIGNATURE})`);
+console.log(
+  `W1 LIFECYCLE REHEARSAL COMPLETE — 16 stages + adversarial battery all green (ALT ${ALT_ADDRESS.toBase58()}, salvage ${FLEET_SIGNATURE})`,
+);
