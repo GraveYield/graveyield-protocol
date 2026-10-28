@@ -86,7 +86,7 @@ fn main() {
     // Local rehearsal: the UNCX per-pool lock marker is absent from the local
     // validator (proven-unlocked path, PoolEnv::scanner_remaining precedent),
     // so the locked-LP evidence set is empty — the honest local mirror.
-    let locks = InMemoryLocks::from_records(&args.amm, &args.lp_mint, Vec::new());
+    let locks = InMemoryLocks::from_records(&args.pool, &args.lp_mint, Vec::new());
 
     let source = RpcLpAccountSource::new(client);
     let snapshot = match builder.build(&source, &locks) {

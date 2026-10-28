@@ -10,8 +10,8 @@ import { createHash } from "node:crypto";
 import { sendTx, IDS, pk, bigIntSafe } from "./lib.mjs";
 
 export function configPda(programId) {
-  const { PublicKey } = IDS.scanner.constructor;
-  return PublicKey.findProgramAddressSync([Buffer.from("protocol_config", "utf8")], programId)[0];
+  const PKC = IDS.scanner.constructor; // the salvor-checkout PublicKey class
+  return PKC.findProgramAddressSync([Buffer.from("protocol_config", "utf8")], programId)[0];
 }
 
 export function buildRegisterOracleIx({ scannerProgramId, authority, activityOracle, launchPriceOracle }) {

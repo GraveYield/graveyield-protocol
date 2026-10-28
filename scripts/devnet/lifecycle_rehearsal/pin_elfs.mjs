@@ -13,7 +13,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DRIVER_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = dirname(dirname(DRIVER_DIR)); // scripts/devnet/lifecycle_rehearsal -> repo root
+// lifecycle_rehearsal -> scripts/devnet -> scripts -> REPO ROOT (three dirnames — fix 2)
+const REPO_ROOT = dirname(dirname(dirname(DRIVER_DIR)));
 
 const args = {};
 for (let i = 2; i < process.argv.length; i++) {

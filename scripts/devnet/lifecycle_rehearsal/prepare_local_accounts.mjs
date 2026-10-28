@@ -53,7 +53,7 @@ function accountJson({ pubkey, owner, lamports, data, executable = false }) {
       data: [b64(data), "base64"],
       owner,
       executable,
-      rent_epoch: 18446744073709551615,
+      rentEpoch: 0,
     },
   };
 }
@@ -67,12 +67,13 @@ function metaOf(name) {
 }
 
 // --- 1. holder keypairs + LP amounts (C6) --------------------------------------------
-function readKeypair(name) {
+async function readKeypair(name) {
+  // web3.js 3.x: Keypair.fromSecretKey is async (fix 3)
   return W3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(join(keys, `${name}.json`), "utf8"))));
 }
-const salvor = readKeypair("salvor");
-const claimantA = readKeypair("claimant_a");
-const claimantB = readKeypair("claimant_b");
+const salvor = await readKeypair("salvor");
+const claimantA = await readKeypair("claimant_a");
+const claimantB = await readKeypair("claimant_b");
 
 const ammLp = BigInt(manifest.parsed?.amm_lp_amount ?? 0n);
 if (ammLp <= 0n) throw new Error(`manifest amm_lp_amount must be > 0, got ${ammLp}`);

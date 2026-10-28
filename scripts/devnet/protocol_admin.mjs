@@ -467,7 +467,14 @@ async function cmdDrill(args) {
 
   console.log(`[${program}] emergency-control drill`);
   // 1. Freshly initialized config: authority set, defaults, not paused.
-  const defaults = program === "scanner" ? SCANNER_DEFAULTS : VAULT_DEFAULTS;
+  // --expect-vault-dust: optional override for rehearsal harnesses that
+  // initialize the vault with a non-default jupiter_dust_threshold
+  // (e.g. the W1 lifecycle rehearsal's u64::MAX conversion-leg skip, C3).
+  // Default stays the spec value — CI and manual drills are unaffected.
+  const defaults = { ...(program === "scanner" ? SCANNER_DEFAULTS : VAULT_DEFAULTS) };
+  if (program === "vault" && args["expect-vault-dust"] !== undefined) {
+    defaults.jupiterDustThresholdLamports = BigInt(args["expect-vault-dust"]);
+  }
   await assertConfig(connection, program, {
     authority: authority.publicKey.toBase58(),
     ...defaults,

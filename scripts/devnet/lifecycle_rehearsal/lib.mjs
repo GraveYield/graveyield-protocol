@@ -25,9 +25,19 @@ export async function initWeb3(salvorBotsPath) {
   // Resolve web3.js exactly as the salvor workspace resolves it so PublicKey /
   // Transaction classes are the SAME identities fleet-core's instanceof checks
   // use (fix 13: dual web3.js instances broke instanceof inside the salvor SDK).
-  const spec = pathToFileURL(join(salvorBotsPath, "package.json")).href;
-  const resolved = import.meta.resolve("@solana/web3.js", spec);
-  W3M = await import(resolved);
+  // NOTE: import.meta.resolve IGNORES its parent argument — it silently resolved
+  // from the driver's own tree (the protocol workspace copy). createRequire
+  // anchored at the salvor package.json resolves the salvor copy for real.
+  const req = createRequire(join(salvorBotsPath, "package.json"));
+  const w3Path = req.resolve("@solana/web3.js");
+  W3M = await import(pathToFileURL(w3Path).href);
+  // The salvor SDK's web3compat restores the 1.x statics the 3.x class dropped
+  // (findProgramAddressSync / createProgramAddressSync / toBuffer). Importing
+  // the SDK here guarantees EVERY consumer of lib sees the patched class.
+  await import(pathToFileURL(join(salvorBotsPath, "dist", "index.js")).href);
+  if (typeof W3M.PublicKey.findProgramAddressSync !== "function") {
+    throw new Error("web3compat patch not applied: PublicKey.findProgramAddressSync still missing");
+  }
   return W3M;
 }
 
@@ -38,7 +48,7 @@ function w() {
 export const getWeb3 = w;
 
 export function pk(s) {
-  return new w().PublicKey(s);
+  return new (w().PublicKey)(s);
 }
 
 export let IDS = null;
@@ -141,38 +151,55 @@ export class RunReport {
 export async function sendTx(connection, ixs, signers, opts = {}) {
   const w3 = w();
   const payer = signers[0].publicKey;
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  let sig;
-  if (opts.viaAlt) {
-    const msg = new w3.TransactionMessage({
-      payerKey: payer,
-      recentBlockhash: blockhash,
-      instructions: ixs,
-    }).compileToV0Message([opts.altAddress]);
-    const vtx = new w3.VersionedTransaction(msg);
-    await vtx.sign([signers[0]]);
-    sig = await connection.sendRawTransaction(vtx.serialize(), {
-      skipPreflight: true,
-      maxRetries: 0,
-    });
-  } else {
-    const tx = new w3.Transaction({ feePayer: payer, blockhash, lastValidBlockHeight });
-    for (const ix of ixs) tx.add(ix);
-    await tx.partialSign(...signers); // async in 3.x (fix 3)
-    const raw = await tx.serialize();
-    sig = await connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 });
+  // One full resend cycle on a confirmation timeout: under --warp-slot with
+  // --slots-per-epoch 32 slots fly fast enough that a single-shot send
+  // (maxRetries 0) can be dropped outright (run-23 finding).
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    let sig;
+    if (opts.viaAlt) {
+      // compileToV0Message expects fetched {key, state} table accounts, not
+      // bare PublicKeys (run-24 finding — extractTableLookup reads .state).
+      const altFetched = await connection.getAddressLookupTable(opts.altAddress);
+      if (!altFetched?.value) throw new Error(`ALT ${opts.altAddress.toBase58()} not resolvable`);
+      const msg = new w3.TransactionMessage({
+        payerKey: payer,
+        recentBlockhash: blockhash,
+        instructions: ixs,
+      }).compileToV0Message([altFetched.value]);
+      const vtx = new w3.VersionedTransaction(msg);
+      await vtx.sign([signers[0]]);
+      sig = await connection.sendRawTransaction(vtx.serialize(), {
+        skipPreflight: true,
+        maxRetries: attempt === 1 ? 0 : 4,
+      });
+    } else {
+      const tx = new w3.Transaction({ feePayer: payer, blockhash, lastValidBlockHeight });
+      for (const ix of ixs) tx.add(ix);
+      await tx.partialSign(...signers); // async in 3.x (fix 3)
+      const raw = await tx.serialize();
+      sig = await connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: attempt === 1 ? 0 : 4 });
+    }
+    try {
+      const status = await confirmSig(connection, sig, lastValidBlockHeight);
+      const res = await connection.getTransaction(sig, {
+        maxSupportedTransactionVersion: 0,
+        commitment: "confirmed",
+      });
+      return {
+        sig,
+        slot: status.slot,
+        err: (res && res.meta && res.meta.err) ?? null,
+        logs: (res && res.meta && res.meta.logMessages) ?? [],
+      };
+    } catch (e) {
+      if (attempt === 2) throw e;
+      // confirmation timeout — fresh blockhash + resend (the first send was
+      // likely dropped; a re-send of the same ix set is idempotent-at-fail
+      // for reverted txs and a duplicate for landed ones, which cannot
+      // happen here because a landed tx confirms).
+    }
   }
-  const status = await confirmSig(connection, sig, lastValidBlockHeight);
-  const res = await connection.getTransaction(sig, {
-    maxSupportedTransactionVersion: 0,
-    commitment: "confirmed",
-  });
-  return {
-    sig,
-    slot: status.slot,
-    err: (res && res.meta && res.meta.err) ?? null,
-    logs: (res && res.meta && res.meta.logMessages) ?? [],
-  };
 }
 
 export async function confirmSig(connection, sig, lastValidBlockHeight) {
@@ -180,10 +207,18 @@ export async function confirmSig(connection, sig, lastValidBlockHeight) {
     const r = await connection.getSignatureStatuses([sig]);
     const v = r && r.value && r.value[0];
     if (v && (v.confirmationStatus === "confirmed" || v.confirmationStatus === "finalized")) {
-      if (v.err) throw new Error(`tx ${sig} failed on chain: ${JSON.stringify(bigIntSafe(v.err))}`);
-      return { slot: v.slot };
+      // A FAILED tx is a RESULT here, not a throw: expectRevert depends on
+      // reading the revert code/logs from the confirmed transaction.
+      return { slot: v.slot, err: v.err ?? null };
     }
-    await new Promise((r2) => setTimeout(r2, 250));
+    // Fallback (run-17 finding): with --slots-per-epoch 32 the recent-status
+    // cache expires in ~25 s — getTransaction sees blocks the status cache forgot.
+    const t = await connection.getTransaction(sig, {
+      maxSupportedTransactionVersion: 0,
+      commitment: "confirmed",
+    });
+    if (t) return { slot: t.slot, err: (t.meta && t.meta.err) ?? null };
+    await new Promise((r2) => setTimeout(r2, 400));
   }
   throw new Error(`tx ${sig} confirmation timed out`);
 }
@@ -268,17 +303,69 @@ export function snapshotDiffZero(a, b) {
   return true;
 }
 
+// --- 1.99-style simulateTransaction config compat (fix 13b) ------------------------------
+// The salvor SDK calls simulateTransaction(connection, legacyTx, {config}) —
+// web3.js 3.x throws "Invalid arguments" for a config object on a legacy
+// Transaction. The config's semantics (replaceRecentBlockhash:false,
+// sigVerify:false) are exactly the 3.x legacy no-config path — translate.
+export function applySimCompat(connection, getAltAddress = null) {
+  const orig = connection.simulateTransaction.bind(connection);
+  connection.simulateTransaction = async (txOrMsg, cfg, includeAccounts) => {
+    const isVersioned = txOrMsg && typeof txOrMsg === "object" && "message" in txOrMsg;
+    if (!isVersioned) {
+      if (cfg !== undefined && !Array.isArray(cfg)) {
+        cfg = undefined; // 1.99 config semantics == 3.x legacy no-config path
+      }
+      // The pipeline simulates the assembled tx BEFORE signing — 3.x needs a
+      // fee payer to serialize; the intended payer is the first signer meta.
+      if (!txOrMsg.feePayer) {
+        const signerMeta = (txOrMsg.instructions ?? [])
+          .map((ix) => (ix.keys ?? []).find((k) => k.isSigner))
+          .find(Boolean);
+        if (signerMeta) txOrMsg.feePayer = signerMeta.pubkey;
+      }
+      try {
+        return await orig(txOrMsg, cfg, includeAccounts);
+      } catch (e) {
+        // F2: the salvage ix cannot fit the legacy packet — simulate the SAME
+        // instructions as v0 over the pre-warmed ALT (run-31 finding).
+        if (/too large/i.test(String(e?.message ?? e)) && getAltAddress) {
+          const altAddr = getAltAddress();
+          if (altAddr) {
+            const altFetched = await connection.getAddressLookupTable(altAddr);
+            const msg = new W3M.TransactionMessage({
+              payerKey: txOrMsg.feePayer,
+              recentBlockhash: txOrMsg.recentBlockhash,
+              instructions: txOrMsg.instructions,
+            }).compileToV0Message([altFetched.value]);
+            const vtx = new W3M.VersionedTransaction(msg);
+            vtx.sign([]);
+            return orig(vtx, undefined, includeAccounts);
+          }
+        }
+        throw e;
+      }
+    }
+    return orig(txOrMsg, cfg, includeAccounts);
+  };
+  return connection;
+}
+
 // --- SLOT-HASH from the sysvar itself (fix 10 / finding F1) --------------------------------
 // SDK.fetchSlotHash uses getBlock(slot).blockhash which NEVER equals the
 // SlotHashes sysvar entry on agave 3.0.10 → 6030 on every SDK-sourced hash.
 // The canonical (slot,hash) pairs must be read from the sysvar account.
 export const SLOT_HASHES_SYSVAR = "SysvarS1otHashes111111111111111111111111111";
 export async function readSlotHashesEntry(connection, slot) {
-  const info = await connection.getAccountInfo(new w().PublicKey(SLOT_HASHES_SYSVAR));
+  const info = await connection.getAccountInfo(new (w().PublicKey)(SLOT_HASHES_SYSVAR));
   if (!info) return null;
   const data = Buffer.from(info.data);
   const target = BigInt(slot);
-  for (let off = 0; off + 40 <= data.length; off += 40) {
+  // SlotHashes sysvar is bincode Vec<(u64 slot, [u8;32] hash)>: 8-byte LE
+  // length prefix, then 40-byte entries NEWEST-FIRST (run-12/13 probes).
+  let off = 8;
+  const count = Number(data.readBigUInt64LE(0));
+  for (let i = 0; i < count && off + 40 <= data.length; i++, off += 40) {
     if (data.readBigUInt64LE(off) === target) {
       return new Uint8Array(data.subarray(off + 8, off + 40));
     }
@@ -297,7 +384,7 @@ export async function createAndFillAlt(connection, payer, addresses) {
   const ret = await w3.AddressLookupTableProgram.createLookupTable({
     payer: payer.publicKey,
     authority: payer.publicKey,
-    slot,
+    recentSlot: slot, // 1.x/3.x param name is recentSlot (run-15 finding)
   });
   if (Array.isArray(ret)) {
     [createIx, alt] = ret; // 3.x: async + [instruction, address] tuple (fix 3)
@@ -319,7 +406,13 @@ export async function createAndFillAlt(connection, payer, addresses) {
       lookupTable: alt,
       addresses: chunk,
     });
-    const r2 = await sendTx(connection, ext, [payer]);
+    // 3.x return shapes vary (array | {instruction} | single ix) — normalize.
+    const extIxs = Array.isArray(ext)
+      ? ext
+      : ext && ext.instruction
+        ? [ext.instruction]
+        : [ext];
+    const r2 = await sendTx(connection, extIxs, [payer]);
     if (r2.err) throw new Error(`ALT extend failed: ${JSON.stringify(bigIntSafe(r2.err))}`);
   }
   return alt;
