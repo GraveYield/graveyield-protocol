@@ -44,11 +44,10 @@
 //     keypairs, exactly as in production the indexer/oracle keys are
 //     registered in ProtocolConfig at initialize.
 
-// solana-sdk 2.3 deprecates the monolithic `system_program` / `bpf_loader`
-// modules in favour of the split interface crates; the deprecated paths
-// still work and keep the harness on the same re-exports anchor-lang's
-// prelude uses (same rationale as the Phase 3/4/5 suites).
-#![allow(deprecated)]
+// solana-sdk 3.0 removed the `system_program` facade module entirely
+// (agave split-crate era); its address now comes from solana-sdk-ids.
+// `bpf_loader` remains on the facade but deprecated — hence the allow.
+#![allow(deprecated)] // bpf_loader facade re-export
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -78,11 +77,11 @@ use solana_sdk::{
     rent::Rent,
     signature::Keypair,
     signer::Signer,
-    system_program,
     sysvar::clock as clock_sysvar,
     sysvar::slot_hashes as slot_hashes_sysvar,
     transaction::Transaction,
 };
+use solana_sdk_ids::system_program;
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -778,10 +777,7 @@ fn evaluate_pool_ix(env: &PoolEnv, msg: &[u8; 112], phase2: bool, writer: &Pubke
     metas.extend([
         AccountMeta::new_readonly(env.launch_price_pda, false),
         AccountMeta::new_readonly(env.pool, false),
-        AccountMeta::new_readonly(
-            anchor_lang::solana_program::sysvar::instructions::id(),
-            false,
-        ),
+        AccountMeta::new_readonly(solana_sdk_ids::sysvar::instructions::id(), false),
         AccountMeta::new_readonly(slot_hashes_sysvar::id(), false),
         AccountMeta::new(*writer, true),
         AccountMeta::new_readonly(system_program::ID, false),
@@ -839,10 +835,7 @@ fn record_launch_price_ix(
     let metas = vec![
         AccountMeta::new(env.launch_price_pda, false),
         AccountMeta::new_readonly(scanner_config_pda(), false),
-        AccountMeta::new_readonly(
-            anchor_lang::solana_program::sysvar::instructions::id(),
-            false,
-        ),
+        AccountMeta::new_readonly(solana_sdk_ids::sysvar::instructions::id(), false),
         AccountMeta::new(*payer, true),
         AccountMeta::new_readonly(system_program::ID, false),
     ];

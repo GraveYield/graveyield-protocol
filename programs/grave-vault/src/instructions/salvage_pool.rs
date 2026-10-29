@@ -283,7 +283,7 @@ pub struct SalvagePool<'info> {
 }
 
 pub fn handler<'info>(
-    ctx: Context<'_, '_, '_, 'info, SalvagePool<'info>>,
+    ctx: Context<'info, SalvagePool<'info>>,
     params: SalvagePoolParams,
 ) -> Result<()> {
     let cfg = &ctx.accounts.protocol_config;
@@ -621,7 +621,7 @@ pub fn handler<'info>(
         let seeds: &[&[u8]] = &[VAULT_AUTHORITY_SEED, &bump];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
         let close_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             CloseAccount {
                 account: ctx.accounts.vault_base_token_account.to_account_info(),
                 destination: ctx.accounts.vault_sol_holding_account.to_account_info(),
@@ -950,18 +950,16 @@ mod tests {
         let bytes = Box::leak(bytes.into_boxed_slice());
         let key = Box::leak(Box::new(Pubkey::new_unique()));
         let owner = Box::leak(Box::new(RAYDIUM_V4_PROGRAM_ID));
-        AccountInfo {
+        // AccountInfo::new (7 args) — rent_epoch dropped in agave 3.x.
+        AccountInfo::new(
             key,
-            lamports: std::rc::Rc::new(std::cell::RefCell::new(
-                Box::leak(Box::new(0u64)) as &mut u64
-            )),
-            data: std::rc::Rc::new(std::cell::RefCell::new(&mut bytes[..])),
+            false,
+            false,
+            Box::leak(Box::new(0u64)),
+            bytes,
             owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        }
+            false,
+        )
     }
 
     #[test]
@@ -1033,7 +1031,7 @@ fn lazy_init_system_pda<'info>(
     let signer_seeds: &[&[&[u8]]] = &[seeds];
     system_program::create_account(
         CpiContext::new_with_signer(
-            system_program.to_account_info(),
+            system_program.key(),
             CreateAccount {
                 from: payer.to_account_info(),
                 to: pda.to_account_info(),
@@ -1202,18 +1200,16 @@ mod adversary_tests {
         let bytes = Box::leak(bytes.into_boxed_slice());
         let key = Box::leak(Box::new(Pubkey::new_unique()));
         let owner = Box::leak(Box::new(RAYDIUM_V4_PROGRAM_ID));
-        AccountInfo {
+        // AccountInfo::new (7 args) — rent_epoch dropped in agave 3.x.
+        AccountInfo::new(
             key,
-            lamports: std::rc::Rc::new(std::cell::RefCell::new(
-                Box::leak(Box::new(0u64)) as &mut u64
-            )),
-            data: std::rc::Rc::new(std::cell::RefCell::new(&mut bytes[..])),
+            false,
+            false,
+            Box::leak(Box::new(0u64)),
+            bytes,
             owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        }
+            false,
+        )
     }
 
     /// ADV-ST-01: the split helper is total for every VALID split, but

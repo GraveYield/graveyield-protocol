@@ -52,13 +52,14 @@
 // without them). `grave_scanner.so` must be in tests/fixtures
 // (scripts/build_fork_harness.sh builds it).
 
-// solana-sdk 2.3 deprecations — same rationale as the earlier suites.
-#![allow(deprecated)]
+// solana-sdk 3.0 removed the `system_program` facade module entirely
+// (agave split-crate era); its address now comes from solana-sdk-ids.
+// `bpf_loader` remains on the facade but deprecated — hence the allow.
+#![allow(deprecated)] // bpf_loader facade re-export
 
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anchor_lang::solana_program::sysvar::instructions;
 use anchor_lang::AccountDeserialize;
 use grave_scanner::state::ProtocolConfig as ScannerProtocolConfig;
 use grave_vault::constants::RAYDIUM_V4_PROGRAM_ID;
@@ -72,11 +73,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    system_program,
     sysvar::clock as clock_sysvar,
     sysvar::slot_hashes as slot_hashes_sysvar,
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
+use solana_sdk_ids::sysvar::instructions;
 fn scanner_id() -> Pubkey {
     Pubkey::from_str("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54").unwrap()
 }

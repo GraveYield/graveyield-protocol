@@ -130,16 +130,9 @@ mod adversary_tests {
         let key = Box::leak(Box::new(key));
         let owner = Box::leak(Box::new(*owner));
         let lamports = Box::leak(Box::new(1_000_000u64));
-        AccountInfo {
-            key,
-            lamports: std::rc::Rc::new(std::cell::RefCell::new(lamports as &mut u64)),
-            data: std::rc::Rc::new(std::cell::RefCell::new(&mut data[..])),
-            owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        }
+        // AccountInfo::new (7 args) — the rent_epoch field was dropped in
+        // the agave split-crate era (solana-account-info 3.x).
+        AccountInfo::new(key, false, false, lamports, data, owner, false)
     }
 
     /// ADV-CPI-01: the submitted pool account is not the pool named in

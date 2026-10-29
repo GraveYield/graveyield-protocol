@@ -194,7 +194,7 @@ mod tests {
         // Simulate a multisig invalidation post-write.
         a.invalidated = true;
 
-        let bytes = a.try_to_vec().expect("borsh serialize");
+        let bytes = borsh::to_vec(&a).expect("borsh serialize");
         let d = EligibilityAnchor::try_from_slice(&bytes).expect("borsh deserialize");
 
         assert_eq!(d.amm_program_id, a.amm_program_id);

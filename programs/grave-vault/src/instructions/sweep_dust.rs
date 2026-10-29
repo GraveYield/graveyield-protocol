@@ -140,7 +140,7 @@ pub fn handler(ctx: Context<SweepDust>, params: SweepDustParams) -> Result<()> {
         let seeds: &[&[u8]] = &[VAULT_AUTHORITY_SEED, &bump];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
         let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             Transfer {
                 from: ctx.accounts.vault_memecoin_token_account.to_account_info(),
                 to: ctx
@@ -160,7 +160,7 @@ pub fn handler(ctx: Context<SweepDust>, params: SweepDustParams) -> Result<()> {
         let seeds: &[&[u8]] = &[VAULT_AUTHORITY_SEED, &bump];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
         let close_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             CloseAccount {
                 account: ctx.accounts.vault_memecoin_token_account.to_account_info(),
                 destination: ctx.accounts.sweeper.to_account_info(),

@@ -320,7 +320,6 @@ pub mod uncx_v4 {
                     &mut self.data[..],
                     &self.owner,
                     false,
-                    0,
                 )
             }
         }
