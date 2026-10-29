@@ -194,6 +194,9 @@ export async function sendTx(connection, ixs, signers, opts = {}) {
         slot: status.slot,
         err: (res && res.meta && res.meta.err) ?? null,
         logs: (res && res.meta && res.meta.logMessages) ?? [],
+        // Finding B fix: the ACTUAL fee the network charged this transaction
+        // (lamports) — expectRevert pins the fee-payer debit to exactly this.
+        fee: (res && res.meta && res.meta.fee) ?? null,
       };
     } catch (e) {
       if (attempt === 2) throw e;
@@ -304,6 +307,71 @@ export function snapshotDiffZero(a, b) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const k of keys) if (a[k] !== b[k]) return false;
   return true;
+}
+
+// --- zero-movement evaluator (Finding B fix) -----------------------------------------
+// PURE (no connection) so the harness regression tests cover it without a
+// validator. expectRevert snapshots before/after and hands the maps here; the
+// evaluator decides. The ONLY permitted debit on the fee payer is the failed
+// transaction's actual signature fee (pinned EXACTLY — not merely "within a
+// budget" — so a small protocol-state debit can never be normalized away as
+// fee). Every other tracked SOL wallet, every tracked token account, and
+// every tracked existing account must be bit-identical; every listed PDA
+// must remain absent.
+export function evaluateZeroMovement({
+  feeDelta,
+  expectedFeeLamports,
+  feeBudgetLamports,
+  solBefore,
+  solAfter,
+  tokensBefore,
+  tokensAfter,
+  absentChecks,
+  unchangedBefore,
+  unchangedAfter,
+}) {
+  const feeOk = feeDelta === expectedFeeLamports && feeDelta <= feeBudgetLamports;
+
+  const solUnchanged = {};
+  let solOk = true;
+  for (const label of Object.keys(solBefore)) {
+    const same = solBefore[label] === solAfter[label];
+    solUnchanged[label] = same;
+    if (!same) solOk = false;
+  }
+
+  const tokensSame = snapshotDiffZero(tokensBefore, tokensAfter);
+
+  const pdasAbsent = {};
+  let absentOk = true;
+  for (const c of absentChecks) {
+    pdasAbsent[c.label] = c.absent;
+    if (!c.absent) absentOk = false;
+  }
+
+  const accountsUnchanged = {};
+  let unchangedOk = true;
+  for (const label of Object.keys(unchangedBefore)) {
+    const b = unchangedBefore[label];
+    const a = unchangedAfter[label];
+    const same =
+      (b === null) === (a === null) &&
+      (b === null || (b.lamports === a.lamports && b.dataB64 === a.dataB64));
+    accountsUnchanged[label] = same;
+    if (!same) unchangedOk = false;
+  }
+
+  return {
+    proved: feeOk && solOk && tokensSame && absentOk && unchangedOk,
+    fee_payer_delta_lamports: feeDelta.toString(),
+    expected_fee_lamports: expectedFeeLamports.toString(),
+    fee_ok: feeOk,
+    sol_unchanged: solUnchanged,
+    tokens_unchanged: tokensSame,
+    pdas_absent: pdasAbsent,
+    accounts_unchanged: accountsUnchanged,
+    note: "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent",
+  };
 }
 
 // --- 1.99-style simulateTransaction config compat (fix 13b) ------------------------------
