@@ -179,9 +179,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
+      # anchor-cli 1.2.2's lockfile pins solana-sbpf 0.23.0, whose
+      # aligned_memory.rs uses the UNSTABLE `Layout::dangling_ptr` core API
+      # (feature `layout_for_ptr`). The pinned stable host toolchain
+      # (1.91.1) rejects it — E0599 — so the CLI binary itself must be
+      # compiled with nightly. This affects ONLY the anchor CLI install:
+      # the on-chain build below still runs on platform-tools' embedded
+      # toolchain, and every other job stays on stable 1.91.1.
+      - name: Install nightly toolchain for anchor-cli
+        run: rustup toolchain install nightly --profile minimal
       - name: Install Anchor CLI
         run: |
-          cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+          cargo +nightly install --locked --version ${ANCHOR_VERSION} anchor-cli
           anchor --version
       # Phase 1 (build/reliability): enforce the pinned toolchain. This
       # script existed pre-Phase-1 but was never wired into CI — it verified
