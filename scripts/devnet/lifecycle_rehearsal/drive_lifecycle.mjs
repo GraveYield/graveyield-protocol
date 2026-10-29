@@ -16,11 +16,12 @@
 //   - reconciliation runs salvor-bots monitor (file-path import);
 //   - every adversarial case asserts the EXACT program error code (or a
 //     classified family for non-custom failures, mirroring the
-//     grave-indexer verify-path precedent) plus a before/after balance
-//     invariant proving zero STATE movement (failed transactions pay the
-//     real signature fee to the fee payer — recorded, never normalized
-//     away; every other wallet, every token account, and the PDA set must
-//     be bit-identical).
+//     grave-indexer verify-path precedent) plus a before/after zero-movement
+//     invariant (Finding B fix): the failed transaction's fee payer is
+//     debited EXACTLY the on-chain meta.fee — recorded, never normalized
+//     away — while every other tracked wallet, every tracked token account,
+//     and every tracked existing account must be bit-identical, and every
+//     listed PDA must remain absent.
 //
 // Boundaries (labeled in the report): synthetic C1 timestamps
 // (fork-precedented), synthetic-collapse launch price ×200 (fork-precedented),
@@ -61,7 +62,7 @@ import {
   errFamilyFromErr,
   eventsFromLogs,
   snapshotTokenAccounts,
-  snapshotDiffZero,
+  evaluateZeroMovement,
   solBalance,
   readSlotHashesEntry,
   createAndFillAlt,
@@ -71,6 +72,7 @@ import {
   join as pjoin,
 } from "./lib.mjs";
 import { registerOracles, readbackAssertOracles } from "./register_oracle.mjs";
+import { classifyReconciliation } from "./monitor_gate.mjs";
 
 // --- args --------------------------------------------------------------------
 const args = {};
@@ -163,6 +165,22 @@ const TREASURY_MEMECOIN_ATA = PublicKey.findProgramAddressSync(
 )[0];
 const UNCX_MARKER = uncxMarkerPda(POOL);
 
+// Finding B fix: the default SOL watch set for adversarial zero-movement
+// windows — every keypair wallet plus the settlement PDAs. expectRevert
+// excludes the fee payer from this set (its debit is pinned to the exact
+// on-chain transaction fee instead of a bitwise comparison).
+const SOL_WATCH = () => ({
+  authority: K.authority.publicKey,
+  activity_oracle: K.activityOracle.publicKey,
+  launch_oracle: K.launchOracle.publicKey,
+  intruder: K.intruder.publicKey,
+  claimant_a: K.claimantA.publicKey,
+  claimant_b: K.claimantB.publicKey,
+  treasury_pda: TREASURY,
+  vault_authority_pda: VAULT_AUTHORITY,
+  lp_holder_pool_pda: LP_HOLDER_POOL,
+});
+
 // --- report ---------------------------------------------------------------------
 const ts = new Date().toISOString().replace(/[:.]/g, "-");
 const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
@@ -206,9 +224,21 @@ async function stage(id, name, fn) {
 }
 
 // A failed transaction still pays the real signature fee to its fee payer —
-// that is the ONLY movement a revert is allowed to produce. Everything else
-// (other wallets, token accounts, the settlement PDA set) must be identical.
+// that is the ONLY movement a revert is allowed to produce (Finding B fix:
+// the debit is pinned to the transaction's EXACT on-chain meta.fee, not
+// merely "within a budget", so a small protocol-state debit can never be
+// normalized away as fee). Everything else must be bit-identical: every
+// wallet in solWallets (default SOL_WATCH(), fee payer excluded), every
+// token account in tokenAccounts, every existing account in
+// accountsUnchanged; every PDA in pdaMustStayAbsent must remain absent.
 const MAX_FAILED_TX_FEE_LAMPORTS = 10_000n;
+
+async function accountSnapshot(pubkey) {
+  const info = await connection.getAccountInfo(pubkey);
+  return info
+    ? { lamports: info.lamports, dataB64: Buffer.from(info.data).toString("base64") }
+    : null;
+}
 
 async function expectRevert({
   id,
@@ -220,16 +250,29 @@ async function expectRevert({
   feePayerBudgetLamports = MAX_FAILED_TX_FEE_LAMPORTS,
   pdaMustStayAbsent = [],
   tokenAccounts = {},
+  solWallets = SOL_WATCH(),
+  accountsUnchanged = [],
   viaAlt = false,
   altAddress = null,
   note = null,
 }) {
   const feePayer = signers[0].publicKey;
+  // Other tracked wallets — the fee payer is excluded here and checked by
+  // exact-fee comparison below (no double counting).
+  const otherWallets = Object.entries(solWallets).filter(([, p]) => !p.equals(feePayer));
   const beforeFee = await solBalance(connection, feePayer);
+  const solBefore = {};
+  for (const [label, p] of otherWallets) solBefore[label] = await solBalance(connection, p);
   const tokensBefore = await snapshotTokenAccounts(connection, tokenAccounts);
+  const unchangedBefore = {};
+  for (const [label, p] of accountsUnchanged) unchangedBefore[label] = await accountSnapshot(p);
   const res = await sendTx(connection, ixs, signers, viaAlt ? { viaAlt: true, altAddress } : {});
   const afterFee = await solBalance(connection, feePayer);
+  const solAfter = {};
+  for (const [label, p] of otherWallets) solAfter[label] = await solBalance(connection, p);
   const tokensAfter = await snapshotTokenAccounts(connection, tokenAccounts);
+  const unchangedAfter = {};
+  for (const [label, p] of accountsUnchanged) unchangedAfter[label] = await accountSnapshot(p);
   const code = customCodeFromErr(res.err);
   // Classify the family for EVERY failure: foreign custom codes (e.g. the
   // ed25519 precompile's own Custom(2)) must classify to their ix's family.
@@ -237,20 +280,26 @@ async function expectRevert({
   const pass =
     expectCode !== undefined ? code === expectCode : family === expectFamily && res.err != null;
   const feeDelta = beforeFee - afterFee;
-  const feeOk = feeDelta >= 0n && feeDelta <= feePayerBudgetLamports;
-  const tokensSame = snapshotDiffZero(tokensBefore, tokensAfter);
-  const absentChecks = [];
-  for (const [label, pda] of pdaMustStayAbsent) {
-    absentChecks.push({ label, absent: (await connection.getAccountInfo(pda)) === null });
-  }
-  const zeroMovement = {
-    proved: feeOk && tokensSame && absentChecks.every((c) => c.absent),
-    fee_payer_delta_lamports: feeDelta.toString(),
-    fee_ok: feeOk,
-    tokens_unchanged: tokensSame,
-    pdas_absent: absentChecks,
-    note: "fee-only debit on the submitter is the expected real cost of a failed transaction and is recorded, not normalized away; every other tracked balance and the settlement PDA set must be unchanged",
-  };
+  // Pin the permitted debit to the network's own accounting (meta.fee);
+  // fall back to 5000 lamports × held signers only if the RPC omits it.
+  const expectedFeeLamports = BigInt(res.fee ?? 5_000n * BigInt(Math.max(signers.length, 1)));
+  const zeroMovement = evaluateZeroMovement({
+    feeDelta,
+    expectedFeeLamports,
+    feeBudgetLamports: feePayerBudgetLamports,
+    solBefore,
+    solAfter,
+    tokensBefore,
+    tokensAfter,
+    absentChecks: await Promise.all(
+      pdaMustStayAbsent.map(async ([label, pda]) => ({
+        label,
+        absent: (await connection.getAccountInfo(pda)) === null,
+      })),
+    ),
+    unchangedBefore,
+    unchangedAfter,
+  });
   report.adversarial({
     id,
     name,
@@ -945,6 +994,8 @@ await stage(
         signers: [K.salvor],
         expectCode: 6016,
         pdaMustStayAbsent: [["eligibility_cert", CERT_PDA]],
+        // The in-gap phase_2 must not touch the existing anchor either.
+        accountsUnchanged: [["eligibility_anchor", ANCHOR_PDA]],
       });
       gapCase = { asserted: true, code: res.code };
     } else {
@@ -1114,6 +1165,7 @@ const SALVAGE_TOKEN_WATCH = () => ({
       pdaMustStayAbsent: [
         ["salvage_receipt", SALVAGE_RECEIPT],
         ["pool_registry", POOL_REGISTRY],
+        ["lp_holder_pool", LP_HOLDER_POOL],
       ],
       tokenAccounts: SALVAGE_TOKEN_WATCH(),
       viaAlt: true, // F2: the salvage ix exceeds the 1232-byte legacy packet
@@ -1142,6 +1194,7 @@ const SALVAGE_TOKEN_WATCH = () => ({
     pdaMustStayAbsent: [
       ["salvage_receipt", SALVAGE_RECEIPT],
       ["pool_registry", POOL_REGISTRY],
+      ["lp_holder_pool", LP_HOLDER_POOL],
     ],
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
     viaAlt: true, // F2
@@ -1383,37 +1436,28 @@ await stage(13, "salvor-bots monitor reconcile (file: import @graveyield/monitor
   });
   const identityKey = `${FLEET_IDENTITY.cluster}|${FLEET_IDENTITY.ammProgramId}|${FLEET_IDENTITY.poolAddress}`;
   const rec = await monitor.reconcile(identityKey, "w1-rehearsal", FLEET_SIGNATURE);
-  // The shipped monitor asserts each leg within ±1 lamport of floor(bps);
-  // the program allocates the PROTOCOL leg as the exact remainder, which can
-  // deviate from floor(20%) by up to +2 lamports (run-40 finding). When the
-  // anomaly is EXACTLY that rounding remainder (sums + reported agree), the
-  // reconciliation is sound — labeled boundary, not a relaxation.
-  const remainderOk =
-    rec.status === "receipt-anomaly" &&
-    rec.detail?.sumsOk === true &&
-    rec.detail?.reportedOk === true &&
-    (() => {
-      const r = rec.receipt;
-      if (!r) return false;
-      const total = BigInt(r.totalProceedsLamports);
-      const floor40 = (total * 4000n) / 10_000n;
-      return (
-        BigInt(r.protocolAmountLamports) === total - floor40 - floor40 &&
-        BigInt(r.lpHolderAmountLamports) === floor40 &&
-        BigInt(r.salvorAmountLamports) === floor40
-      );
-    })();
-  if (rec.status !== "receipt-verified" && !remainderOk) {
+  // Finding D fix: accepted outcomes are EXPLICIT (monitor_gate.mjs). The
+  // shipped monitor verifies within a ±1-lamport share tolerance; the program
+  // allocates the PROTOCOL leg as the exact remainder, which can deviate from
+  // floor(20%) by up to +2 lamports (run-40 finding). A "receipt-verified"
+  // status is accepted as verified; a "receipt-anomaly" is accepted ONLY when
+  // it is exactly the known rounding remainder (sums + reported figures agree
+  // and every leg equals its exact program allocation) — the discrepancy's
+  // magnitude and reason are recorded in the stage output and run report.
+  // Any genuinely unexpected anomaly is rejected and fails the stage. The
+  // anomaly is never relabeled as verified.
+  const verdict = classifyReconciliation(rec);
+  if (!verdict.accepted) {
     throw new Error(
-      `monitor status=${rec.status} detail=${jsonSafe(rec.detail)} receipt=${jsonSafe(rec.receipt)}`,
+      `monitor status=${rec.status} verdict=${verdict.kind} reason=${verdict.reason} detail=${jsonSafe(rec.detail)} receipt=${jsonSafe(rec.receipt)}`,
     );
   }
   return {
     status: rec.status,
-    remainder_boundary:
-      rec.status === "receipt-anomaly"
-        ? "monitor ±1 tolerance vs the program's exact-remainder protocol leg (≤2 lamports) — labeled"
-        : null,
+    accepted_kind: verdict.kind,
+    protocol_delta_lamports:
+      verdict.protocolDeltaLamports === null ? null : verdict.protocolDeltaLamports.toString(),
+    verdict_reason: verdict.reason,
     detail: rec.detail,
     receipt: rec.receipt,
     identity_key: identityKey,
@@ -1433,6 +1477,13 @@ await stage(13, "salvor-bots monitor reconcile (file: import @graveyield/monitor
     signers: [K.salvor],
     expectFamily: "anchor-decode",
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
+    // The replay must not touch the completed receipt, the pool registry,
+    // or the LP-holder pool PDA either.
+    accountsUnchanged: [
+      ["salvage_receipt", SALVAGE_RECEIPT],
+      ["pool_registry", POOL_REGISTRY],
+      ["lp_holder_pool", LP_HOLDER_POOL],
+    ],
     viaAlt: true, // F2
     altAddress: ALT_ADDRESS,
     note: "exact code pinned by observation: Anchor account-already-initialized precedes any handler logic",
@@ -1525,6 +1576,10 @@ await stage(
     signers: [K.claimantA],
     expectFamily: "anchor-decode",
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
+    // The duplicate must not alter claimant A's existing ClaimRecord.
+    accountsUnchanged: [
+      ["claim_record_a", SDK.claimRecordPda(IDS.vault, POOL, K.claimantA.publicKey)],
+    ],
     note: "exact code pinned by observation: AccountAlreadyInitialized on the claim_record init (fork precedent lp_claim_fork L1569-1589)",
   });
 
@@ -1551,6 +1606,10 @@ await stage(
     signers: [K.intruder],
     expectCode: 7010,
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
+    // The intruder's rolled-back record init must leave no PDA behind.
+    pdaMustStayAbsent: [
+      ["claim_record_intruder", SDK.claimRecordPda(IDS.vault, POOL, K.intruder.publicKey)],
+    ],
   });
 
   // A9c: inflated payout — balance inflated past the proof binding → 7010
@@ -1570,12 +1629,15 @@ await stage(
     signers: [K.intruder],
     expectCode: 7010,
     tokenAccounts: SALVAGE_TOKEN_WATCH(),
+    pdaMustStayAbsent: [
+      ["claim_record_intruder", SDK.claimRecordPda(IDS.vault, POOL, K.intruder.publicKey)],
+    ],
     note: "fork-covered boundary: the fork's 7009 math-overflow needs in-VM registry control; on a live validator the proof binding rejects first with 7010",
   });
 }
 
-// --- [stage 15] sweep_dust positive + 7021 re-sweep negative --------------------------------
-await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative", async () => {
+// --- [stage 15] sweep_dust positive + re-sweep negative (observed 3012) ----------------------
+await stage(15, "sweep_dust (permissionless) positive + re-sweep negative", async () => {
   let dust = 0n;
   try {
     dust = BigInt((await connection.getTokenAccountBalance(VAULT_MEMECOIN_ATA)).value.amount);
@@ -1618,9 +1680,14 @@ await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative",
   // TokenAccount decode dies with 3012 (AccountNotInitialized) BEFORE the
   // handler's 7021 DustAlreadySwept — the one-shot guard is provably intact
   // either way (the account cannot be swept twice; the state is destroyed).
-  const r2 = await sendTx(
-    connection,
-    [
+  // Finding B/C fix: asserted through expectRevert so the zero-movement
+  // evidence is MEASURED (fee pinned to meta.fee, treasury ATA + receipt
+  // byte-identical), and the stage text names the OBSERVED code (3012), not
+  // the handler's unreachable 7021 (fork-covered).
+  await expectRevert({
+    id: "S15-resweep",
+    name: "second sweep_dust → 3012 (closed vault ATA decode; one-shot guard intact — 7021 unreachable on a live validator)",
+    ixs: [
       SDK.buildSweepDustIx({
         vaultProgramId: IDS.vault,
         poolAddress: POOL,
@@ -1628,28 +1695,20 @@ await stage(15, "sweep_dust (permissionless) positive + 7021 re-sweep negative",
         sweeper: K.salvor.publicKey,
       }),
     ],
-    [K.salvor],
-  );
-  const code2 = customCodeFromErr(r2.err);
-  if (code2 !== 3012)
-    throw new Error(
-      `re-sweep expected 3012 (closed-ATA decode precedes the handler's 7021), got ${jsonSafe(r2.err)}`,
-    );
-  report.adversarial({
-    id: "S15-resweep",
-    name: "second sweep_dust → 3012 (closed vault ATA; one-shot guard intact — 7021 unreachable on a live validator)",
-    expected: { code: 3012 },
-    observed: { code: code2, err: r2.err },
-    pass: true,
-    tx: r2.sig,
-    zero_movement: { proved: true, note: "one-shot guard; fee-only debit" },
-    boundary_note:
-      "fork-covered: the fork suites assert 7021 in-VM where the ATA can be re-funded; on a live validator the closed account decode precedes the handler",
+    signers: [K.salvor],
+    expectCode: 3012,
+    tokenAccounts: SALVAGE_TOKEN_WATCH(),
+    accountsUnchanged: [
+      ["salvage_receipt", SALVAGE_RECEIPT],
+      ["pool_registry", POOL_REGISTRY],
+    ],
+    note: "fork-covered: the fork suites assert 7021 in-VM where the ATA can be re-funded; on a live validator the closed account decode precedes the handler",
   });
   return {
     dust_memecoin_lamports: dust.toString(),
     treasury_delta: (treasuryAfter - treasuryBefore).toString(),
-    detail: "dust swept to the protocol treasury ATA; vault ATA closed; re-sweep reverted 7021",
+    detail:
+      "dust swept to the protocol treasury ATA; vault ATA closed; re-sweep reverted 3012 (closed-ATA Anchor decode precedes the handler's 7021 — fork-covered)",
   };
 });
 
@@ -1701,6 +1760,9 @@ const boundaries = [
   "7002 expired-cert negative fork-covered (no wall-clock fast-forward on a live validator)",
   "A9c inflated-payout binds to 7010 on a live validator (fork's 7009 needs in-VM registry control)",
   "7002/6016 gap-1 timing may land fork-covered if the compressed clock passes the gap before stage 7",
+  "stage-13 monitor tolerance: a receipt-anomaly that is EXACTLY the program's protocol-leg rounding remainder is accepted and recorded with its magnitude (Finding D) — never relabeled as receipt-verified",
+  "stage-15 re-sweep reverts 3012 (closed-ATA Anchor decode) on a live validator; the handler's 7021 is fork-covered (Finding C)",
+  "market fixture adaptation (F3): the local market's nonce + market-vault owners are re-pointed to fleet-core's string-seed vault-signer PDA — a fleet-core-compatibility adaptation that deviates from the real OpenBook derivation ([market, nonce]); see local_plan.market + probe_vault_signer.mjs (Finding E)",
 ];
 const doc = report.finish({
   boundaries,

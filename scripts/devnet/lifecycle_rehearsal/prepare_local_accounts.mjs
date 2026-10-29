@@ -5,12 +5,22 @@
 //    (C6 re-pin — economic grounding comes from manifest parsed.amm_lp_amount,
 //    NOT from the re-pinned supply).
 //  - Holder LP ATAs: built from scratch (165B SPL token layout).
-//  - Market (F3): the real SOL/USDC Serum v3 market stores
-//    vault_signer_nonce = 1 (u64 LE @45) → NON-canonical vault signer →
-//    fleet-core's canonical derivation fails closed. We re-pin the local
-//    market's nonce to the canonical bump and re-point both market vault
-//    token accounts' owner to the canonical signer (documented fixture
-//    adaptation; see probe_vault_signer.mjs).
+//  - Market (F3, Finding E remediation): fleet-core's account-discovery
+//    pipeline derives the market vault signer as the string-seed PDA
+//    ["vault-signer", market] under the market program, which matches NO
+//    real OpenBook market (the program's actual rule is
+//    create_program_address([market, nonce_le]); the real SOL/USDC market's
+//    stored nonce 1 IS canonical under that rule). To let the fail-closed
+//    discovery accept the fixture, the LOCAL market's stored nonce is
+//    re-pinned to the string-seed PDA's bump and both market vault token
+//    accounts' owner is re-pointed to that PDA. This is a DOCUMENTED
+//    fleet-core-compatibility adaptation — the local market therefore
+//    DEVIATES from mainnet semantics; the modified relationship is never
+//    validated on-chain by the W1 salvage path (the vault's Raydium withdraw
+//    CPI ignores the market vault signer — programs/grave-vault/src/cpi/
+//    raydium_v4.rs), and the faithful CPI evidence remains the fork suite,
+//    which uses the UNMODIFIED mainnet market. See probe_vault_signer.mjs
+//    and local_plan.market.
 //  - loader_account_flags.txt is written ONCE, AFTER the holder section
 //    (fix 9: writing it before the holder dumps appended left 0 LP holders
 //    loaded and failed the snapshot completeness gate at 0 vs supply).
@@ -126,6 +136,26 @@ const [canonicalSigner, bump] = PublicKey.findProgramAddressSync(
   [Buffer.from("vault-signer", "utf8"), marketPk.toBytes()],
   marketProgram,
 );
+// Finding E remediation: also derive the REAL OpenBook rule
+// ([market, stored_nonce_le]) for the evidence record — it must reproduce
+// the manifest's vault signer (the real mainnet relationship).
+const realSchemeSigner = PublicKey.createProgramAddressSync(
+  [
+    marketPk.toBytes(),
+    (() => {
+      const b = Buffer.alloc(8);
+      b.writeBigUInt64LE(oldNonce);
+      return b;
+    })(),
+  ],
+  marketProgram,
+);
+if (realSchemeSigner.toBase58() !== metaOf("vault_signer").pubkey) {
+  throw new Error(
+    `real OpenBook derivation ([market, nonce_le]) does not reproduce the manifest vault signer ` +
+      `(${realSchemeSigner.toBase58()} vs ${metaOf("vault_signer").pubkey}) — fixture provenance broken`,
+  );
+}
 marketBytes.writeBigUInt64LE(BigInt(bump), MARKET_NONCE_OFFSET);
 writeFileSync(
   join(outDir, "market.json"),
@@ -222,7 +252,13 @@ const plan = {
     old_nonce: oldNonce.toString(),
     pinned_nonce: String(bump),
     canonical_vault_signer: canonicalSigner.toBase58(),
-    note: "F3: real market nonce=1 was non-canonical; local market re-pinned to the canonical bump and both market vault token accounts re-pointed to the canonical signer",
+    // Finding E remediation: record BOTH derivations. The real OpenBook rule
+    // ([market, stored_nonce]) reproduces the manifest vault signer; the
+    // string-seed PDA above is what fleet-core's discovery requires.
+    real_scheme_signer_from_stored_nonce: realSchemeSigner.toBase58(),
+    real_scheme_matches_manifest_vault_signer:
+      realSchemeSigner.toBase58() === metaOf("vault_signer").pubkey,
+    note: "F3 (Finding E): fleet-core's discovery requires the string-seed vault-signer PDA, so the LOCAL market's stored nonce is re-pinned to that PDA's bump and both market vault token accounts are re-pointed to it — a documented fleet-core-compatibility adaptation. The real OpenBook rule ([market, nonce_le]) with the original nonce 1 reproduces the REAL mainnet vault signer; the local market therefore deviates from mainnet semantics and the modified relationship is never validated on-chain by the W1 salvage path (the withdraw CPI ignores the market vault signer). Faithful CPI evidence: programs/grave-vault/tests/raydium_v4_fork.rs with the UNMODIFIED fixture.",
   },
   holders: Object.fromEntries(
     holders.map((h) => [
