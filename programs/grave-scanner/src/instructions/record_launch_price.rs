@@ -78,7 +78,7 @@ pub struct RecordLaunchPrice<'info> {
     /// CHECK: instructions sysvar, address-constrained. Used to locate
     /// the `ed25519_program` verify instruction and this instruction's
     /// own data for attestation offset validation (ORACLE-001 / D9).
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    #[account(address = solana_sdk_ids::sysvar::instructions::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 
     #[account(mut)]

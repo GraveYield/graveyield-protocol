@@ -27,13 +27,17 @@ homepage = "https://***REMOVED***"
 readme = "README.md"
 
 [workspace.dependencies]
-anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
+# Anchor 1.2.2: built against the agave solana-* 3.1.x crates. Moving off
+# the 0.32.x/2.x line removes the last rustls-0.21 carrier
+# (solana-pubsub-client 2.3.x -> tokio-tungstenite 0.20) — Dependabot
+# alerts #9-#11.
+anchor-lang = "1.2.2"
+anchor-spl = "1.2.2"
 
 # cargo-build-sbf reads this to pick the platform-tools version for the
 # BPF compile. v1.54 (2026-03-06) ships cargo 1.85+, the first BPF
 # toolchain that handles edition2024 manifests. Solana 3.0.10 + Anchor
-# 0.32.1 still default to older platform-tools (cargo 1.84) so the
+# 1.2.2 still default to older platform-tools (cargo 1.84) so the
 # explicit pin remains the source of truth for our reproducible build.
 [workspace.metadata.solana]
 tools-version = "v1.54"

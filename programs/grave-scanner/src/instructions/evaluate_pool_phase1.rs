@@ -70,12 +70,12 @@ pub struct EvaluatePoolPhase1<'info> {
     /// CHECK: instructions sysvar, address-constrained. Used to locate
     /// the `ed25519_program` verify instruction and this instruction's
     /// own data for attestation offset validation (ORACLE-002).
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    #[account(address = solana_sdk_ids::sysvar::instructions::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
 
     /// CHECK: slot hashes sysvar, address-constrained. Anchors the
     /// attestation's `issued_slot` to a real recent slot (freshness).
-    #[account(address = anchor_lang::solana_program::sysvar::slot_hashes::id())]
+    #[account(address = solana_sdk_ids::sysvar::slot_hashes::id())]
     pub slot_hashes: UncheckedAccount<'info>,
 
     #[account(mut)]
