@@ -8,6 +8,9 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "scripts": {
+    "test": "node --test --test-reporter=spec 'test/**/*.test.mjs'"
+  },
   "dependencies": {
     "@solana/web3.js": "^3.1.1",
     "tweetnacl": "^1.0.3"
