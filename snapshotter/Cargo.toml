@@ -14,16 +14,24 @@ readme.workspace = true
 name = "grave_snapshotter"
 
 [dependencies]
-# Blocking JSON-RPC client for the enumeration source. The 2.3 line is
-# aligned with the solana-program 2.3.x transitively pulled by
-# anchor-lang 0.32.1 (see Cargo.lock — solana-client 2.3.13 already
-# resolved for the fork-harness stack, so this adds no new resolution).
-solana-client = "2.3"
-solana-sdk = "2.3"
+# Blocking JSON-RPC client for the enumeration source. The 3.1 line is
+# aligned with the solana-program 3.1.x transitively pulled by anchor-lang
+# 1.2.2 (see Cargo.lock), and its pubsub client uses tokio-tungstenite
+# 0.28 / rustls 0.23 — the 2.3 line's tungstenite 0.20 was the last
+# rustls-0.21 carrier in the tree (Dependabot alerts #9-#11).
+solana-client = "3.1"
+# solana-sdk stays on the "3" facade (3.0.0; there is no 3.1.x facade
+# release) — its caret component reqs resolve the SAME 3.1.x instances
+# solana-client 3.1.x uses.
+solana-sdk = "3"
+# CommitmentConfig lives in its standalone crate in the agave split-crate
+# era (no longer re-exported through the solana-sdk facade); resolved on
+# the same 3.1.x train as solana-client.
+solana-commitment-config = "3.1"
 # `UiAccountEncoding` (rpc_config's encoding field) is not re-exported
-# through solana-client 2.3 — it comes from this types crate, already
-# resolved at 2.3.13 in Cargo.lock.
-solana-account-decoder-client-types = "2.3"
+# through solana-client — it comes from this types crate, resolved on the
+# same 3.1.x train as solana-client.
+solana-account-decoder-client-types = "3.1"
 # Canonical SHA-256 for the leaf/parent hashing (Phase 5.2). Pure-Rust
 # backend, byte-identical to the on-chain `solana_sha256_hasher::hash`
 # path — the equality is pinned by tests against

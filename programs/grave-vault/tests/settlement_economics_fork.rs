@@ -46,11 +46,10 @@
 // without them). `grave_vault.so` and `jupiter_v6_stub.so` must be in
 // tests/fixtures (scripts/build_fork_harness.sh builds both).
 
-// solana-sdk 2.3 deprecates the monolithic `system_program` / `bpf_loader`
-// modules in favour of the split interface crates; the deprecated paths
-// still work and keep the harness on the same re-exports anchor-lang's
-// prelude uses (same rationale as the Phase 3 suite).
-#![allow(deprecated)]
+// solana-sdk 3.0 removed the `system_program` facade module entirely
+// (agave split-crate era); its address now comes from solana-sdk-ids.
+// `bpf_loader` remains on the facade but deprecated — hence the allow.
+#![allow(deprecated)] // bpf_loader facade re-export
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -75,9 +74,9 @@ use solana_sdk::{
     rent::Rent,
     signature::Keypair,
     signer::Signer,
-    system_program,
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -1138,7 +1137,11 @@ async fn sweep_moves_dust_to_treasury_and_closes_ata() {
     // Pre-create the treasury ATA so the sweeper's lamport delta is exact.
     // The treasury ATA address is derivable before genesis.
     let protocol_treasury = Pubkey::find_program_address(&[b"protocol_treasury"], &vault_id()).0;
-    let manifest = load_manifest().unwrap();
+    // Graceful skip (documented intent): the fixtures are gitignored;
+    // without them the suite must SKIP, not panic.
+    let Some(manifest) = load_manifest() else {
+        return;
+    };
     let (memecoin_mint, _) = if manifest["base_is_coin_side"].as_bool().unwrap() {
         load_real_account(&manifest["accounts"], "pc_mint")
     } else {
@@ -1212,7 +1215,11 @@ async fn sweep_moves_dust_to_treasury_and_closes_ata() {
 #[tokio::test]
 async fn second_sweep_reverts_dust_already_swept() {
     let protocol_treasury = Pubkey::find_program_address(&[b"protocol_treasury"], &vault_id()).0;
-    let manifest = load_manifest().unwrap();
+    // Graceful skip (documented intent): the fixtures are gitignored;
+    // without them the suite must SKIP, not panic.
+    let Some(manifest) = load_manifest() else {
+        return;
+    };
     let mint = env_memecoin_mint(&manifest);
     let treasury_ata = Pubkey::find_program_address(
         &[
@@ -1346,7 +1353,11 @@ async fn sweep_on_fully_converted_pool_reverts_nothing_to_sweep() {
 #[tokio::test]
 async fn sweep_destination_cannot_be_hijacked() {
     let protocol_treasury = Pubkey::find_program_address(&[b"protocol_treasury"], &vault_id()).0;
-    let manifest = load_manifest().unwrap();
+    // Graceful skip (documented intent): the fixtures are gitignored;
+    // without them the suite must SKIP, not panic.
+    let Some(manifest) = load_manifest() else {
+        return;
+    };
     let mint = env_memecoin_mint(&manifest);
     let treasury_ata = Pubkey::find_program_address(
         &[
@@ -1488,7 +1499,11 @@ async fn claims_drain_lp_holder_pool_exactly() {
     // Balances are fixed relative to the fixture supply; compute them after
     // the env loads (the tree must be built BEFORE the salvage: the root is
     // a salvage parameter).
-    let manifest = load_manifest().unwrap();
+    // Graceful skip (documented intent): the fixtures are gitignored;
+    // without them the suite must SKIP, not panic.
+    let Some(manifest) = load_manifest() else {
+        return;
+    };
     let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
     let supply = mint_supply(&lp_mint_acct);
     let bal_a = supply / 10 * 6;

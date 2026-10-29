@@ -51,11 +51,10 @@
 // without them). `grave_vault.so` and `jupiter_v6_stub.so` must be in
 // tests/fixtures (scripts/build_fork_harness.sh builds both).
 
-// solana-sdk 2.3 deprecates the monolithic `system_program` /
-// `bpf_loader` modules in favour of the split interface crates; the
-// deprecated paths still work and keep the harness on the same re-exports
-// anchor-lang's prelude uses.
-#![allow(deprecated)]
+// solana-sdk 3.0 removed the `system_program` facade module entirely
+// (agave split-crate era); its address now comes from solana-sdk-ids.
+// `bpf_loader` remains on the facade but deprecated — hence the allow.
+#![allow(deprecated)] // bpf_loader facade re-export
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -78,9 +77,9 @@ use solana_sdk::{
     rent::Rent,
     signature::Keypair,
     signer::Signer,
-    system_program,
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
 
 fn vault_id() -> Pubkey {
     grave_vault::ID

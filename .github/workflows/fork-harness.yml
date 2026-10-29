@@ -61,7 +61,7 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       # Same hidapi/libudev requirement as anchor-build in ci.yml: anchor
-      # 0.32.1's transitive deps probe for libudev headers when compiling
+      # 1.2.2's transitive deps probe for libudev headers when compiling
       # from source. cargo-build-sbf needs the same system libs on cold
       # cache, and the fork suites link solana-program-test which builds
       # parts of the Solana stack natively.

@@ -40,10 +40,10 @@
 // green; with them they run for real. `grave_vault.so` must be copied into
 // tests/fixtures after `cargo build-sbf` (see scripts/build_fork_harness.sh).
 
-// solana-sdk 2.3 deprecates the monolithic `system_program` module in favour
-// of `solana_system_interface`; the deprecated path still works and keeps the
-// harness on the same re-exports anchor-lang's prelude uses.
-#![allow(deprecated)]
+// solana-sdk 2.3 deprecated the monolithic `system_program` module and the
+// 3.0 facade removed it entirely; the canonical address source in the
+// agave split-crate era is `solana_sdk_ids::system_program` (same 3.1.x
+// instance the rest of the graph uses).
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -63,9 +63,9 @@ use solana_sdk::{
     rent::Rent,
     signature::Keypair,
     signer::Signer,
-    system_program,
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
 
 // GraveVault / GraveScanner placeholder program IDs (KEYS-003; same values as
 // Anchor.toml). The vault ID also comes from `declare_id!`.

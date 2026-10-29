@@ -179,7 +179,7 @@ mod tests {
         c.writer = Pubkey::new_unique();
         c.criteria_bitmap = 0x3F;
         c.reissue_generation = 1;
-        let bytes = c.try_to_vec().expect("borsh serialize");
+        let bytes = borsh::to_vec(&c).expect("borsh serialize");
         let d = EligibilityCert::try_from_slice(&bytes).expect("borsh deserialize");
         assert_eq!(d.amm_program_id, c.amm_program_id);
         assert_eq!(d.expires_at, 1_000);

@@ -50,14 +50,13 @@
 // needed and the settlement path is the withdraw-leg WSOL only.
 //
 // Fixtures via `scripts/fetch_v4_fork_fixtures.mjs` (gitignored; tests SKIP
-// without them). `grave_vault.so` must be in tests/fixtures
-// (scripts/build_fork_harness.sh builds it).
+// without them). `grave_vault.so` and `grave_scanner.so` must be in
+// tests/fixtures (scripts/build_fork_harness.sh builds both).
 
-// solana-sdk 2.3 deprecates the monolithic `system_program` / `bpf_loader`
-// modules in favour of the split interface crates; the deprecated paths
-// still work and keep the harness on the same re-exports anchor-lang's
-// prelude uses (same rationale as the earlier suites).
-#![allow(deprecated)]
+// solana-sdk 3.0 removed the `system_program` facade module entirely
+// (agave split-crate era); its address now comes from solana-sdk-ids.
+// `bpf_loader` remains on the facade but deprecated — hence the allow.
+#![allow(deprecated)] // bpf_loader facade re-export
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -79,9 +78,9 @@ use solana_sdk::{
     rent::Rent,
     signature::Keypair,
     signer::Signer,
-    system_program,
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -481,6 +480,12 @@ fn build_genesis(
     if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
         return None;
     }
+    // adv_fk02 drives GraveScanner's `initialize` directly, so the scanner
+    // ELF must be deployed too (same loader pattern as scanner_windows_fork;
+    // build_fork_harness.sh always builds it first).
+    if !add_elf(&mut pt, "grave_scanner.so", scanner_id(), true) {
+        return None;
+    }
     add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
     add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
     add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
@@ -789,13 +794,23 @@ async fn unauthorized_authority_signers_revert() {
     )
     .await
     .expect("authority update_protocol_config must succeed");
+    // The attacker's refusals left the vault unpaused, so the authority's
+    // positive control toggles BOTH ways — a same-state call would trip the
+    // 7022 no-op invariant, and a real transition must not.
+    send(
+        &mut client,
+        &boot.salvor,
+        &[pause_ix(&config, &boot.salvor.pubkey(), true)],
+    )
+    .await
+    .expect("authority emergency_pause (pause) must succeed");
     send(
         &mut client,
         &boot.salvor,
         &[pause_ix(&config, &boot.salvor.pubkey(), false)],
     )
     .await
-    .expect("authority emergency_pause must succeed");
+    .expect("authority emergency_pause (unpause) must succeed");
 }
 
 /// Roadmap rows "emergency-pause testing" + "replay testing": pause gates
@@ -1217,14 +1232,17 @@ async fn adv_fk03_vault_share_config_violations_rejected_7004_7005() {
         )
     };
 
-    // Sum ≠ 10_000 → 7004, config PDA still unborn.
+    // Sum ≠ 10_000 → 7004, config PDA still unborn. The probe keeps the
+    // protocol share below the 2_000 ceiling: `initialize` enforces the
+    // Charter ceiling (7005) first, so a split breaching both would report
+    // 7005 and mask the sum invariant under test.
     let err = send(
         &mut client,
         &boot.salvor,
-        &[vault_initialize(5_000, 3_000, 2_001)],
+        &[vault_initialize(5_000, 3_000, 1_999)],
     )
     .await
-    .expect_err("share sum 10_001 must be refused");
+    .expect_err("share sum 9_999 must be refused");
     expect_custom(err, ERR_INVALID_SHARE_SPLIT, "share sum violation");
     assert!(
         maybe_acct(&mut client, &config).await.is_none(),

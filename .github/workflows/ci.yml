@@ -23,7 +23,7 @@ env:
   # Aligned with the official Solana 3.x stack:
   # https://solana.com/docs/intro/installation
   SOLANA_VERSION: 3.0.10
-  ANCHOR_VERSION: 0.32.1
+  ANCHOR_VERSION: 1.2.2
   # Host toolchain. Must match rust-toolchain.toml.
   RUST_TOOLCHAIN: 1.91.1
   NODE_VERSION: 24
@@ -151,7 +151,7 @@ jobs:
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       # cargo-binstall was the original choice for speed but silently
-      # no-ops on anchor-cli 0.32.x: it exits 0 without installing the
+      # no-ops on anchor-cli (observed on 0.32.x): it exits 0 without installing the
       # `anchor` binary on PATH (verified across multiple CI runs — the
       # Install Anchor CLI step reports 0 seconds and success, then
       # `anchor build` exits in 1 second with "command not found").
@@ -160,7 +160,7 @@ jobs:
       # ~/.cargo/bin. The trailing `anchor --version` is a load-bearing
       # assertion so future install regressions fail here rather than
       # leaking to the build step where the symptom is opaque.
-      # Install system libraries needed by `anchor-cli` 0.32.1's transitive
+      # Install system libraries needed by `anchor-cli` 1.2.2's transitive
       # build deps before `cargo install` recompiles them from source.
       # `hidapi 2.6.3` (pulled in via anchor-cli → solana-cli →
       # solana-remote-wallet) runs `pkg-config --libs --cflags libudev` from
@@ -179,9 +179,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
+      # anchor-cli 1.2.2's lockfile pins solana-sbpf 0.23.0, whose
+      # aligned_memory.rs uses the UNSTABLE `Layout::dangling_ptr` core API
+      # (feature `layout_for_ptr`). The pinned stable host toolchain
+      # (1.91.1) rejects it — E0599 — so the CLI binary itself must be
+      # compiled with nightly. This affects ONLY the anchor CLI install:
+      # the on-chain build below still runs on platform-tools' embedded
+      # toolchain, and every other job stays on stable 1.91.1.
+      - name: Install nightly toolchain for anchor-cli
+        run: rustup toolchain install nightly --profile minimal
       - name: Install Anchor CLI
         run: |
-          cargo install --locked --version ${ANCHOR_VERSION} anchor-cli
+          cargo +nightly install --locked --version ${ANCHOR_VERSION} anchor-cli
           anchor --version
       # Phase 1 (build/reliability): enforce the pinned toolchain. This
       # script existed pre-Phase-1 but was never wired into CI — it verified
@@ -197,7 +206,7 @@ jobs:
       # programmatic CI inspection does not expose log download).
       # Solana 3.0.10's bundled platform-tools v1.51 ships cargo 1.84,
       # which can't parse edition2024 manifests (blake3 0.12, hashbrown,
-      # digest, crypto-common — all transitive deps of Anchor 0.32.1's SPL
+      # digest, crypto-common — all transitive deps of Anchor 1.2.2's SPL
       # deps). cargo-build-sbf 3.0.10's `--tools-version` flag is silently
       # ignored, and `[workspace.metadata.solana] tools-version = "v1.54"`
       # isn't honored either, so we replace the cached platform-tools
@@ -217,8 +226,8 @@ jobs:
           "$CACHE_DEST/rust/bin/rustc" --version
       # `anchor build` invokes `cargo-build-sbf` for the BPF compile AND
       # `anchor idl build` for IDL generation. The IDL step requires a
-      # nightly Rust toolchain (Anchor 0.32.1 hasn't migrated to stable IDL
-      # gen yet). Since this workflow only installs stable, we run with
+      # nightly Rust toolchain (the Anchor IDL-gen toolchain requirements
+      # differ from this job's stable-only install). Since this workflow only installs stable, we run with
       # `--no-idl` and treat IDL generation as a follow-up workstream — it
       # produces TS client types but isn't a blocker for the on-chain
       # program. A later PR can add `dtolnay/rust-toolchain@nightly` plus

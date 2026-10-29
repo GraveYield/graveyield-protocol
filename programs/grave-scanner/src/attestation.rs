@@ -130,7 +130,7 @@
 //   [ 152.. 320)  params.msg (the 168-byte attestation)
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar::instructions as instructions_sysvar;
+use solana_instructions_sysvar as instructions_sysvar;
 
 use crate::errors::GraveScannerError;
 
