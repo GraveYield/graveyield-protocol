@@ -23,6 +23,7 @@ rust-version = "1.91"
 license = "Apache-2.0"
 authors = ["GraveYield Protocol contributors"]
 repository = "https://github.com/GraveYield-Protocol/protocol"
+homepage = "https://github.com/GraveYield/graveyield-protocol"
 readme = "README.md"
 
 [workspace.dependencies]
