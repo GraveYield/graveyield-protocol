@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "description": "Settlement layer for economic finality on-chain. GraveYield Protocol monorepo.",
-  "homepage": "https://***REMOVED***",
   "repository": {
     "type": "git",
     "url": "https://github.com/graveyieldprotocol/protocol.git"

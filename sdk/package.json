@@ -8,7 +8,6 @@
     "url": "https://github.com/GraveYield/graveyield-protocol.git",
     "directory": "sdk"
   },
-  "homepage": "https://***REMOVED***",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
