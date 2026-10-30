@@ -5,8 +5,8 @@
 GraveYield Protocol is settlement infrastructure handling derelict liquidity. Security reports
 are taken seriously and triaged urgently.
 
-**Please do not open public issues for security reports.** Email
-**security@***REMOVED***** (PGP key TBD) with:
+**Please do not open public issues for security reports.** Use **GitHub private
+vulnerability reporting** on this repository (Security tab) with:
 
 1. A clear description of the vulnerability.
 2. Steps to reproduce, or a proof-of-concept.

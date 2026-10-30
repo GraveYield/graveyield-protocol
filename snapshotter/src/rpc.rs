@@ -11,8 +11,8 @@ use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::account::Account;
-use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::error::SnapshotError;
@@ -188,6 +188,11 @@ impl LpAccountSource for RpcLpAccountSource {
     }
 
     fn token_accounts(&self, lp_mint: &Pubkey) -> Result<Vec<TokenAccountSnapshot>, SnapshotError> {
+        // getProgramAccounts returns raw account bytes (parsed below by
+        // parse_spl_token_account); the suggested get_program_ui_accounts_
+        // with_config migration returns UI-encoded accounts — a behavioral
+        // migration deliberately deferred out of the dependency-bump PR.
+        #[allow(deprecated)]
         let accounts = self
             .client
             .get_program_accounts_with_config(
@@ -222,6 +227,9 @@ impl LockedLpEvidence for RpcLockedLpEvidence {
         amm_id: &Pubkey,
         lp_mint: &Pubkey,
     ) -> Result<Vec<TokenLockRecord>, SnapshotError> {
+        // See token_accounts: raw-bytes gPA kept deliberately (UI-account
+        // migration deferred out of the dependency-bump PR).
+        #[allow(deprecated)]
         let accounts = self
             .client
             .get_program_accounts_with_config(

@@ -135,7 +135,7 @@ mod tests {
             _reserved: [0u8; 96],
         };
 
-        let bytes = cfg.try_to_vec().expect("borsh serialize");
+        let bytes = borsh::to_vec(&cfg).expect("borsh serialize");
         let d = ProtocolConfig::try_from_slice(&bytes).expect("borsh deserialize");
 
         assert_eq!(d.authority, cfg.authority);

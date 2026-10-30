@@ -107,7 +107,7 @@ mod tests {
             _reserved: [0u8; 32],
         };
 
-        let bytes = record.try_to_vec().expect("borsh serialize");
+        let bytes = borsh::to_vec(&record).expect("borsh serialize");
         let d = ClaimRecord::try_from_slice(&bytes).expect("borsh deserialize");
 
         assert_eq!(d.pool_address, record.pool_address);

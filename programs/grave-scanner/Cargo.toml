@@ -34,6 +34,13 @@ anchor-debug = []
 # vault already uses for its PDAs.
 anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
+# Sysvar addresses + instructions-sysvar loaders for the attestation
+# paths. Anchor 1.2's `solana_program` re-export no longer carries the
+# sysvar id()/load_* helpers (agave split-crate era) — these are the
+# canonical standalone crates, already resolved in Cargo.lock via
+# anchor-lang ^3 reqs (same instances, no new resolution).
+solana-sdk-ids = "3.1"
+solana-instructions-sysvar = "3"
 
 [dev-dependencies]
 # Phase 7 security hardening: property-based fuzz tests for the ed25519

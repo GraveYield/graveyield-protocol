@@ -6,7 +6,7 @@
 |---|---|
 | **Working paper** | WP-2026-001r4 · October 2026 |
 | **Author** | GraveYield Protocol Research Division |
-| **Contact** | research@***REMOVED*** · ***REMOVED***/research |
+| **Contact** | [github.com/GraveYield](https://github.com/GraveYield) |
 | **Published snapshot** | [`published/GhostPools_Research_Paper_WP-2026-001r4.pdf`](published/GhostPools_Research_Paper_WP-2026-001r4.pdf) (19 pages, typeset two-column) |
 
 > **Cover document.** This markdown is the living cover and abstract for the

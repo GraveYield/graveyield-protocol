@@ -1,7 +1,9 @@
 [toolchain]
 # Aligned with the official Solana 3.x stack (per
-# https://solana.com/docs/intro/installation).
-anchor_version = "0.32.1"
+# https://solana.com/docs/intro/installation). anchor 1.2.2 is the Anchor
+# line built against the agave solana-* 3.1.x crates (closing the
+# tokio-tungstenite 0.20 / rustls 0.21 transitive exposure).
+anchor_version = "1.2.2"
 solana_version = "3.0.10"
 
 [features]

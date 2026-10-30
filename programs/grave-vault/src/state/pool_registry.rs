@@ -185,7 +185,7 @@ mod tests {
         r.salvaged_at_ts = 1_700_000_000;
         r.bump = 253;
 
-        let bytes = r.try_to_vec().expect("borsh serialize");
+        let bytes = borsh::to_vec(&r).expect("borsh serialize");
         let d = PoolRegistry::try_from_slice(&bytes).expect("borsh deserialize");
 
         assert_eq!(d.amm_program_id, r.amm_program_id);

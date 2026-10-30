@@ -24,19 +24,21 @@ idl-build = [
     "anchor-spl/idl-build",
     "grave-scanner/idl-build",
 ]
-# Anchor 0.32.x's `#[program]` macro emits `#[cfg(feature = "anchor-debug")]`
-# tags. Declaring the feature here silences the unexpected_cfgs lint on
-# Rust 1.80+. The feature is a no-op flag the macro author uses internally.
+# Anchor's `#[program]` macro emits `#[cfg(feature = "anchor-debug")]`
+# tags (0.32.x era behavior; kept declared under 1.2.2 as a no-op flag in
+# case the macro re-emits them). Declaring the feature here silences the
+# unexpected_cfgs lint on Rust 1.80+.
 anchor-debug = []
 
 [dependencies]
 anchor-lang = { workspace = true, features = ["init-if-needed"] }
 anchor-spl  = { workspace = true }
 grave-scanner = { path = "../grave-scanner", features = ["cpi"] }
-# SHA-256 hasher for merkle.rs Merkle proof verification. Anchor 0.32
-# dropped the `solana_program::hash` re-export — sha256 now lives in
-# the standalone `solana-sha256-hasher` crate. Pinned at 2.x to match
-# the Solana 3.0.10 stack transitively pulled by anchor-lang 0.32.1.
+# SHA-256 hasher for merkle.rs Merkle proof verification. Anchor dropped
+# the `solana_program::hash` re-export generations ago — sha256 lives in
+# the standalone `solana-sha256-hasher` crate. Pinned to the 3.x line to
+# match the agave solana-* 3.1.x stack transitively pulled by anchor-lang
+# 1.2.2 (single lockfile instance across program and host builds).
 solana-sha256-hasher = "3"
 
 [dev-dependencies]
@@ -53,11 +55,21 @@ proptest = "1"
 solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
 # Phase 2.1 fork harness (tests/raydium_v4_fork.rs): executes the real
 # salvage_pool instruction against real mainnet Raydium V4 / OpenBook /
-# SPL token bytecode inside an in-process Solana VM. The 2.3 line is
-# aligned with the solana-program 2.3.x transitively pulled by
-# anchor-lang 0.32.1 (see Cargo.lock).
-solana-program-test = "2.3"
-solana-sdk = "2.3"
+# SPL token bytecode inside an in-process Solana VM. The 3.1 line —
+# aligned with the solana-program 3.1.x transitively pulled by anchor-lang
+# 1.2.2 (see Cargo.lock), and carries tokio-tungstenite 0.28 / rustls
+# 0.23 — eliminating the rustls-0.21 carrier of the 2.3 line
+# (Dependabot alerts #9-#11). solana-sdk stays on the "3" facade (3.0.0;
+# there is no 3.1.x facade release) — its caret component reqs resolve
+# the SAME 3.1.x instances program-test 3.1.x uses. The
+# agave-unstable-api feature acknowledges the program-test surface the
+# harness depends on (required from agave 4.0 on; silences the
+# deprecation gate the whole suite would otherwise trip).
+solana-program-test = { version = "3.1", features = ["agave-unstable-api"] }
+solana-sdk = "3"
+# Canonical sysvar/program addresses (agave split-crate era): the fork
+# harness references system_program::ID; the facade no longer carries it.
+solana-sdk-ids = "3.1"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
 # Phase 5.3 claims fork harness (tests/lp_claim_fork.rs): the claim path

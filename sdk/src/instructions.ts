@@ -27,6 +27,7 @@ import {
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { writer } from "./borsh.js";
 import { ScannerIx, VaultIx } from "./discriminators.js";
+import { createRequire } from "node:module";
 import {
   scannerProtocolConfigPda,
   vaultProtocolConfigPda,
@@ -424,6 +425,8 @@ export function buildSweepDustIx(opts: {
 
 /** Lazy import to avoid pulling @solana/spl-token at module load for non-salvage builders. */
 function requireAssociatedToken() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("@solana/spl-token") as typeof import("@solana/spl-token");
+  // ESM-safe lazy load (W1 fix): this package is "type": "module" with NodeNext
+  // emit, so a bare require() here throws "require is not defined in ES module
+  // scope" the moment buildSweepDustIx runs under plain node ESM.
+  return createRequire(import.meta.url)("@solana/spl-token") as typeof import("@solana/spl-token");
 }

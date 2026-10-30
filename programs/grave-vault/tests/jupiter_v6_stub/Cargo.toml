@@ -12,4 +12,7 @@ crate-type = ["cdylib", "lib"]
 name = "jupiter_v6_stub"
 
 [dependencies]
-solana-program = "2.3"
+# Aligned with the agave solana-* 3.x stack the rest of the workspace
+# resolves (anchor-lang 1.2.2 / solana-program-test 3.1.x) — keeps a
+# single solana-program/pubkey instance in the graph.
+solana-program = "3"
