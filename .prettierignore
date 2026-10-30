@@ -10,3 +10,6 @@ pnpm-lock.yaml
 # Prose is out of scope for the code formatter.
 *.md
 .github/
+
+# W1 workrun evidence must stay byte-faithful — never reformat.
+recovery-w1-2026-10-28/
