@@ -1335,6 +1335,267 @@ async fn claim_journey_wallet_proof_claim_sol() {
     );
 }
 
+// =====================================================================
+// P5-05 / P5-06 pins — pause-live claims and the residual-dust bound
+// =====================================================================
+
+fn vault_config_pda() -> Pubkey {
+    Pubkey::find_program_address(&[b"protocol_config"], &vault_id()).0
+}
+
+/// `emergency_pause`: bool + (protocol_config, authority) — the vault's
+/// immediate governance toggle.
+fn vault_pause_ix(authority: &Pubkey, paused: bool) -> Instruction {
+    let mut data = anchor_disc("emergency_pause").to_vec();
+    data.push(u8::from(paused));
+    Instruction::new_with_bytes(
+        vault_id(),
+        &data,
+        vec![
+            AccountMeta::new(vault_config_pda(), false),
+            AccountMeta::new_readonly(*authority, true),
+        ],
+    )
+}
+
+/// P5-05 — the Charter invariant "claims remain live during emergency
+/// pause" is pinned end-to-end: the vault is paused FOR REAL in this VM
+/// (the flag is deserialized from the live config PDA — the same state
+/// `salvage_pool`'s 7003 gate reads), and a Merkle-proven claim still
+/// executes with exact lamport movement, a registry counter tick, and a
+/// ClaimRecord. A future refactor adding a pause gate to
+/// `claim_lp_proceeds` fails this test.
+#[tokio::test]
+async fn claims_remain_live_during_emergency_pause() {
+    let Some(fork) = boot_claim_lifecycle().await else {
+        return;
+    };
+    let ClaimFork {
+        mut client,
+        env,
+        published,
+        salvor,
+        wallets,
+        bucket,
+        supply,
+        ..
+    } = fork;
+    let rent0 = Rent::default().minimum_balance(0);
+    let config = vault_config_pda();
+
+    // (1) Pause the protocol. The pause ix is the real governance
+    // transition (same refuse-first instruction the 7022 pin in
+    // security_negative_fork.rs exercises; here it is expected to SUCCEED
+    // because the flag transitions).
+    send(
+        &mut client,
+        &salvor,
+        &[vault_pause_ix(&salvor.pubkey(), true)],
+    )
+    .await
+    .expect("pause must succeed");
+    let cfg = grave_vault::state::ProtocolConfig::try_deserialize(
+        &mut &acct(&mut client, &config).await.data[..],
+    )
+    .expect("config must deserialize");
+    assert!(
+        cfg.emergency_paused,
+        "the pause flag must be set in the same VM the claim runs in"
+    );
+
+    // (2) While paused: the Charter-invariant claim executes.
+    let holder = &wallets[0];
+    let entry = published
+        .proof_for(&holder.wallet.pubkey())
+        .unwrap_or_else(|| panic!("the artifact must carry the holder"));
+    let expected = pro_rata(bucket, entry.lp_balance, supply);
+    let before = acct(&mut client, &holder.wallet.pubkey()).await.lamports;
+    send(
+        &mut client,
+        &holder.wallet,
+        &[claim_ix(
+            &env,
+            &holder.wallet.pubkey(),
+            &claim_record_pda(&env, &holder.wallet.pubkey()),
+            entry.lp_balance,
+            &entry.proof,
+        )],
+    )
+    .await
+    .expect("a claim must stay live during emergency pause (Charter invariant)");
+    assert_eq!(
+        acct(&mut client, &holder.wallet.pubkey()).await.lamports,
+        before - FEE - claim_record_rent() + expected,
+        "the paused-protocol claim must pay exactly the pro-rata floor"
+    );
+
+    // (3) The registry counter and ClaimRecord moved with it.
+    let registry = grave_vault::state::PoolRegistry::try_deserialize(
+        &mut &acct(&mut client, &env.pool_registry).await.data[..],
+    )
+    .expect("registry must deserialize");
+    assert_eq!(registry.lp_holder_pool_claimed_lamports, expected);
+    assert!(maybe_acct(&mut client, &env.lp_holder_pool_vault)
+        .await
+        .is_some());
+    assert_eq!(
+        acct(&mut client, &env.lp_holder_pool_vault).await.lamports,
+        rent0 + bucket - expected
+    );
+    let record = grave_vault::state::ClaimRecord::try_deserialize(
+        &mut &acct(
+            &mut client,
+            &claim_record_pda(&env, &holder.wallet.pubkey()),
+        )
+        .await
+        .data[..],
+    )
+    .expect("the claim record must exist");
+    assert_eq!(record.amount_lamports, expected);
+    assert_eq!(record.lp_holder, holder.wallet.pubkey());
+
+    // (4) Unpause restores the normal state (pause-gated paths resume).
+    send(
+        &mut client,
+        &salvor,
+        &[vault_pause_ix(&salvor.pubkey(), false)],
+    )
+    .await
+    .expect("unpause must succeed");
+    let cfg = grave_vault::state::ProtocolConfig::try_deserialize(
+        &mut &acct(&mut client, &config).await.data[..],
+    )
+    .expect("config must deserialize");
+    assert!(!cfg.emergency_paused);
+}
+
+/// P5-06 — the per-claim floor-rounding residual bound, pinned with a
+/// NON-divisible recipe: three holders whose balances exactly cover the
+/// snapshot supply (1, 2, S−3) so every pro-rata entitlement
+/// `bucket × balance / supply` floors, and after ALL eligible holders
+/// claim, the vault keeps exactly `Σ floor residuals ≤ N − 1 = 2`
+/// lamports — permanently (the vault is unsweepable by Charter, 7006).
+/// The recipe is exact: r = Σ frac(bucket·bᵢ/S) = 0 only when the bucket
+/// itself is divisible by the supply (asserted, not assumed); otherwise
+/// 1 ≤ r ≤ 2 for this recipe (r = Σ of the three per-claim fractions,
+/// which sum to an integer).
+#[tokio::test]
+async fn claim_rounding_residual_dust_within_n_minus_1() {
+    let manifest = match load_manifest() {
+        Some(m) => m,
+        None => return, // fixtures absent: SKIP (same contract as the boot fns)
+    };
+    let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
+    let supply = mint_supply(&lp_mint_acct);
+    assert!(supply > 3, "the recipe needs S > 3");
+
+    // Three holders covering the supply EXACTLY (Σ bᵢ = S) with balances
+    // that make the pro-rata divisions non-trivial: 1, 2, S−3.
+    let dust_holder = Keypair::new(); // b = 1  → the sub-lamport entitlement
+    let two_holder = Keypair::new(); //  b = 2
+    let whale = Keypair::new(); //  b = S−3
+    let claimants = vec![(dust_holder, 1u64), (two_holder, 2u64), (whale, supply - 3)];
+    let Some(fork) = boot_oversubscribed(claimants).await else {
+        return;
+    };
+    let OversubFork {
+        mut client,
+        env,
+        bucket,
+        supply,
+        claimants,
+        proofs,
+    } = fork;
+    assert_ne!(bucket, 0, "the LP bucket must be funded for this pin");
+    let rent0 = Rent::default().minimum_balance(0);
+
+    // Each holder claims their floor entitlement.
+    let mut sum_claimed = 0u64;
+    for (i, (wallet, balance)) in claimants.iter().enumerate() {
+        let expected = pro_rata(bucket, *balance, supply);
+        let before = acct(&mut client, &wallet.pubkey()).await.lamports;
+        send(
+            &mut client,
+            wallet,
+            &[claim_ix(
+                &env,
+                &wallet.pubkey(),
+                &claim_record_pda(&env, &wallet.pubkey()),
+                *balance,
+                &proofs[i],
+            )],
+        )
+        .await
+        .unwrap_or_else(|e| panic!("claim {i} (balance {balance}) failed: {e:?}"));
+        sum_claimed += expected;
+        assert_eq!(
+            acct(&mut client, &wallet.pubkey()).await.lamports,
+            before - FEE - claim_record_rent() + expected,
+            "claim {i} must pay exactly floor(bucket × {balance} / {supply})"
+        );
+    }
+
+    // The sub-lamport entitlement: the 1-lamport holder's floor is 0
+    // whenever bucket < supply (bucket is WSOL lamports, the fixture
+    // supply is orders of magnitude larger) — the claim still succeeds,
+    // creates its ClaimRecord, and pays out zero. The boot fn sorts
+    // claimants by pubkey, so locate the b=1 holder by balance.
+    if bucket < supply {
+        let (dust_wallet, _) = claimants
+            .iter()
+            .find(|(_, b)| *b == 1)
+            .expect("the recipe must carry a 1-lamport holder");
+        let record = grave_vault::state::ClaimRecord::try_deserialize(
+            &mut &acct(&mut client, &claim_record_pda(&env, &dust_wallet.pubkey()))
+                .await
+                .data[..],
+        )
+        .expect("the dust holder's claim record must exist");
+        assert_eq!(
+            record.amount_lamports, 0,
+            "floor(bucket × 1 / supply) = 0 when bucket < supply"
+        );
+    }
+
+    // THE BOUND: after all N = 3 eligible holders claim, the residual is
+    // exactly the Σ of the per-claim floor remainders and never exceeds
+    // N − 1 lamports.
+    let residual = bucket - sum_claimed;
+    assert!(
+        residual < claimants.len() as u64,
+        "residual {residual} must be ≤ N−1 = {} lamports",
+        claimants.len() - 1
+    );
+    let registry = grave_vault::state::PoolRegistry::try_deserialize(
+        &mut &acct(&mut client, &env.pool_registry).await.data[..],
+    )
+    .expect("registry must deserialize");
+    assert_eq!(
+        registry.lp_holder_pool_claimed_lamports, sum_claimed,
+        "the cumulative counter must equal Σ floor entitlements"
+    );
+    assert_eq!(
+        acct(&mut client, &env.lp_holder_pool_vault).await.lamports,
+        rent0 + residual,
+        "the vault keeps exactly rent + the rounding residual"
+    );
+
+    // Recipe exactness: this recipe's residual is 0 ONLY when the bucket
+    // is itself divisible by the supply (every frac term vanishes);
+    // otherwise it is at least 1 — i.e. the test demonstrably exercises
+    // a non-zero, bounded residual for the real fixture bucket.
+    if bucket % supply != 0 {
+        assert!(
+            residual >= 1,
+            "a non-divisible bucket must leave visible rounding dust"
+        );
+    }
+    eprintln!(
+        "dust pin: bucket {bucket} / supply {supply} / claimed {sum_claimed} / residual {residual} (≤ N−1 = {})",
+        claimants.len() - 1
+    );
+}
+
 /// Swapped sibling, truncated proof, forged element, wrong signer — every
 /// malformed submission reverts 7010 with zero state movement, and the
 /// honest claim still succeeds afterwards (positive control).
