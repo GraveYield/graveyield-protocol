@@ -1,8 +1,8 @@
 # Phase 5.1 — Stage A Reconciliation Log (graveyield-protocol)
 
-> **Stage:** Phase 5.1 Stage A — documentation reconciliation only. **No code, test, workflow, or dependency file was modified** (`git diff --stat` for this branch touches `docs/security/*.md` exclusively).
+> **Stage:** Phase 5.1 Stage A — documentation reconciliation only. **No code, test, workflow, or dependency file was modified** (`git diff --stat` for this branch touches `docs/security/*.md` exclusively). A correction pass (§12) was applied after owner review; still documentation-only.
 > **Trigger:** PR #67 (Phase 5.1 preflight) merged; `origin/main` advanced to `1865908` (including PR #69 — minimatch dependency fix, Dependabot alert #13's dependency).
-> **Authority:** preflight report §6 (D-1…D-5 discrepancy inventory) is the work order; owner instruction adds the P5-01 refresh, the Dependabot-statement correction, and preservation directives (P5-04 retraction, fork flake, P5-A1, historical IDs).
+> **Authority:** preflight report §6 (D-1…D-5 discrepancy inventory) is the work order; owner instruction adds the P5-01 refresh, the Dependabot-statement correction, and preservation directives (P5-04 retraction, fork flake, P5-A1, historical IDs). The correction pass (§12) is authorized by the owner's PR #70 review findings.
 > **Companion documents:** [`PHASE5_FINDINGS_REGISTER.md`](PHASE5_FINDINGS_REGISTER.md) · [`PHASE5_COVERAGE_MATRIX.md`](PHASE5_COVERAGE_MATRIX.md) · [`PHASE5_BASELINE_REPORT.md`](PHASE5_BASELINE_REPORT.md) · [`PHASE5_1_PREFLIGHT_REPORT.md`](PHASE5_1_PREFLIGHT_REPORT.md).
 
 ---
@@ -37,7 +37,7 @@ Declared vocabulary (register preamble): **Fixed and verified / Open / Accepted 
 | Register location | Before | After | Note |
 | --- | --- | --- | --- |
 | §1.2, D6–D10 | `Closed (accurate)` | **Fixed and verified** (accuracy confirmations; historical wording preserved in the cell) | no action required either way |
-| §2, P5-08 | `Record only` | **Accepted risk** (informational record; "record only" wording preserved in the cell) | nothing here is a protocol risk |
+| §2, P5-08 | `Record only` | **Accepted risk** (informational record; "record only" wording preserved in the cell) | nothing here is a protocol risk — *(superseded by the correction pass §12.6: re-dispositioned to **Record only (informational)**, a proposed vocabulary extension pending owner approval)* |
 | §1.6, PROTOCOL_SPEC §8 ledger row | `Fixed` | **Fixed and verified** | evidence column already stated verification |
 | §1.1, B1 | dual: `Superseded … → re-opened as P5-A1` | **Superseded** (P5-A1 pointer + original wording preserved in the cell) | exactly one status; P5-A1 unchanged (**Open**) |
 | §1.6, sha2 incident row | dual: `Fixed and verified at the time → re-opened as P5-02` | **Superseded** (by P5-02; original wording preserved in the cell) | exactly one status |
@@ -72,8 +72,8 @@ Verification: `grep -nF 'F5-' docs/security/PHASE5_COVERAGE_MATRIX.md` → only 
 
 | New ID | Severity | Content | Status |
 | --- | --- | --- | --- |
-| **P5-11** | Low | No-op emergency-pause toggles are not pinned by any test (both programs; scanner 6006 / vault 7003 refuses-first). Resolves the AU-04/G2 "F5-06" collision. | **Open** |
-| **P5-12** | Info | Priority-fee ceiling is SDK/operator-enforced only; on-chain 7008 reserved, never raised. Gives the dangling ST-10 "F5-11" a stable owning ID; kept visible for the Phase 13 external audit. | **Accepted risk** (documented boundary) |
+| **P5-11** | Low | No-op emergency-pause toggles are not pinned by any test (both programs; scanner 6006 / vault 7022 refuses-first — the GraveVault code was misprinted as 7003 at mint time and in the register; corrected in §12.1: 7003 is `ProtocolPaused`, the pause gate, not the no-op-toggle revert). Resolves the AU-04/G2 "F5-06" collision. | **Open** |
+| **P5-12** | Info | Priority-fee ceiling is enforced by the SDK fee-validation helper when used — not an on-chain enforcement boundary (7008 reserved, never raised; independent transaction construction can bypass the SDK guard). Gives the dangling ST-10 "F5-11" a stable owning ID; kept visible for the Phase 13 external audit. | **Accepted risk** (documented boundary) |
 
 Both rows explicitly mark themselves as minted at Stage A reconciliation so the 5.0/5.1 history stays auditable.
 
@@ -84,7 +84,7 @@ Narrowed or annotated — never downgraded without evidence:
 | Row | Change |
 | --- | --- |
 | ST-03 | PASS annotated: executed against the test-only Jupiter v6 **stub**; real aggregator route semantics unexercised (P5-10) |
-| ST-10 | `PASS (SDK layer)` split into **PASS** (SDK layer executed) + **N/A-proc** (on-chain layer unenforced by design, 7008 reserved); dangling ref resolved to P5-12 |
+| ST-10 | `PASS (SDK layer)` split into **PASS** (SDK layer executed) + **N/A-proc** (on-chain layer unenforced by design, 7008 reserved); dangling ref resolved to P5-12 — *(correction pass §12.4: PASS further narrowed to the offline fee-helper rejection actually tested; it does not prove that independent transaction construction is prevented)* |
 | CL-05 | PASS annotated: divisible recipes + conservation executed; the non-divisible ≤ N−1 residual case is **not** tested (P5-06) |
 | EL-07 | gap cell relabeled **Documented testing limitation** (explicit disposition, no register ID; host predicates are the compensating control) — PASS unchanged |
 | CL-03 | gap cell annotated: no downgrade warranted (on-chain 7018 pin is the tested final authority) — PASS unchanged |
@@ -102,7 +102,7 @@ Narrowed or annotated — never downgraded without evidence:
 | `sweep_stale_anchor` handler paths | P5-03 (handler) + account-constraint coverage **explicitly included in P5-03's scope** (register row + baseline §7.2 + matrix G7) |
 | `invalidate_anchor` fork coverage | **Documented testing limitation** (matrix G7; no register ID — unit predicates are the compensating control) |
 | Cert-expiry wall-clock crossing | **Documented testing limitation** (matrix EL-07 + G7) |
-| SDK-only priority-fee ceiling | **P5-12** (minted; Accepted risk) |
+| SDK-helper-only priority-fee ceiling (not on-chain) | **P5-12** (minted; Accepted risk) |
 | Rounding dust | G4/CL-05 → P5-06 (unchanged, clean) |
 | Real Jupiter v6 | G6/ST-03/ST-08 → P5-10 (unchanged, clean) |
 
@@ -128,7 +128,7 @@ Narrowed or annotated — never downgraded without evidence:
 | --- | --- |
 | `git diff --stat main` | docs-only: 3 modified files under `docs/security/` + this log (no code/test/CI/dependency files) |
 | `bash scripts/terminology-lint.sh` | `ok: no forbidden vocabulary detected` |
-| `bash scripts/doc-links-lint.sh` | `ok: all relative markdown links resolve` (115 targets re-checked) |
+| `bash scripts/doc-links-lint.sh` | `ok: all relative markdown links resolve` (115 targets re-checked — *count corrected in §12.7: the actual count at `ebb68d9` was 124; 115 was the pre-Stage-A count*) |
 | `grep -rnF 'F5-' docs/security/PHASE5_BASELINE_REPORT.md` | quoted historical citations only (0 live references) |
 | `grep -in 'dependabot alerts are disabled' docs/` | no hits (corrected) |
 | `grep -rn 'ain]' docs/` | no hits (retraction preserved, claim not resurrected) |
@@ -140,7 +140,7 @@ Narrowed or annotated — never downgraded without evidence:
 | --- | --- | --- |
 | **P5-A1** (Critical) | **Open** | sole P0 — owner decision on devnet key custody (restore vs DR-001-style redeployment); blocks all live-chain verification incl. the real-Jupiter end-to-end proof |
 | P5-02 | Needs further investigation | sha2 multi-instance: confirm which hasher instance the ELF uses; upstream-chain property |
-| P5-03 | Open | scanner handler tests (6006 bound + `sweep_stale_anchor` paths + account-constraint layer) |
+| P5-03 | Open | scanner tests: handler-level (6006 bound, stale-window, handler-side writer check) **plus** Anchor instruction/context-level (PDA derivation, writer binding via the account context, ownership validation, pre-handler rejection, state preservation) — plain handler tests do not establish account-constraint enforcement (§12.2) |
 | P5-04 | Open | fork harness not PR-gated (policy choice; trigger verified functioning per preflight §7.1 retraction) |
 | P5-05, P5-06 | Open | charter/pause + residual-dust pins (P1 class) |
 | P5-07 | Open | CI supply-chain hardening (pre-mainnet) |
@@ -155,6 +155,37 @@ Narrowed or annotated — never downgraded without evidence:
 2. No test suites were re-run in Stage A (docs-only stage); all test-execution citations remain the Phase 5.0/preflight records on the stated commits.
 3. The register title/headers still say "@ `78b5d87`" — intentionally preserved as the assessment-snapshot designation; the reconciliation notes at the top of each document state the current `origin/main` (`1865908`).
 
-## 12. Stop-point statement
+## 12. Correction pass — owner-review findings (2026-11-01, documentation-only)
+
+The original Stage A reconciliation commit (`ebb68d9`) was reviewed by the owner; the review identified six factual/consistency defects. This pass corrects them on the same branch. No code, test, dependency, or CI file was touched; no historical record was rewritten — original wording is quoted and preserved, corrections are additive annotations or in-place fixes each carrying a §12 pointer. Every correction was independently re-verified against the actual source before editing (sources cited per item); nothing was taken on faith from the review alone.
+
+| # | Finding ID | Defect in the original Stage A text | Correction applied | Evidence re-verified for this pass |
+| --- | --- | --- | --- | --- |
+| 12.1 | P5-11 | GraveVault no-op emergency-pause error stated as **7003** (register P5-11 row ×2; log §5 mint row) | Corrected to **7022** (`InvariantViolation`, offset-adjusted) everywhere; 7003 clarified as the unrelated `ProtocolPaused` gate. Matrix AU-04 now cites the exact vault anchor with 7022. | `programs/grave-vault/src/errors.rs:35-37,147` (7003 = `ProtocolPaused`) and `:122-128,166` (7022 = `InvariantViolation`); `programs/grave-vault/src/instructions/emergency_pause.rs:50-53` (`require!(cfg.emergency_paused != paused, GraveVaultError::InvariantViolation)`); `docs/error_codes.md:79,98` |
+| 12.2 | P5-03 | Remediation specified handler-level tests only, implying plain handler tests would close a finding whose scope includes Anchor account-constraint coverage | Remediation split into two layers: (1) handler-level (6006 config-bound rejection; stale-window-not-elapsed; handler-side writer check where applicable) and (2) Anchor instruction/context-level (actual PDA derivation and account binding; incorrect-writer rejection through the instruction account context; account-ownership validation; rejection before handler execution where the constraint layer fires; state preservation after rejected instructions). Explicit statement added: plain handler tests do **not** establish account-constraint enforcement. Specification only — no tests implemented. | register P5-03 row scope (incl. Stage A disposition + matrix G7); `programs/grave-scanner/src/instructions/update_protocol_config.rs:58` (6006 bound in handler); `programs/grave-scanner/src/instructions/sweep_stale_anchor.rs:35` (`eligibility_anchor.writer == anchor_writer.key()` — an accounts-context constraint, not handler logic) |
+| 12.3 | P5-03 / P5-11 | Register §1.6 Phase 12 emergency-pause row cross-referenced **P5-03** for the missing no-op pause-toggle test pin ("but see P5-03") | Historical wording preserved verbatim; a Stage A correction-pass annotation added naming **P5-11** as the canonical owner of the missing toggle test pin (P5-03's scope covers only the `price_collapse_bps` (6006) handler bound and `sweep_stale_anchor`) | register §1.6 row (original Phase 5.0 wording intact); P5-11 mint row (§5 above); preflight §6 D-2 |
+| 12.4 | P5-12 / ST-10 / ADV-MP-02 | Enforcement boundary overstated: "operators cannot opt out of the SDK" / "no-opt-out Charter guard" / "The *SDK* cannot be opted out of"; ADV-MP-02's test-name claim repeated as the documentation's own interpretation | Reworded to the three-part boundary: (1) SDK helper enforcement — `computeBudgetIxs` → `charterGuard` rejects fees above the configured ceiling **when used**; (2) operator policy — official operator implementations are expected to comply with the documented fee policy; (3) on-chain enforcement — not implemented in v1.0; 7008 reserved and never raised. ST-10 PASS narrowed to the behavior actually tested (offline fee-helper rejection); the on-chain non-enforcement boundary kept visible as a documented accepted risk / design limitation — not downgraded or removed. | `sdk/src/client.ts:274-288` (`charterGuard` throw) + `:588-612` (`computeBudgetIxs`); `adversary/test/economics.adversary.test.ts:147-168` (offline fee-helper assertions only); `programs/grave-vault/src/errors.rs:55,152` (7008 defined; grep confirms no instruction raises it); `docs/architecture/priority-fee-policy.md` §5 |
+| 12.5 | P5-12 (+ ADV-F1, error-codes row) | Priority-fee policy document path given as `docs/priority-fee-policy.md` (does not exist) | Corrected to `docs/architecture/priority-fee-policy.md` in all affected references (register P5-12 evidence, ADV-F1 evidence, error-codes row evidence, matrix ST-10) | `ls docs/priority-fee-policy.md` → ENOENT; `docs/architecture/priority-fee-policy.md` exists (§5 = "Enforcement boundary: SDK/operator only") |
+| 12.6 | P5-08 | Status contradiction: "**Accepted risk** (informational record)" vs "nothing here is a defect or a risk to the protocol itself" — falsely implies the owner accepted a security risk that does not exist | Re-dispositioned to **Record only (informational)** — a proposed sixth vocabulary value, **pending owner approval**; the limitation of the declared five-value vocabulary is documented (register preamble note; log §3 row annotated as superseded). Original finding identity, description, and evidence unchanged. | register preamble (five-value vocabulary declaration); register §2 P5-08 row (original "Record only" + Stage A first-pass "Accepted risk (informational record)" wording both preserved in-cell) |
+| 12.7 | — (self-discovered during the pass's link-resolution verification, not an owner-review item) | Log §10 recorded the original pass's doc-links-lint count as **115** targets; the actual count at `ebb68d9` was **124** (115 was the pre-Stage-A `main` count; the Stage A documents added relative links) | §10 row annotated with the correction pointer; the current pass's count is recorded as 124 in the verification table below | `git stash` + `bash scripts/doc-links-lint.sh` at `ebb68d9` → "checked 124 relative link target(s)"; the `ebb68d9` commit message also states "doc-links-lint OK (124 links)" |
+
+### Verification (correction pass)
+
+| Command | Result |
+| --- | --- |
+| `git fetch origin --prune` | exit 0; `origin/main` unchanged at `1865908`; PR branch in sync at `ebb68d9` before the pass |
+| `git diff origin/main...HEAD --stat` (after the pass) | docs-only: 4 files, all under `docs/security/` |
+| `bash scripts/terminology-lint.sh` | `ok: no forbidden vocabulary detected` |
+| `bash scripts/doc-links-lint.sh` | `ok: all relative markdown links resolve` (124 targets re-checked; exit 0) |
+| `grep -n '7003' docs/security/PHASE5_FINDINGS_REGISTER.md` | only the 7003-vs-7022 clarifier inside P5-11 (corrective context) — no P5-11 misattribution remains |
+| `grep -rn 'opt out' docs/security/` | only the attributed ADV-MP-02 test-name quotation inside ST-10 (and the P5-12 correction annotation quoting the retired wording) |
+| `grep -rn 'priority-fee-policy' docs/security/` | all occurrences carry the corrected `docs/architecture/` path |
+| `grep -nF 'F5-' docs/security/PHASE5_COVERAGE_MATRIX.md` | unchanged: 2 intentional hits (header note + AU-04 historical quote) |
+
+Known limitation: the full 543-test baseline was **not** re-run (documentation-only pass; no test, source, dependency, or CI file changed, so the executed baseline is untouched).
+
+## 13. Stop-point statement
 
 Stage A reconciliation is complete: the three Phase 5.0 documents are mutually consistent, use the declared status vocabulary, carry corrected canonical IDs, and reflect the P5-01/PR #69 reality with fresh audit evidence — with every preservation directive honored. **Stage A stops here.** No code, tests, dependencies, or CI workflows were touched; Stage B has not begun. Awaiting owner review of the documentation-only PR.
+
+**Correction pass (§12) appended:** all six owner-review corrections are applied on top of the original reconciliation commit `ebb68d9`; verification rerun and green. Stage A still stops here — Stage B has not begun, no security tests were implemented, P5-A1 remains the owner's unresolved P0 decision, and PR #70 is not merged from this side.

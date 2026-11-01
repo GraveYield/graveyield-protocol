@@ -6,6 +6,8 @@
 > **Companion documents:** [`PHASE5_COVERAGE_MATRIX.md`](PHASE5_COVERAGE_MATRIX.md) (attack-class → test mapping), [`PHASE5_FINDINGS_REGISTER.md`](PHASE5_FINDINGS_REGISTER.md) (findings disposition + prioritized plan), [`PHASE5_1_PREFLIGHT_REPORT.md`](PHASE5_1_PREFLIGHT_REPORT.md), [`PHASE5_1_STAGE_A_RECONCILIATION_LOG.md`](PHASE5_1_STAGE_A_RECONCILIATION_LOG.md).
 >
 > **Stage A reconciliation (2026-11-01):** this document remains the Phase 5.0 record of `main @ 78b5d87` — assessment values (543/543 execution results, ELF hashes, toolchain table, §5 dependency rows) are preserved unmodified. Stage A refreshed only *cross-references*: the drifted `F5-nn` IDs now point at the canonical register IDs (full mapping in the reconciliation log; drift inventory: preflight report §6 D-1), and the P5-01/minimatch rows carry a post-PR-#69 resolution pointer. Current `origin/main` is `1865908` (merge of PR #67; PR #69 dependency remediation landed — see register P5-01). No assessment value was altered.
+>
+> **Stage A correction pass (2026-11-01, owner-review findings):** cross-reference precision only — §7.2's P5-03 pointer now references the two-layer (handler-level vs Anchor instruction/context-level) remediation specification, and §7.3's P5-11 pointer states the correct GraveVault error code (7022; 7003 is the unrelated `ProtocolPaused` gate). No assessment value was altered by the correction pass.
 
 ---
 
@@ -160,8 +162,8 @@ The following enforcement points were read and verified directly (not via summar
 Full scenario mapping is in [`PHASE5_COVERAGE_MATRIX.md`](PHASE5_COVERAGE_MATRIX.md) §5. Highlights:
 
 1. Charter invariant "claims remain live during pause" is code-true but pinned by **no test** (register P5-05).
-2. Scanner handler-level reverts for `price_collapse_bps > 10_000` (6006) and the entire `sweep_stale_anchor` handler are untested (documented GOV gap in `docs/ADVERSARY.md` §4 — still true; register P5-03, whose Stage A scope also covers `sweep_stale_anchor` account-constraint coverage).
-3. Pause no-op-toggle refuses-first reverts (both programs) untested (register P5-11, minted at Stage A reconciliation).
+2. Scanner handler-level reverts for `price_collapse_bps > 10_000` (6006) and the entire `sweep_stale_anchor` handler are untested (documented GOV gap in `docs/ADVERSARY.md` §4 — still true; register P5-03, whose Stage A scope also covers `sweep_stale_anchor` account-constraint coverage; the remediation now distinguishes handler-level tests from Anchor instruction/context-level tests — plain handler tests do not establish account-constraint enforcement).
+3. Pause no-op-toggle refuses-first reverts (both programs) untested (register P5-11, minted at Stage A reconciliation; GraveVault reverts 7022 `InvariantViolation` — 7003 is the unrelated `ProtocolPaused` gate — GraveScanner reverts 6006).
 4. Residual per-claim floor dust (≤ N−1 lamports, permanently locked in the unsweepable LP vault) has no explicit test or documented magnitude bound (register P5-06).
 5. `invalidate_anchor` / `sweep_stale_anchor` have no fork-harness coverage (unit predicates only) — documented in `docs/assessments/phase4-assessment.md` §3, still true.
 6. Real Jupiter v6 is never exercised (test-only stub at the pinned program ID) — documented; still true.
