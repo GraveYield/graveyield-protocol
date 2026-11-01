@@ -22,6 +22,8 @@
 
 **Consequence:** because `origin/main` has not advanced past `78b5d87`, **no Phase 5.0 finding can have been addressed by subsequent commits.** Every finding is re-verified below against the same code state the assessment covered (plus the one docs commit).
 
+**Addendum (2026-11-01, post-merge re-verification):** after this report was committed (`24164aa`), `origin/main` advanced twice: `67a666d` (merge of PR #66 — `typescript-eslint` 8.72.0 → 8.72.1, a dev-dependency patch) and `dc1c09f` (merge of PR #68 — the Phase 5.0 baseline deliverables, `e61de4a`, into `main`). Neither commit touches program code, tests, or workflows, and neither addresses any finding in §4; the snapshot above and §4's "nothing addressed upstream" conclusion remain accurate for the state they describe. The corresponding claim in the `24164aa` commit message ("origin/main unchanged at 78b5d87") was true at snapshot time and is superseded by this addendum; commit messages are left unrewritten so the record stays honest.
+
 ## 2. Execution environment (re-verified, exact)
 
 | Tool | Version used | vs. repo pin |
@@ -157,7 +159,11 @@ Per the Phase 5.1 instruction §A2, each must end up with exactly one of: findin
 
 ## 7. New preflight observations (not in the Phase 5.0 register)
 
-1. **`fork-harness.yml` malformed PR branch filter** (line 34, exact bytes verified): `branches: ain]` — evidently a typo for `branches: [main]`. YAML parses it as the string `ain]`, which **matches no real branch, so the label-gated pull_request trigger can never fire**; in practice the fork suite runs only via nightly cron + manual dispatch. This defect predates Phase 5.1 (present at `78b5d87`) but was not flagged in the Phase 5.0 documents. Stage D should fix it alongside P5-04 (path-filtered PR enforcement), and P5-04's remediation is incomplete without it.
+1. **RETRACTED — the `fork-harness.yml` "malformed PR branch filter" observation (correction issued 2026-11-01, post-merge).** The original text below claimed the file contained `branches: ain]` ("line 34, exact bytes verified") and concluded the label-gated pull_request trigger could never fire. **That finding is false and is withdrawn.**
+   - **Byte-exact re-verification, three independent channels, all agreeing:** `git cat-file` object reads + `od -c` at both the preflight base and merged `origin/main`, and the raw file fetched from `raw.githubusercontent.com` at `main` — all show the literal filter `branches: [main]` at `fork-harness.yml:29`; `ci.yml:4` (push) and `ci.yml:7` (pull_request) are likewise byte-exact `[main]`.
+   - **Corroborating empirics:** the label-gated `pull_request` trigger has demonstrably fired in CI history (executed and skipped-but-present label-gated runs on PRs #57 and #66 — a skipped-but-present run is exactly the designed gate behavior; a broken branch filter would produce no `pull_request` runs at all).
+   - **Root cause of the false observation:** the delivery environment's plain-text output channel renders the token `[main]` as `ain]` in non-byte-exact views. The preflight trusted one such view as "exact bytes" and reproduced the corruption into this report (including the "line 34" citation — the filter is actually at line 29; the job-level label gate remains at line 47, `if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'fork-harness')`, with `pull_request: types: [labeled, synchronize]`). The corrupted quote was also written into the `24164aa` commit message; commit history is left unrewritten — this retraction and the PR description are the record of correction.
+   - **Net effect:** the trigger configuration is intact and functioning as designed (`pull_request` types `[labeled, synchronize]` + `branches: [main]`, nightly cron `0 3 * * *` + `workflow_dispatch`). **Nothing here instructs Stage D.** P5-04 stands exactly as defined in the register (PR-gating/policy hardening — a choice to make, not a defect to fix).
 2. **Fork flake** (§3.1): one non-deterministic failure of `inverted_orientation_pool_converts_memecoin` observed on the first pass of the session; 11 consecutive clean executions since. Recorded with evidence; root cause unconfirmed.
 
 ## 8. Branching / PR plan for Phase 5.1 (established at preflight)
