@@ -1,0 +1,150 @@
+# Phase 5.0 — Findings Register (graveyield-protocol @ `78b5d87`)
+
+> **Rules applied:** no finding was silently closed or downgraded; every pre-existing finding carries its original ID and source, and is assigned exactly one status of **Fixed and verified / Open / Accepted risk / Needs further investigation / Superseded**. "Fixed and verified" means the fix is evidenced either by execution in this assessment (test names cited) or by repo records plus a verification artifact; the evidence column says which. New findings from this assessment use the `P5-nn` prefix.
+>
+> Companion documents: [`PHASE5_BASELINE_REPORT.md`](PHASE5_BASELINE_REPORT.md), [`PHASE5_COVERAGE_MATRIX.md`](PHASE5_COVERAGE_MATRIX.md).
+
+---
+
+## 1. Findings from prior engagements (disposition table)
+
+### 1.1 Phase 0 baseline blockers (`docs/BASELINE_REPORT.md` §5)
+
+| ID | Original severity | Finding | Status | Evidence / verification |
+| --- | --- | --- | --- | --- |
+| B1 | Critical | Dead authority/oracle key custody on devnet (original deployment `5JiCVx…`/`HUyoG5…`) | **Superseded** (by DR-001 + NS-2 fresh deployment) → **re-opened as P5-A1** (below) | `docs/DECISIONS.md` (DR-001: `recoverable = no`); `docs/DEVNET.md` NS-2 block (new deployment + drill). The **NS-2 deployment's own key was later erased** (phase4-assessment §4 B1) — see P5-A1, status **Open**. |
+| B2 | Critical | Deployed devnet ELFs stale vs `main` | **Fixed and verified** | NS-2 fresh deployment from CI-built ELFs (run 40178764437, commit `d4661b4`, sha256-pinned), `docs/DEVNET.md`; intruder-rejection drill passed on live devnet (recorded in CHANGELOG top block). |
+| B3 | High | SDK divergence with stranded fixes (F1/F5/F7 only in salvor-bots) | **Fixed and verified** | NS-4 reunification; `sdk-sync-check` CI job enforces byte-equality; **re-verified during this assessment**: `diff -r sdk/src salvor-bots/src` → byte-identical (2026-11-01). sdk suite 122/122 executed here. |
+| B4 | High | CI gates zero tests | **Fixed and verified** | `ci.yml` `rust-host-tests` + `ts-build-and-test` jobs (read + executed locally this assessment: 205 Rust + 288 TS green); nightly `fork-harness.yml` exists — but see P5-04 (fork not PR-gated). |
+| B5 | High | salvor-bots fresh-clone failure + no CI (external repo) | **Open** (external repo track, NS-6) | phase4-assessment §1.2 notes salvor CI now exists; DX/workflow items remain salvor-side. Not verifiable from this repo. |
+| B6 | Medium | Single-key devnet governance (upgrade + config + both oracles on one key) | **Accepted risk** (devnet-only; "Track, don't fix, on devnet") | `BASELINE_REPORT.md` §2.6; mainnet plan = Squads v4 3-of-5 (`charter-invariants.md`); KEYS-003/GOV-001 track the mainnet side. |
+| B7 | Medium | ORACLE-003: no oracle operational runbook (custody, rotation, freshness, downtime) | **Open** (hard pre-mainnet blocker, 🟥) | `PRE_MAINNET_CHECKLIST.md` row open; NS-7 next step. Partially covered by indexer-repo custody docs per phase4 §4. |
+| B8 | Medium | Open CPI/adapter surface (scanner CLMM/Orca/PumpSwap/Meteora; vault CPI stubs; KEYS-001; KEYS-002) | **Open** (v1.1 feature line; fail-closed stubs re-verified: `adv_cpi03_registered_stubs_refuse_with_6007` executed) | `PRE_MAINNET_CHECKLIST.md` CPI-002…008; source markers §3 of the 5.0-A extraction (11 live `PRE-MAINNET-TODO` markers counted at this commit). |
+| B9 | Low | Doc/tooling debt (D3/D4/D5; no committed IDL; marker-audit CI; date drift) | **Open (residual)** — partially fixed | D4 fixed (NS-2 block); D3/date drift corrected in DEVNET.md; **still open**: D5 (`tests/README.md` still advertises `anchor test` over an empty suite — verified this assessment), NS-9 IDLs (still `--no-idl` in CI, no IDL committed), promised marker-audit CI job does not exist (D7). |
+
+### 1.2 Phase 0 documentation discrepancies (`docs/BASELINE_REPORT.md` §2.5)
+
+| ID | Finding | Status | Evidence |
+| --- | --- | --- | --- |
+| D1 | OPS.md §7 "wiped/de-pointed" wording misleading (config pointed at a dead key) | **Open** (wording; doc-correction candidate) | `OPS.md` §7 unchanged; now additionally outdated because the NS-2 key was also erased — see P5-A1. |
+| D2 | DEVNET.md claimed EXECUTED while ELFs were 4 commits stale | **Fixed and verified** (superseded by NS-2 re-deployment + runbook corrections) | `docs/DEVNET.md` NS-2 block documents provenance (CI run, commit, sha256). |
+| D3 | Devnet date off-by-one | **Fixed and verified** | corrected in DEVNET.md per CHANGELOG. |
+| D4 | Funding-check contradiction (2 SOL vs 6 SOL) | **Fixed and verified** | NS-2 block: lamport-exact guard + doc correction; `deploy_devnet.sh` now compares lamports exactly. |
+| D5 | `tests/README.md` "Run: `anchor test`" runs 0 tests | **Open** | verified live this assessment: root `tests/` = README only; `Anchor.toml` glob matches zero files. |
+| D6–D10 | Accuracy confirmations | **Closed (accurate)** | no action required. |
+
+### 1.3 Phase 12 adversarial battery findings ledger (`docs/ADVERSARY.md` §4)
+
+| ID | Finding | Status | Evidence / verification |
+| --- | --- | --- | --- |
+| ADV-F1 | Priority-fee unit mismatch (legacy `computeOperationalMaxLamportsPerCu`) | **Fixed and verified** (repo-side) | NS-4 backport; helper deprecated (`priorityFee.ts:24-36`); `priorityFeePlan.test.ts` (8 tests) executed; `priority-fee-policy.md` §4 records the hazard. |
+| ADV-F2 | No upper TVL bound (whale pools pass eligibility) | **Accepted risk** (pinned; policy question for the external audit) | `adv_el06_no_upper_tvl_bound_pinned` + ADV-EL-01/06 executed; coverage matrix ST-09. |
+| ADV-F3 | Fleet revalidation does not pre-read `PoolRegistry` (competing salvor → wasted simulation, chain refuses) | **Open** (fleet-side hardening; chain-level safety verified: `pause_gates_salvage_atomically_and_salvage_is_oneshot` executed) | ADVERSARY §4; coverage matrix ST-05. |
+| ADV-F5 | Expired fleet leases silently stealable (no fencing token; chain init-once is the backstop) | **Accepted risk** (pinned; single-process documented non-goal) | ADV-FLEET F5 case; phase4 B6 tracks the fleet side. |
+| ADV-F8 | Decoders tolerate trailing account bytes | **Accepted risk** (pinned; Anchor-compatible reserved-space trade-off; audit to confirm) | ADV-LP-02; note `ed25519-dalek`-style dual-version evidence not applicable here. |
+| ADV-F9 | Unknown error codes decode to `undefined` (fail-open for consumers) | **Accepted risk** (pinned with documented consumer obligation) | ADV-FT-02; `sdk/src/errors.ts` contract. |
+| GOV gap | `price_collapse_bps > 10_000` (6006) and the whole `sweep_stale_anchor` handler untested at handler level | **Open** (test gap — re-verified true this assessment) | coverage matrix AU-05 / gap G3; **P5-03** below tracks it. |
+
+### 1.4 Phase 4 session-assessment blockers (`docs/assessments/phase4-assessment.md` §4) — *working record, not canon*
+
+| ID | Class | Finding | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| P4-B1 | Critical | **NS-2 deployer key erased** (2026-10-26 workspace reset; key was config authority + both oracles + upgrade authority) | **Open** — owner decision D1 required (custody vs DR-001-style refresh) | recorded in phase3/phase4 assessments + indexer `ORACLE_PIPELINE.md` §6.4; consequences: `update_protocol_config` (oracle registration), attestation-gated devnet writes, upgrades, pause/unpause all impossible on the live NS-2 deployment until resolved. This assessment **cannot** re-verify key custody on-chain (no key material); status carried forward unchanged. |
+| P4-B2 | Critical | No registered oracle keypair (subsumed by P4-B1) | **Open** | same record. |
+| P4-B3 | Integration | Scout→executor transport missing | **Open** (fleet-side; required before fleet operation) | phase4 §4. |
+| P4-B4 | Integration | Production attestation source missing (`LocalAttestationSource` is test/devnet-drill only) | **Open** | phase4 §4. |
+| P4-B5 | Integration | `deriveLastSwapV4` robustness (ALT/version-1 tx) caps attestation yield (11/12 pools in Phase 3 snapshot) | **Open** (protocol-side fix deferred; W4) | phase4 §4; SDK `lastSwapAttestation.ts` code confirms the documented derivation constraints. |
+| P4-B6 | Integration | Shared `FleetStore` lease fencing (ADV-F5) | **Open** (fleet-side) | phase4 §4. |
+
+### 1.5 Security-alert triage (`docs/SECURITY_ALERT_TRIAGE.md`) — re-verified against `Cargo.lock` 2026-11-01
+
+| Alert | Package | Original disposition | **Status after the anchor 1.2.2 / agave 3.1.x migration (re-verified)** |
+| --- | --- | --- | --- |
+| #1 | npm `bigint-buffer ≤1.1.5` (HIGH) | tolerable_risk (unreachable; no upstream fix) | **Accepted risk** — unchanged; `pnpm audit` re-run today shows it as 1 of 2 findings; reachability analysis stands (`sdk` never calls the vulnerable signature; spl-token unpack validates length first). |
+| #2 | rust `atty` (LOW) | accepted (dev-dep chain) | **Fixed and verified** — crate absent from `Cargo.lock` post-migration. |
+| #3 | rust `ed25519-dalek <2` (MEDIUM) | accepted; "revisit with the anchor stack upgrade" | **Accepted risk (evidence refreshed)** — revisit condition **met and resolved**: 1.0.1 persists but its only carrier is `agave-precompiles ← solana-runtime ← solana-program-test` (dev-dependency of `grave-vault`, fork-harness test binaries only; `cargo tree -i` evidence 2026-11-01). Not compiled into any deployed ELF. Unfixable locally (upstream agave chain). |
+| #4 | rust `curve25519-dalek <4.1.3` (LOW) | accepted | **Accepted risk (evidence refreshed)** — 3.2.0 persists, same single dev-only carrier (via `ed25519-dalek 1.0.1`). |
+| #5/#6/#8 | rust `rustls-webpki` (LOW×2 + HIGH) | accepted; revisit at upgrade | **Fixed and verified** — only 0.103.16 (≥ 0.103.13) remains in the lock. |
+| #7 | rust `rand 0.7.3` (LOW) | accepted | **Accepted risk (evidence refreshed)** — 0.7.3 persists, same dev-only carrier. |
+
+### 1.6 Other recorded findings / incidents
+
+| Origin | Finding | Status | Evidence |
+| --- | --- | --- | --- |
+| Aikido SAST (Phase 11) | CWE-78 arbitrary-execution sink in `scripts/no_uring.c` | **Fixed and verified** | fix present (argv validated against a single compile-time constant; header comment verified this assessment); `ops/scenarios.ts` shell-spawn sink removed (`hasOnPath` walks PATH in Node). |
+| CHANGELOG Phase 12 | `sha2` multi-instance supply-chain incident (PR #44 walk-back to the 0.10 line) | **Fixed and verified at the time** → **re-opened as P5-02** (post-migration observation) | Phase 12 record; today's lock has 0.9.9/0.10.9/0.11.1 — see P5-02. |
+| CHANGELOG Phase 12 | `anchor-lang` version skew incident (PR #45 walk-back to pinned) | **Fixed and verified** | `anchor-lang` resolves to 1.2.2 uniformly (lock + `rust-toolchain.toml`); Dependabot ignores majors. |
+| CHANGELOG Phase 12 | `invalidate_anchor` re-invalidation pollutes audit trail | **Fixed and verified** | refuses-first revert (6017) in source; host predicate tests executed; fork battery green. |
+| CHANGELOG Phase 12 | emergency-pause no-op toggles | **Fixed and verified** (behavior) — but see **P5-03** (test pin missing) | refuses-first in both `emergency_pause.rs`. |
+| CHANGELOG Phase 12 | anchor sweep window liveness-griefing primitive (zero/one-epoch window) | **Fixed and verified** | `MIN_ANCHOR_STALENESS_SECONDS` floor at both write paths + defensive read clamp; `staleness_floor_keeps_phase2_window_open` executed; `adv_fk02` fork test executed. |
+| CHANGELOG Phase 6 | C1/C2 precompile wire contract (attestations could never succeed end-to-end) | **Fixed and verified** | runtime layout pinned fail-closed; `attestationVectors.test.ts` (11) executed; full lifecycle fork test (real ed25519 precompile path) executed here. |
+| CHANGELOG Phase 2.1 | Raydium V4 withdraw CPI could never have succeeded (3 latent defects) | **Fixed and verified** | `raydium_v4_fork` 10/10 executed against real mainnet bytecode this assessment. |
+| CHANGELOG Phase 3 | CPI-010 hardcoded orientation; SLIP-001 dead slippage cap; N1/CPI-011 route integrity | **Fixed and verified** | all three fork suites (`inverted_orientation_pool_converts_memecoin`, `zero_floor_rejected_by_slippage_ceiling`, `hijacked_route_destination_rejected`, `route_referencing_protected_accounts_rejected`) executed here. |
+| CHANGELOG Phase 1.4 | cert-PDA init-once brick (expired cert permanently blocked salvage) | **Fixed and verified** | `init_if_needed` + 6034 gate + `reissue_generation`; fork `cert_reissue_gate_rejects_while_valid` executed. |
+| `PROTOCOL_SPEC.md` §8 discrepancy ledger (items 1–15) | doc/code drift items | **Fixed** (per ledger; sampled re-verification during 5.0-A extraction found no contradicting evidence) | ledger itself; canonical docs updated. |
+| `docs/error_codes.md` | Reserved codes 7006/7008/7012/7014 never raised in v1.0 | **Accepted risk** (documented design; each maps to a documented enforcement boundary) | charter-invariants §4, priority-fee-policy §5, sweep_dust D6 policy. |
+| `technical-documentation.md` §10 | "Who can supply the LP being withdrawn?" — core product/economic question | **Needs further investigation** | explicit open question in the technical documentation; no code mechanism forces redemption of non-participating holders' LP (salvor burns only `salvor_lp_amount`; remaining LP stays with its holders; claim math pays only snapshot holders). Not a defect; a product-model decision to record before mainnet. |
+| `technical-documentation.md` §10 | C3 TVL unit consistency (`min_tvl_lamports` naming vs WSOL-side TVL) | **Needs further investigation** | naming drift documented; economics consistent in executed tests (C3 boundary tests pass); recommend a one-line spec clarification. |
+| `technical-documentation.md:134` | C4 fixed raw-unit dust threshold (residual small supply passes) | **Accepted risk** (known limitation; KEYS-002 tracks) | checklist row open. |
+
+---
+
+## 2. New findings from this Phase 5.0 assessment
+
+| ID | Severity | Finding | Evidence | Status | Recommended remediation |
+| --- | --- | --- | --- | --- | --- |
+| **P5-01** | Medium (dev-tooling) | **`pnpm audit` = 2 findings**: npm `minimatch <11.0.1` (MODERATE, GHSA-g3hv-75wg-m249 — globparts amplification DoS) via `eslint@10.13.0` (dev tooling only), in addition to the accepted `bigint-buffer`. The advisory post-dates the repo's Phase 12 dependency pass; Dependabot alerts are disabled on this repo, so nothing else will flag it. | `pnpm audit` run 2026-11-01 (paths: `eslint > @eslint/config-array > minimatch@10.2.6`, `eslint > minimatch@10.2.6`) | **Open** | Add `minimatch: ">=11.0.1"` + `brace-expansion: "^5.0.12"` (+ `minimatch@11` sub-override) to `pnpm.overrides` — exactly the fix already applied in the console repo; re-run `pnpm -r test`/`typecheck` after. Dev-only reachability, zero runtime impact. |
+| **P5-02** | Low | **sha2 multi-instance tree returned after the agave 3.1.x migration**: `Cargo.lock` now carries sha2 0.9.9 + 0.10.9 + 0.11.1 (carriers: agave-precompiles chain and k256/secp256k1 chain — all dev-side; the Merkle core line remains 0.10.9 via `solana-sha256-hasher`'s `sha2` feature + the snapshotter, per `dependabot.yml:28-37`). The Phase 12 "single crypto core" property is no longer literally true. Merkle determinism itself is unaffected (byte-identity proptests vs the snapshotter pass — executed in this assessment). | `awk` over `Cargo.lock` + `cargo tree -i sha2@0.9.9 / sha2@0.11.1` (2026-11-01) | **Needs further investigation** | Confirm the byte-identity pin tests reference the *agave hasher* path the ELF actually uses; re-word the dependabot comment; if a literal single-instance property is still desired, it must be enforced against the agave chain upstream (not locally fixable). |
+| **P5-03** | Low | Scanner handler-level test gap (documented GOV gap, still true and now precisely scoped): no test drives `update_protocol_config` handler reverts for `price_collapse_bps > 10_000` (6006) or any `sweep_stale_anchor` handler path (window-not-elapsed close, writer mismatch). | `docs/ADVERSARY.md` §4 + this assessment's test inventory (no matching test IDs anywhere) | **Open** | Add host handler tests (Anchor `program_test` host style or plain handler fns) for the two paths. |
+| **P5-04** | Medium-low (process) | **Fork suites are not PR-gated**: `ci.yml` runs host + TS only; the 50 fork tests run nightly/label/dispatch. A PR that breaks a fork-only path (e.g. CPI account ordering) passes CI until the nightly run. The repo has the `fork-harness` label machinery already. | `ci.yml` (no fork job) vs `fork-harness.yml:47` (label gate) | **Open** | Recommend: run the fork harness on PRs that touch `programs/**` or `sdk/**` (path-filtered), keeping the nightly as the catch-all. Requires runner budget decision (build-sbf ~10 min + ~7 MB fixtures). |
+| **P5-05** | Low | **Charter invariant "claims remain live during pause" is pinned by no test.** Code-verified true this assessment (`claim_lp_proceeds.rs` contains no pause check — intentional). A future refactor adding a pause gate to claims would violate the Charter silently; no test would fail. | `claim_lp_proceeds.rs:1-35` (header states the invariant) + full test inventory grep | **Open** | Add one fork case: pause the protocol, execute a claim successfully, assert the event + lamport movement. |
+| **P5-06** | Low | **Per-claim floor-rounding residual dust is undocumented and unpinned**: each claim floors `bucket × balance / supply`, so ≤ (N−1) lamports can remain in `lp_holder_pool_vault` after all N holders claim — permanently (the vault is unsweepable by Charter). Not a loss vector (it *cannot* be swept — that's the invariant), but the residual is neither bounded in docs nor pinned by a test (`claims_drain_lp_holder_pool_exactly` uses an exactly-divisible recipe). | arithmetic of `claim_lp_proceeds.rs:137-144`; fork recipe inspection | **Open** | Document the ≤ N−1 bound in `PROTOCOL_SPEC.md` §6.4 + add a fork case with a non-divisible recipe asserting `vault_lamports − rent == Σ floor residuals ≤ N−1`. |
+| **P5-07** | Medium-low (process) | **CI supply-chain surface**: Solana CLI + platform-tools are installed in CI via `curl \| sh` / direct tarball download with **no checksum verification**; GitHub actions are pinned by major tag (`@v7`, `@v2`) not SHA; CodeQL analyzes JS/TS only and is inactive while the repo is private; branch protection config is documented but **not enforced** (free tier). None of these are protocol defects; together they define the trusted path that produces the deployed ELFs (DR-001 provenance relies on it). | `ci.yml:149-152,216-226`, `fork-harness.yml:88-91`, `codeql.yml`, `.github/branch-protection.md` | **Open** | Pre-mainnet hardening: SHA-pin actions (Dependabot already watches the ecosystem), checksum-verify or self-host the toolchain fetch, enable CodeQL on flip-public, activate branch protection when the tier allows. |
+| **P5-08** | Info | **ELF provenance artifacts from this assessment** (CI-equivalent pinned toolchain): `grave_scanner.so` `d47f315a…7b1473`, `grave_vault.so` `33cfd453…d15076be3` (full hashes in baseline report §3). Available for cross-check against the NS-2 deployed ELFs (run 40178764437, commit `d4661b4`) — note the assessed HEAD (`78b5d87`) is 1 docs commit ahead of the deployed build commit, so byte-equality is not expected; toolchain-equality is. | sha256sum (this assessment) | **Record only** | optional: verify deployed-onchain ELF hashes vs CI artifacts at the same commit as part of the P5-A1 redeployment decision. |
+| **P5-09** | Info | Fuzz layer is proptest-only (15 properties, 1 committed regression seed). No cargo-fuzz/libfuzzer targets and no TS property testing exist. Documented Phase 7 design decision; adequate for current surface size; listed so the external audit scope decision is conscious. | grep-verified absence; `tests/README.md` | **Accepted risk** (documented) | optional post-5.1: cargo-fuzz target for `verify_ed25519_offsets_at` + `slot_hash_lookup` (the two arbitrary-bytes surfaces). |
+| **P5-10** | Info | Real Jupiter v6 aggregator is never exercised (test-only stub at the pinned program ID — `technical-documentation.md:489`). All route-integrity guarantees are enforced pre-CPI by vetting, so the stub does not weaken the vetting tests, but quote-API semantics (route data shape) remain unvalidated against the real aggregator. | `jupiter_v6_stub` + docs | **Open** (documented; mainnet-relevant) | tracked by CPI-011-adjacent work; an end-to-end devnet salvage with the real Jupiter v6 remains the only full proof (currently impossible — P5-A1). |
+
+### Cross-cutting dependency status
+
+- **P5-A1** (carried from phase4 B1/B2, **Critical, Open**): the live NS-2 devnet deployment has no usable authority/oracle key custody. Until the owner decides (custody restoration vs DR-001-style re-deployment), every attestation-gated on-chain write, oracle registration, config update, upgrade, and pause/unpause is impossible on live devnet — meaning **the one thing this repo's fork tests cannot prove (real-cluster end-to-end salvage with real Jupiter v6) remains blocked**. This is the single highest-priority item and it is an owner decision, not a code change.
+
+---
+
+## 3. Explicitly reviewed and sound (no change, verified this assessment)
+
+- The nine-state / fail-closed attestation verifier and its arbitrary-bytes property tests (executed).
+- Merkle producer↔verifier byte-contract incl. promotion convention and regression seed (executed).
+- Settlement conservation (split, ceiling, remainder routing) — host + property + fork (executed).
+- Init-once replay defenses: anchor, cert, launch price, registry, receipt, claim record (executed at fork layer).
+- Supply pin (7018) and snapshotter supply-completeness gates (executed).
+- Route-account vetting and CPI program pinning, both wire-format (SDK) and on-chain (fork) (executed).
+- Bounded config writes + hard floors (staleness, TTL, share ceiling) (executed).
+- Sealed-artifact integrity gates (snapshotter + ops mirrors) (executed).
+- SDK byte-identity with salvor-bots (diff-verified).
+- Refuses-first discipline (pause, invalidation) in source.
+
+## 4. Prioritized implementation plan (for Stage 5.1 and beyond)
+
+**P0 — owner decision (blocks live-chain verification of everything else):**
+1. **P5-A1**: decide devnet key custody (restore vs DR-001-style fresh redeployment). Everything attestation-gated on live devnet waits on this.
+
+**P1 — quick, high-value, no-semantic-risk (recommend as the first 5.1 code PRs):**
+2. **P5-01**: patch `minimatch` via `pnpm.overrides` (restore the zero-findings posture except the documented accepted bigint-buffer).
+3. **P5-05**: fork test pinning "claims live during pause" (one case; protects a Charter invariant against silent regression).
+4. **P5-06**: document the ≤ N−1 residual-dust bound + non-divisible fork recipe (doc + one case).
+5. **P5-03**: scanner handler tests for 6006-bound + `sweep_stale_anchor` paths (closes the documented GOV gap).
+6. **P5-02**: sha2 pin-investigation follow-up (confirm which hasher instance the ELF uses; re-word dependabot comment).
+
+**P2 — process hardening (no protocol semantics):**
+7. **P5-04**: path-filtered fork-harness job on PRs touching `programs/**` / `sdk/**`.
+8. **P5-07**: CI supply-chain hardening (SHA-pin actions, checksum-verified toolchain fetch, CodeQL on flip-public, branch-protection activation when possible).
+9. D5/B9 residual: fix `tests/README.md` / `Anchor.toml` misleading `anchor test` story (either implement the harness or document its absence); NS-9 IDL generation as its own workstream.
+
+**P3 — pre-mainnet tracked items (already open in the checklist; not Phase 5 scope creep):**
+10. ORACLE-003 (oracle runbook), KEYS-003 (mainnet custody), GOV-001 (timelock wiring-or-documentation), LOCKER-002 (off-chain locker cross-check), CPI-002…008 + KEYS-001/KEYS-002 (v1.1 adapter surface), ADV-F2/F3/F5/F8/F9 dispositions at the Phase 13 external audit.
+
+**Explicitly out of scope for 5.1 code changes (Stage 5.0 restrictions honored):** no protocol economics, account layouts, instruction behavior, or architecture was modified in this stage; the docs above are the only artifacts created.
+
+## 5. Stop-point statement
+
+This register completes the Phase 5.0 Definition of Done. **Stage 5.0 stops here.** No further stages should begin until the owner has reviewed the P0/P1 items above.
