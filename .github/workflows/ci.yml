@@ -1,5 +1,12 @@
 name: CI
 
+# Supply-chain posture (P5-07, Stage B): every third-party action is pinned
+# to a full commit SHA (version noted in a trailing comment; Dependabot's
+# github-actions ecosystem keeps the pairs current), and the platform-tools
+# tarball — the toolchain that produces the deployed ELFs — is sha256-verified
+# before extraction. The remaining unverified fetch is the Solana CLI
+# installer (release.anza.xyz publishes no signed checksums); documented as a
+# known limitation in the Phase 5.1 register rather than silently accepted.
 on:
   push:
     branches: [main]
@@ -34,8 +41,8 @@ jobs:
     name: cargo fmt --check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt
@@ -45,12 +52,12 @@ jobs:
     name: cargo clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --all-targets -- -D warnings
 
   # Baseline audit (Phase 0, blocker B4 / NS-5): the repo had 668 passing
@@ -62,11 +69,11 @@ jobs:
     name: cargo test (host)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: grave-scanner (lib)
         run: cargo test -p grave-scanner --lib
       - name: grave-vault (lib)
@@ -78,13 +85,13 @@ jobs:
     name: pnpm build + test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Ordering note: setup-node MUST come before pnpm/action-setup@v6
       # (see ts-typecheck below).
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
       # Includes the SDK's live-devnet smoke tests: read-only RPC calls
@@ -111,8 +118,8 @@ jobs:
     name: sdk sync (salvor-bots mirror)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: GraveYield/salvor-bots
           ref: main
@@ -130,11 +137,11 @@ jobs:
     name: anchor build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Node + pnpm are installed here (not because anchor needs them) so
       # that scripts/check-toolchain.sh below can verify ALL five pinned
       # toolchains — solana, anchor, rust, node, pnpm — in the single job
@@ -142,10 +149,10 @@ jobs:
       # steps the toolchain check would fail on the missing JS side; with
       # them, a drift in ANY pin (rust-toolchain.toml, packageManager,
       # NODE_VERSION, SOLANA_VERSION, ANCHOR_VERSION) fails this job.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Install Solana CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
@@ -218,6 +225,9 @@ jobs:
           set -euo pipefail
           curl -sSL -o /tmp/platform-tools.tar.bz2 \
             "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+          # P5-07: the tarball is hash-pinned so the platform-tools toolchain
+          # (which produces the deployed ELFs) cannot be swapped silently.
+          echo "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e  /tmp/platform-tools.tar.bz2" | sha256sum -c -
           CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
           rm -rf "$CACHE_DEST"
           mkdir -p "$CACHE_DEST"
@@ -242,7 +252,7 @@ jobs:
         # toolchain (the baseline report's "CI-equivalent pinned toolchain"
         # provenance requirement, made reproducible by uploading the
         # artifacts instead of rebuilding outside CI).
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: program-elvs
           path: target/deploy/*.so
@@ -250,7 +260,7 @@ jobs:
           retention-days: 7
       - name: Upload anchor build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: anchor-build-log
           path: /tmp/anchor-build.log
@@ -261,19 +271,19 @@ jobs:
     name: pnpm typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # pnpm/action-setup@v6 requires Node.js to already be installed
       # (upstream removed the bundled Node in v6). setup-node MUST come
       # first. The previous floating-tag failure at install time was this
       # ordering, not a regression in v6.0.7/v6.0.8.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       # pnpm/action-setup@v6 auto-detects pnpm version from the
       # `packageManager` field in package.json (pnpm@9.12.0). No explicit
       # `version:` input — that field is what we want to be the single
       # source of truth for the pnpm pin anyway.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       # pnpm-lock.yaml IS committed at the repo root, so the install is
       # frozen (reproducible builds). If you intentionally bump deps,
       # regenerate the lockfile in the same PR.
@@ -290,11 +300,11 @@ jobs:
     name: ts lint + format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm fmt:ts:check
@@ -303,7 +313,7 @@ jobs:
     name: terminology lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Forbidden vocabulary check
         run: bash scripts/terminology-lint.sh
 
@@ -311,6 +321,6 @@ jobs:
     name: doc link integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Relative markdown link check
         run: bash scripts/doc-links-lint.sh

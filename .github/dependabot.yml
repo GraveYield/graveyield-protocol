@@ -25,13 +25,22 @@ updates:
     # anchor-cli and Anchor.toml. Ignore the whole family until the next
     # deliberate migration.
     #
-    # sha2 is pinned for the same class of reason: the on-chain hasher's
-    # `sha2` feature resolves the 0.10 line, and the snapshotter's direct
-    # dependency must reuse that SAME lockfile instance (single crypto
-    # core in the tree; byte-identity is test-pinned against
-    # `grave_vault::merkle`). Dependabot files a 0.x minor (0.10 -> 0.11)
-    # as a semver-major, so the major rule covers it; 0.10.x patches keep
-    # flowing.
+    # sha2 is pinned for the same class of reason, stated precisely (P5-02,
+    # Stage B investigation): the deployed ELFs contain NO sha2 crate — the
+    # on-chain SHA-256 is the runtime `sol_sha256` syscall (verified by
+    # cargo-tree reachability + the ELF's single syscall import). Host-side,
+    # three sha2 instances exist in the lock (0.9.9 / 0.10.9 / 0.11.1):
+    # 0.10.9 is the only reachable instance that matters — the snapshotter's
+    # direct dependency (the off-chain Merkle producer) MUST reuse the SAME
+    # lockfile instance the host-test hasher resolves, because the
+    # byte-identity is test-pinned against `grave_vault::merkle` and the
+    # fork claim tests prove the syscall accepts 0.10.9-produced roots
+    # end-to-end. The 0.9.9 and 0.11.1 instances are host/toolchain-graph
+    # only (proc-macros and dead lockfile weight — their carriers are not
+    # reachable from any workspace build graph), so a multi-instance tree is
+    # a hygiene observation, not a crypto-core split. Dependabot files a
+    # 0.x minor (0.10 -> 0.11) as a semver-major, so the major rule covers
+    # it; 0.10.x patches keep flowing.
     ignore:
       - dependency-name: "anchor-*"
       - dependency-name: "sha2"

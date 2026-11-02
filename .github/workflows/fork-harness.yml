@@ -1,16 +1,25 @@
-# fork-harness.yml — nightly + label-gated execution of the seven
-# solana-program-test fork suites under programs/grave-vault/tests/.
+# fork-harness.yml — the seven solana-program-test fork suites under
+# programs/grave-vault/tests/.
 #
 # Baseline audit (Phase 0, blocker B4 / NS-5): the fork suites are the ONLY
 # tests that exercise the programs against REAL mainnet state (Raydium V4
 # AmmInfo/MarketState layouts, Jupiter v6 routing, scanner windows), yet
 # pre-audit they were compile-validated at best — never run in CI, and the
-# CHANGELOG admits the post-rollback suites were only build-checked. This
-# workflow closes that gap without paying its cost on every PR:
+# CHANGELOG admits the post-rollback suites were only build-checked.
 #
-#   - nightly cron (03:00 UTC, off-peak)
+# Trigger policy (P5-04, Stage B):
+#   - nightly cron (03:00 UTC, off-peak) — the catch-all
 #   - workflow_dispatch (manual runs)
-#   - pull_request runs ONLY when the PR carries the `fork-harness` label
+#   - pull_request runs AUTOMATICALLY when the diff touches fork-relevant
+#     paths (programs/**, snapshotter/**, sdk/**, workspace manifests,
+#     rust-toolchain.toml, Anchor.toml, the harness scripts, this workflow)
+#   - the `fork-harness` label remains a manual escape hatch for ANY PR
+#     (including docs-only changes), preserved from the pre-Stage-B policy
+#
+# The path/label decision is made by a cheap `changes` job so a skipped
+# fork run is VISIBLE as a skipped job (a docs-only PR never pays the
+# build-sbf + fixture cost, and a reviewer can see the harness was
+# deliberately not run rather than silently absent).
 #
 # The heavy work is `scripts/build_fork_harness.sh`: build both programs +
 # the Jupiter v6 stub with cargo build-sbf, fetch real mainnet fixtures
@@ -25,7 +34,9 @@ on:
     - cron: "0 3 * * *"
   workflow_dispatch:
   pull_request:
-    types: [labeled, synchronize]
+    # opened/reopened/synchronize drive the automatic path filter; `labeled`
+    # keeps the manual escape hatch for PRs the path filter excludes.
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
 
 permissions:
@@ -41,19 +52,50 @@ env:
   NODE_VERSION: 24
 
 jobs:
+  changes:
+    name: detect fork-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      fork_relevant: ${{ steps.filter.outputs.fork_relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history so the base sha is always present
+      - id: filter
+        run: |
+          set -euo pipefail
+          # Nightly and manual runs always execute the full harness.
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "fork_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          CHANGED="$(git diff --name-only "$BASE...HEAD" || true)"
+          echo "Changed files vs $BASE:"
+          echo "$CHANGED"
+          if printf '%s\n' "$CHANGED" | grep -qE '(^programs/|^snapshotter/|^sdk/|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^Anchor\.toml$|^scripts/build_fork_harness\.sh$|^scripts/fetch_v4_fork_fixtures\.mjs$|^\.github/workflows/fork-harness\.yml$)'; then
+            echo "fork_relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fork_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fork-harness:
     name: build + fetch + run 7 fork suites
-    # Schedule/dispatch always run; PRs only when labeled `fork-harness`.
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'fork-harness')
+    needs: changes
+    # Run when fork-relevant paths changed, or when a PR is manually
+    # labeled `fork-harness` (escape hatch). Schedule/dispatch always run.
+    if: >-
+      needs.changes.outputs.fork_relevant == 'true' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'fork-harness'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install Solana CLI
@@ -78,6 +120,9 @@ jobs:
           set -euo pipefail
           curl -sSL -o /tmp/platform-tools.tar.bz2 \
             "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+          # P5-07: the tarball is hash-pinned so the platform-tools toolchain
+          # (which produces the deployed ELFs) cannot be swapped silently.
+          echo "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e  /tmp/platform-tools.tar.bz2" | sha256sum -c -
           CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
           rm -rf "$CACHE_DEST"
           mkdir -p "$CACHE_DEST"
@@ -94,7 +139,7 @@ jobs:
           bash scripts/build_fork_harness.sh 2>&1 | tee /tmp/fork-harness.log
       - name: Upload harness log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fork-harness-log
           path: /tmp/fork-harness.log
