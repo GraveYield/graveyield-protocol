@@ -91,7 +91,9 @@ fn uncx_locker_id() -> Pubkey {
 
 // Error codes asserted by the tests (grave-scanner errors.rs).
 const ERR_UNAUTHORIZED: u32 = 6000;
+const ERR_INVARIANT_VIOLATION: u32 = 6006;
 const ERR_PROTOCOL_PAUSED: u32 = 6010;
+const ERR_ANCHOR_NOT_STALE: u32 = 6018;
 const ERR_ATTESTATION_ORACLE_MISMATCH: u32 = 6026;
 const ERR_ATTESTATION_TIMESTAMP_INVALID: u32 = 6028;
 const ERR_ATTESTATION_STALE: u32 = 6029;
@@ -106,8 +108,10 @@ const AMM_PC_VAULT_OFF: usize = 368;
 const AMM_COIN_MINT_OFF: usize = 400;
 const AMM_PC_MINT_OFF: usize = 432;
 
-// Base transaction fee in program-test (one signature) — informational.
-const _FEE: u64 = 5_000;
+// Base transaction fee in program-test (one signature) — load-bearing for
+// the lamport-exact assertions in the sweep test (failed transactions pay
+// it too).
+const FEE: u64 = 5_000;
 
 // The C1 message's last-swap timestamp is anchored IN THE PAST so the
 // inactivity criterion (threshold 1s in this harness) is comfortably met
@@ -1290,4 +1294,453 @@ async fn phase2_epoch_confirmation_boundary() {
             .await
             .expect("two epochs must certify");
     }
+}
+
+// =====================================================================
+// P5-03 / P5-11 pins — config bounds, sweep window/writer, no-op toggles
+//
+// These drive the REAL scanner BPF through the full Anchor entrypoint:
+// constraint-layer rejections (PDA binding, writer binding, authority
+// ownership) fire before the handler; handler rejections (config bounds,
+// staleness window, no-op toggle) fire inside it. The register
+// distinguishes these instruction/context-level tests from the
+// handler-level host tests in
+// programs/grave-scanner/src/instructions/{update_protocol_config,sweep_stale_anchor}.rs.
+// =====================================================================
+
+/// `update_protocol_config` with ONLY `price_collapse_bps` set (every other
+/// Option field = None). Wire order mirrors `UpdateProtocolConfigParams`.
+fn scanner_update_collapse_bps_ix(bps: u16, authority: &Pubkey) -> Instruction {
+    let mut data = anchor_disc("update_protocol_config").to_vec();
+    data.push(0); // inactivity_seconds: None
+    data.push(1); // price_collapse_bps: Some
+    data.extend_from_slice(&bps.to_le_bytes());
+    data.push(0); // min_tvl_lamports: None
+    data.push(0); // anchor_staleness_seconds: None
+    data.push(0); // lp_burn_dust_threshold: None
+    data.push(0); // cert_ttl_seconds: None
+    data.push(0); // activity_oracle: None
+    data.push(0); // launch_price_oracle: None
+    Instruction::new_with_bytes(
+        scanner_id(),
+        &data,
+        vec![
+            AccountMeta::new(scanner_config_pda(), false),
+            AccountMeta::new_readonly(*authority, true),
+        ],
+    )
+}
+
+/// `sweep_stale_anchor`: (protocol_config, eligibility_anchor,
+/// anchor_writer, caller) — the writer slot is where rent lands on close.
+fn sweep_stale_anchor_ix(
+    anchor_pda: Pubkey,
+    anchor_writer: &Pubkey,
+    caller: &Pubkey,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        scanner_id(),
+        &anchor_disc("sweep_stale_anchor"),
+        vec![
+            AccountMeta::new_readonly(scanner_config_pda(), false),
+            AccountMeta::new(anchor_pda, false),
+            AccountMeta::new(*anchor_writer, false),
+            AccountMeta::new_readonly(*caller, true),
+        ],
+    )
+}
+
+/// Reads the scanner config PDA.
+async fn scanner_config(client: &mut BanksClient) -> grave_scanner::state::ProtocolConfig {
+    grave_scanner::state::ProtocolConfig::try_deserialize(
+        &mut &acct(client, &scanner_config_pda()).await.data[..],
+    )
+    .expect("scanner config must deserialize")
+}
+
+/// Account-or-None lookup (an account closed by `close = …` comes back as
+/// None; an account untouched by a reverted instruction stays Some).
+async fn maybe_acct(client: &mut BanksClient, k: &Pubkey) -> Option<Account> {
+    client.get_account(*k).await.unwrap()
+}
+
+/// Reads the eligibility anchor PDA.
+async fn read_anchor(
+    client: &mut BanksClient,
+    pda: &Pubkey,
+) -> grave_scanner::state::EligibilityAnchor {
+    grave_scanner::state::EligibilityAnchor::try_deserialize(&mut &acct(client, pda).await.data[..])
+        .expect("eligibility anchor must deserialize")
+}
+
+/// One honest Phase 1 run against the fork pool: returns the fresh
+/// anchor's `first_eligible_epoch`.
+async fn run_phase1(client: &mut BanksClient, boot: &Boot) -> u64 {
+    let (slot, _, ts) = read_clock(client).await;
+    let (hash_slot, hash) = newest_slot_hash(client, slot).await;
+    let msg = c1_msg(
+        &RAYDIUM_V4_PROGRAM_ID,
+        &boot.env.pool,
+        ts - INACTIVITY_MARGIN_SECONDS,
+        hash_slot,
+        &hash,
+    );
+    let precompile = attestation_ix(&boot.oracle, &msg, 72, 1);
+    let eval = evaluate_pool_ix(&boot.env, &msg, false, &boot.salvor.pubkey());
+    send(client, &boot.salvor, &[precompile, eval])
+        .await
+        .expect("phase 1 must succeed");
+    read_anchor(client, &boot.env.anchor_pda)
+        .await
+        .first_eligible_epoch
+}
+
+/// P5-03 (instruction/context level): the `price_collapse_bps` bound is
+/// enforced by the real BPF handler (6006), the 10_000 boundary is
+/// inclusive, and a rejected update leaves the config PDA with every
+/// field unchanged (transaction-atomic state preservation).
+#[tokio::test]
+async fn scanner_config_bounds_reject_and_preserve_state() {
+    let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
+        return;
+    };
+    let (mut ctx, boot) = start(boot).await;
+    let slot0 = read_clock(&mut ctx.banks_client).await.0;
+    ctx.warp_to_slot(slot0 + 1).expect("warp to usable slot");
+
+    let before = scanner_config(&mut ctx.banks_client).await;
+    assert_eq!(before.price_collapse_bps, 5_000, "harness boots 5_000");
+
+    // Above the bound: the constraint layer passes (right PDA, right
+    // authority signer), so 6006 comes from the HANDLER.
+    let err = send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_update_collapse_bps_ix(
+            10_001,
+            &boot.oracle.pubkey(),
+        )],
+    )
+    .await
+    .expect_err("price_collapse_bps 10_001 must revert 6006");
+    expect_custom(err, ERR_INVARIANT_VIOLATION, "config bound 10_001");
+
+    // The rejected instruction left the config PDA unchanged: same value,
+    // same authority, every other field byte-for-byte the same.
+    let after = scanner_config(&mut ctx.banks_client).await;
+    assert_eq!(
+        after.price_collapse_bps, 5_000,
+        "rejected write must not land"
+    );
+    assert_eq!(after.authority, before.authority);
+    assert_eq!(after.inactivity_seconds, before.inactivity_seconds);
+    assert_eq!(after.min_tvl_lamports, before.min_tvl_lamports);
+    assert_eq!(
+        after.anchor_staleness_seconds,
+        before.anchor_staleness_seconds
+    );
+    assert_eq!(after.lp_burn_dust_threshold, before.lp_burn_dust_threshold);
+    assert_eq!(after.cert_ttl_seconds, before.cert_ttl_seconds);
+    assert_eq!(after.activity_oracle, before.activity_oracle);
+    assert_eq!(after.launch_price_oracle, before.launch_price_oracle);
+    assert_eq!(after.paused, before.paused);
+    assert_eq!(after.pending_authority, before.pending_authority);
+
+    // The inclusive 10_000 boundary is accepted and applied.
+    send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_update_collapse_bps_ix(
+            10_000,
+            &boot.oracle.pubkey(),
+        )],
+    )
+    .await
+    .expect("the 10_000 boundary value must be accepted");
+    assert_eq!(
+        scanner_config(&mut ctx.banks_client)
+            .await
+            .price_collapse_bps,
+        10_000
+    );
+}
+
+/// P5-03 (instruction/context level) + sweep-window handler pin: the
+/// staleness window gates the sweep (6018) with state preserved; the
+/// constraint layer rejects a non-writer rent recipient (6000) and a
+/// foreign eligibility_anchor account before the handler; the strict
+/// `>` boundary opens exactly one epoch past the clamped floor window;
+/// and the sweep is permissionless (a third-party caller succeeds — rent
+/// returns to the ORIGINAL writer, not the caller).
+#[tokio::test]
+async fn sweep_stale_anchor_window_writer_and_pdas_enforced() {
+    let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
+        return;
+    };
+    let (mut ctx, boot) = start(boot).await;
+    let slot0 = read_clock(&mut ctx.banks_client).await.0;
+    ctx.warp_to_slot(slot0 + 1).expect("warp to usable slot");
+
+    // Phase 1's C2 criterion reads the recorded LaunchPrice PDA — record
+    // the oracle-signed baseline first (same precondition as every other
+    // Phase 1/2 test in this suite).
+    record_c2(&mut ctx, &boot).await;
+    let anchor_epoch = run_phase1(&mut ctx.banks_client, &boot).await;
+    let anchor = read_anchor(&mut ctx.banks_client, &boot.env.anchor_pda).await;
+    let writer = anchor.writer;
+    assert_eq!(
+        writer,
+        boot.salvor.pubkey(),
+        "phase 1's payer is the anchor writer"
+    );
+    let anchor_lamports = acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+        .await
+        .lamports;
+
+    // The harness boots the 14-day default window (7 epochs). Narrow it
+    // to the 6-day governance floor (3 epochs) so the exact boundary is
+    // warpable — this same update path is bound-tested in
+    // scanner_config_bounds_reject_and_preserve_state.
+    send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[{
+            let mut data = anchor_disc("update_protocol_config").to_vec();
+            data.push(0); // inactivity_seconds: None
+            data.push(0); // price_collapse_bps: None
+            data.push(0); // min_tvl_lamports: None
+            data.push(1); // anchor_staleness_seconds: Some
+            data.extend_from_slice(&518_400u64.to_le_bytes()); // = MIN floor
+            data.push(0); // lp_burn_dust_threshold: None
+            data.push(0); // cert_ttl_seconds: None
+            data.push(0); // activity_oracle: None
+            data.push(0); // launch_price_oracle: None
+            Instruction::new_with_bytes(
+                scanner_id(),
+                &data,
+                vec![
+                    AccountMeta::new(scanner_config_pda(), false),
+                    AccountMeta::new_readonly(boot.oracle.pubkey(), true),
+                ],
+            )
+        }],
+    )
+    .await
+    .expect("narrowing the window to the floor must be accepted");
+
+    // (a) Window not elapsed (+1 epoch): right writer, right PDA, right
+    // ownership — the HANDLER rejects 6018; the anchor survives and the
+    // writer loses nothing but the failed transaction's own fee.
+    ctx.warp_to_epoch(anchor_epoch + 1).expect("warp +1");
+    let writer_before = acct(&mut ctx.banks_client, &writer).await.lamports;
+    let err = send(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[sweep_stale_anchor_ix(
+            boot.env.anchor_pda,
+            &writer,
+            &boot.salvor.pubkey(),
+        )],
+    )
+    .await
+    .expect_err("the sweep must be gated inside the window");
+    expect_custom(err, ERR_ANCHOR_NOT_STALE, "sweep inside window");
+    assert!(
+        maybe_acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+            .await
+            .is_some(),
+        "anchor must survive the gated sweep"
+    );
+    assert_eq!(
+        acct(&mut ctx.banks_client, &writer).await.lamports,
+        writer_before - FEE,
+        "a gated sweep must move no rent (only the tx fee is charged)"
+    );
+
+    // (b) Wrong writer in the rent-recipient slot: the constraint-layer
+    // writer binding reverts 6000 BEFORE the handler runs — even though
+    // the window is still closed, proving the constraint fires first.
+    let attacker_writer = Keypair::new();
+    let err = send(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[sweep_stale_anchor_ix(
+            boot.env.anchor_pda,
+            &attacker_writer.pubkey(),
+            &boot.salvor.pubkey(),
+        )],
+    )
+    .await
+    .expect_err("a non-writer rent recipient must be rejected");
+    expect_custom(err, ERR_UNAUTHORIZED, "sweep writer binding");
+    // A zero-lamport account does not exist on-chain — the rejected
+    // recipient must have received nothing (the account stays absent).
+    assert!(
+        maybe_acct(&mut ctx.banks_client, &attacker_writer.pubkey())
+            .await
+            .is_none(),
+        "the rejected recipient must not exist (no rent moved)"
+    );
+    assert!(maybe_acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+        .await
+        .is_some());
+
+    // (c) A non-existent account in the eligibility_anchor slot fails the
+    // constraint layer (owner/discriminator — never reaches the handler,
+    // so the failure is NOT the 6018/6006 custom codes).
+    let bogus = Keypair::new();
+    let err = send(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[sweep_stale_anchor_ix(
+            bogus.pubkey(),
+            &writer,
+            &boot.salvor.pubkey(),
+        )],
+    )
+    .await
+    .expect_err("a foreign account in the anchor slot must be rejected");
+    assert!(
+        matches!(
+            err,
+            BanksClientError::TransactionError(TransactionError::InstructionError(..))
+        ),
+        "expected an instruction error, got {err:?}"
+    );
+    assert!(maybe_acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+        .await
+        .is_some());
+
+    // (d) Boundary with the floor window: earliest_sweep_epoch =
+    // anchor_epoch + 3 — the boundary epoch itself still reverts 6018
+    // (strict `>`); one epoch later the sweep succeeds.
+    ctx.warp_to_epoch(anchor_epoch + 3)
+        .expect("warp to boundary");
+    let err = send(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[sweep_stale_anchor_ix(
+            boot.env.anchor_pda,
+            &writer,
+            &boot.salvor.pubkey(),
+        )],
+    )
+    .await
+    .expect_err("the boundary epoch must still revert 6018");
+    expect_custom(err, ERR_ANCHOR_NOT_STALE, "sweep at the boundary epoch");
+    assert!(maybe_acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+        .await
+        .is_some());
+
+    // (e) Permissionless success: a third party (the oracle key — funded,
+    // and neither the writer nor required to sign anything) triggers the
+    // sweep; rent returns to the ORIGINAL writer, not the caller.
+    let caller = &boot.oracle;
+    assert_ne!(
+        caller.pubkey(),
+        writer,
+        "caller must differ from the writer"
+    );
+    ctx.warp_to_epoch(anchor_epoch + 4)
+        .expect("warp past boundary");
+    let writer_before_sweep = acct(&mut ctx.banks_client, &writer).await.lamports;
+    let caller_before = acct(&mut ctx.banks_client, &caller.pubkey()).await.lamports;
+    send(
+        &mut ctx.banks_client,
+        caller,
+        &[sweep_stale_anchor_ix(
+            boot.env.anchor_pda,
+            &writer,
+            &caller.pubkey(),
+        )],
+    )
+    .await
+    .expect("a third-party caller must be able to sweep past the window");
+    assert!(
+        maybe_acct(&mut ctx.banks_client, &boot.env.anchor_pda)
+            .await
+            .is_none(),
+        "the swept anchor must be closed"
+    );
+    assert_eq!(
+        acct(&mut ctx.banks_client, &writer).await.lamports,
+        writer_before_sweep + anchor_lamports,
+        "rent must return to the original writer"
+    );
+    assert_eq!(
+        acct(&mut ctx.banks_client, &caller.pubkey()).await.lamports,
+        caller_before - FEE,
+        "the caller must receive no rent (only pay the tx fee)"
+    );
+}
+
+/// P5-11 (scanner side): a no-op emergency-pause toggle — requested state
+/// equals current state, either direction — reverts refuses-first with the
+/// scanner InvariantViolation (6006) instead of double-emitting
+/// `ProtocolPauseChanged`, and the refused toggle leaves the pause flag
+/// unchanged. Mirrors the GraveVault 7022 pin in security_negative_fork.rs.
+#[tokio::test]
+async fn scanner_noop_pause_toggles_revert_refuses_first() {
+    let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
+        return;
+    };
+    let (mut ctx, boot) = start(boot).await;
+    let slot0 = read_clock(&mut ctx.banks_client).await.0;
+    ctx.warp_to_slot(slot0 + 1).expect("warp to usable slot");
+
+    // Boot state: unpaused. An unpause request is a no-op toggle → 6006.
+    assert!(!scanner_config(&mut ctx.banks_client).await.paused);
+    let err = send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_pause_ix(&boot.oracle.pubkey(), false)],
+    )
+    .await
+    .expect_err("unpause-while-unpaused must revert 6006");
+    expect_custom(err, ERR_INVARIANT_VIOLATION, "no-op unpause");
+    assert!(
+        !scanner_config(&mut ctx.banks_client).await.paused,
+        "the flag must be unchanged after the refused unpause"
+    );
+
+    // The real transition succeeds ...
+    send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_pause_ix(&boot.oracle.pubkey(), true)],
+    )
+    .await
+    .expect("pause must succeed");
+    assert!(scanner_config(&mut ctx.banks_client).await.paused);
+
+    // ... and the mirrored no-op (pause-while-paused) reverts 6006 too.
+    let err = send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_pause_ix(&boot.oracle.pubkey(), true)],
+    )
+    .await
+    .expect_err("pause-while-paused must revert 6006");
+    expect_custom(err, ERR_INVARIANT_VIOLATION, "no-op pause");
+    assert!(
+        scanner_config(&mut ctx.banks_client).await.paused,
+        "the flag must be unchanged after the refused pause"
+    );
+
+    // Positive control: the real unpause still works afterwards.
+    send_multi(
+        &mut ctx.banks_client,
+        &boot.salvor,
+        &[&boot.oracle],
+        &[scanner_pause_ix(&boot.oracle.pubkey(), false)],
+    )
+    .await
+    .expect("unpause must succeed");
+    assert!(!scanner_config(&mut ctx.banks_client).await.paused);
 }

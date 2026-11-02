@@ -99,6 +99,7 @@ fn spl_ata_id() -> Pubkey {
 const ERR_UNAUTHORIZED: u32 = 7000;
 const ERR_PROTOCOL_PAUSED: u32 = 7003;
 const ERR_PREFLIGHT_FAILED: u32 = 7013;
+const ERR_INVARIANT_VIOLATION: u32 = 7022;
 
 // Anchored timestamps: genesis clock is "now", so certs expiring in 2100 are
 // valid regardless of test time.
@@ -878,6 +879,78 @@ async fn pause_gates_salvage_atomically_and_salvage_is_oneshot() {
     expect_any_failure(err, "salvage replay");
     let root_after = sealed_root(&mut client, &env.pool_registry).await;
     assert_eq!(root_after, root, "replay must not touch the sealed root");
+}
+
+/// Reads the vault config's `emergency_paused` flag.
+async fn vault_paused_flag(client: &mut BanksClient, config: &Pubkey) -> bool {
+    grave_vault::state::ProtocolConfig::try_deserialize(&mut &acct(client, config).await.data[..])
+        .expect("config must deserialize")
+        .emergency_paused
+}
+
+/// P5-11 (GraveVault side): a no-op emergency-pause toggle — requested
+/// state equals current state, either direction — reverts refuses-first
+/// with the vault `InvariantViolation` (7022; 7003 is the unrelated
+/// `ProtocolPaused` salvage gate) instead of double-emitting
+/// `ProtocolPauseChanged`, and the refused toggle leaves the pause flag
+/// unchanged. Mirrors the GraveScanner 6006 pin in scanner_windows_fork.rs.
+#[tokio::test]
+async fn vault_noop_pause_toggles_revert_refuses_first_7022() {
+    let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
+        return;
+    };
+    let (mut client, boot) = start(boot).await;
+    let config = protocol_config_pda();
+    let authority = boot.salvor.pubkey();
+
+    // Boot state: unpaused. An unpause request is a no-op toggle → 7022.
+    assert!(!vault_paused_flag(&mut client, &config).await);
+    let err = send(
+        &mut client,
+        &boot.salvor,
+        &[pause_ix(&config, &authority, false)],
+    )
+    .await
+    .expect_err("unpause-while-unpaused must revert 7022");
+    expect_custom(err, ERR_INVARIANT_VIOLATION, "no-op unpause");
+    assert!(
+        !vault_paused_flag(&mut client, &config).await,
+        "the flag must be unchanged after the refused unpause"
+    );
+
+    // The real transition succeeds ...
+    send(
+        &mut client,
+        &boot.salvor,
+        &[pause_ix(&config, &authority, true)],
+    )
+    .await
+    .expect("pause must succeed");
+    assert!(vault_paused_flag(&mut client, &config).await);
+
+    // ... and the mirrored no-op (pause-while-paused) reverts 7022 too.
+    let err = send(
+        &mut client,
+        &boot.salvor,
+        &[pause_ix(&config, &authority, true)],
+    )
+    .await
+    .expect_err("pause-while-paused must revert 7022");
+    expect_custom(err, ERR_INVARIANT_VIOLATION, "no-op pause");
+    assert!(
+        vault_paused_flag(&mut client, &config).await,
+        "the flag must be unchanged after the refused pause"
+    );
+
+    // Positive control: the real unpause still works afterwards.
+    send(
+        &mut client,
+        &boot.salvor,
+        &[pause_ix(&config, &authority, false)],
+    )
+    .await
+    .expect("unpause must succeed");
+    assert!(!vault_paused_flag(&mut client, &config).await);
 }
 
 /// Roadmap row "CPI account substitution testing": the AMM authority slot

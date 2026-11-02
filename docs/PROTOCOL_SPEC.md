@@ -557,6 +557,22 @@ violate it).
 - No locker introspection beyond the UNCX Raydium V4 locker — LP locked
   in PinkSale / Team Finance / Streamflow / others is invisible to
   on-chain C5 in v1.0 (LOCKER-002; mitigated SDK-side).
+- **No guarantee that claims drain `lp_holder_pool_vault` to zero.**
+  Each claim pays `floor(bucket × balance / supply)` (u128 intermediate,
+  floor division, `claim_lp_proceeds`), so with N eligible holders the
+  per-claim floor remainders can accumulate to a residual of **at most
+  N − 1 lamports** (each claim loses strictly less than 1 lamport, and
+  the entitlements of all N holders sum to the bucket exactly when the
+  snapshot leaf set covers the supply). The residual stays in the vault
+  **permanently**: `lp_holder_pool_vault` is unsweepable by Charter
+  (`LpHolderPoolUnsweepable`, 7006) and no redistribution mechanism
+  exists — a sub-lamport entitlement (e.g. a 1-raw-unit balance with
+  `bucket < supply`) pays out 0 and still consumes its ClaimRecord.
+  This is bounded accounting dust, not a loss vector: no party can
+  claim, sweep, or redirect the residual. Pinned by the
+  `claim_rounding_residual_dust_within_n_minus_1` fork test
+  (non-divisible recipe, all N holders claim, residual ≤ N−1 asserted
+  against the live vault balance).
 
 ## 7. Resolved decisions (Phase 0 settlements)
 
