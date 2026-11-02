@@ -252,7 +252,7 @@ jobs:
         # toolchain (the baseline report's "CI-equivalent pinned toolchain"
         # provenance requirement, made reproducible by uploading the
         # artifacts instead of rebuilding outside CI).
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: program-elvs
           path: target/deploy/*.so
@@ -260,7 +260,7 @@ jobs:
           retention-days: 7
       - name: Upload anchor build log on failure
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: anchor-build-log
           path: /tmp/anchor-build.log
