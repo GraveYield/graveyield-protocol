@@ -7,17 +7,28 @@
 # pre-audit they were compile-validated at best — never run in CI, and the
 # CHANGELOG admits the post-rollback suites were only build-checked.
 #
-# Trigger policy (P5-04, Stage B):
+# Trigger policy (P5-04, Stage B; fail-closed closeout correction
+# 2026-11-02):
 #   - nightly cron (03:00 UTC, off-peak) — the catch-all
 #   - workflow_dispatch (manual runs)
 #   - pull_request runs AUTOMATICALLY when the diff touches fork-relevant
 #     paths (programs/**, snapshotter/**, sdk/**, workspace manifests,
-#     rust-toolchain.toml, Anchor.toml, the harness scripts, this workflow)
+#     rust-toolchain.toml, Anchor.toml, the harness scripts, the
+#     classifier script, this workflow)
 #   - the `fork-harness` label remains a manual escape hatch for ANY PR
 #     (including docs-only changes), preserved from the pre-Stage-B policy
 #
-# The path/label decision is made by a cheap `changes` job so a skipped
-# fork run is VISIBLE as a skipped job (a docs-only PR never pays the
+# The path/label decision is made by a cheap `changes` job whose
+# classification logic lives in scripts/classify_fork_changes.sh and is
+# FAIL-CLOSED: a failed diff, a missing/unresolvable base reference, an
+# empty diff, or a MATCHING-TOOL failure (grep error — only a clean exit
+# 1 counts as "no match") all classify as "run". The previous inline filter used
+# `git diff ... || true`, whose failure mode was FAIL-OPEN — a failed diff
+# could silently skip the fork suites on a code PR (Phase 5.1 post-merge
+# closeout audit finding, corrected 2026-11-02). The heavy job's condition
+# skips the harness ONLY on an explicit "skip" from a successful
+# classification; a failed or missing classification runs it. A skipped
+# fork run remains VISIBLE as a skipped job (a docs-only PR never pays the
 # build-sbf + fixture cost, and a reviewer can see the harness was
 # deliberately not run rather than silently absent).
 #
@@ -56,37 +67,49 @@ jobs:
     name: detect fork-relevant changes
     runs-on: ubuntu-latest
     outputs:
-      fork_relevant: ${{ steps.filter.outputs.fork_relevant }}
+      # Fail-closed: only the literal "skip" suppresses the heavy job. An
+      # empty/missing classification (failed step) defaults to "run".
+      fork_relevant: ${{ steps.filter.outputs.fork_relevant || 'run' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # full history so the base sha is always present
       - id: filter
+        name: classify fork-relevant changes (fail-closed)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          # Nightly and manual runs always execute the full harness.
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "fork_relevant=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          BASE="${{ github.event.pull_request.base.sha }}"
-          CHANGED="$(git diff --name-only "$BASE...HEAD" || true)"
-          echo "Changed files vs $BASE:"
-          echo "$CHANGED"
-          if printf '%s\n' "$CHANGED" | grep -qE '(^programs/|^snapshotter/|^sdk/|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^Anchor\.toml$|^scripts/build_fork_harness\.sh$|^scripts/fetch_v4_fork_fixtures\.mjs$|^\.github/workflows/fork-harness\.yml$)'; then
-            echo "fork_relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "fork_relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -uo pipefail
+          # scripts/classify_fork_changes.sh prints exactly "run" or
+          # "skip" and exits 0; every failure mode inside it (failed diff,
+          # missing base, empty diff, matching-tool error) classifies as
+          # "run" — fail-closed.
+          # Fixture-tested by scripts/classify_fork_changes_test.sh (23
+          # scenarios, incl. grep-error fail-closed).
+          result="$(bash scripts/classify_fork_changes.sh "$EVENT_NAME" "$BASE_SHA" "$HEAD_SHA")"
+          echo "classification: $result"
+          echo "fork_relevant=$result" >> "$GITHUB_OUTPUT"
 
   fork-harness:
     name: build + fetch + run 7 fork suites
     needs: changes
-    # Run when fork-relevant paths changed, or when a PR is manually
-    # labeled `fork-harness` (escape hatch). Schedule/dispatch always run.
+    # Run unless the classification EXPLICITLY said "skip" on a successful
+    # changes job, or the PR carries the manual `fork-harness` label
+    # (escape hatch). Schedule/dispatch always run. Fail-closed: a failed
+    # changes job (needs.changes.result != 'success') or an empty output
+    # (already defaulted to 'run' in the outputs block) RUNS the harness
+    # instead of skipping it. always() + !cancelled() let this job's
+    # condition evaluate when the changes job failed, while still honoring
+    # a user cancellation.
     if: >-
-      needs.changes.outputs.fork_relevant == 'true' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'fork-harness'))
+      always() && !cancelled() &&
+      (
+        needs.changes.outputs.fork_relevant != 'skip' ||
+        needs.changes.result != 'success' ||
+        (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'fork-harness'))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

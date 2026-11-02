@@ -35,10 +35,21 @@ updates:
     # lockfile instance the host-test hasher resolves, because the
     # byte-identity is test-pinned against `grave_vault::merkle` and the
     # fork claim tests prove the syscall accepts 0.10.9-produced roots
-    # end-to-end. The 0.9.9 and 0.11.1 instances are host/toolchain-graph
-    # only (proc-macros and dead lockfile weight — their carriers are not
-    # reachable from any workspace build graph), so a multi-instance tree is
-    # a hygiene observation, not a crypto-core split. Dependabot files a
+    # end-to-end. 0.9.9 is not reachable from any crate's normal
+    # (artifact-producing) graph — it enters only through the
+    # solana-program-test dev-dependency chain in host test binaries.
+    # CORRECTED 2026-11-02 (P5-02 closeout re-verification, Stage B log
+    # §2.5 addendum): the 0.11.1 carriers ARE reachable — k256 (via
+    # solana-sdk → solana-program → solana-secp256k1-recover) and
+    # solana-ed25519 (via solana-client → solana-signature) resolve 0.11.1
+    # in the snapshotter's normal host graph (hence expected to link into
+    # the snapshotter host binary's signature/RPC machinery, not the
+    # Merkle producer path — final-binary linkage is a build-graph-derived
+    # expectation, NOT independently verified by binary inspection);
+    # scanner/vault carry 0.11.1 via anchor-syn proc-macros only. Graph
+    # reachability is not evidence of runtime execution, and the on-chain
+    # ELFs contain no sha2 crate — a multi-instance tree remains a hygiene
+    # observation, not a crypto-core split. Dependabot files a
     # 0.x minor (0.10 -> 0.11) as a semver-major, so the major rule covers
     # it; 0.10.x patches keep flowing.
     ignore:
