@@ -366,11 +366,23 @@ vector — wrong oracle key, moved message offset, pool/mint/price binding
 mismatch, zero price, zero/future first-swap timestamp and slot,
 zero/future issued slot, truncated instruction data — is covered.
 
-Run:
+Run (corrected at the Phase 5.1 closeout, 2026-11-02 — no `anchor test`
+harness exists yet; the commands below are what actually execute tests):
 
 ```bash
-anchor test
+# Rust host unit tests (no network, no fixtures):
+cargo test -p grave-scanner
+cargo test -p grave-vault        # host units; fork suites are separate --test targets
+cargo test -p grave-snapshotter
+# TypeScript suites (sdk / indexer / ops / adversary):
+pnpm -r test
+# The seven fork suites (real mainnet bytecode; needs the Solana/SBF
+# toolchain and the gitignored fixtures — see the harness sections above):
+bash scripts/build_fork_harness.sh
 ```
 
-Once `tests/package.json` exists this directory will join the pnpm workspace
+`anchor test` runs 0 tests today: `Anchor.toml`'s test script matches zero
+files while this directory awaits the m1 ts-mocha harness (register item
+D5). Do not read a successful `anchor test` exit as coverage. Once
+`tests/package.json` exists this directory will join the pnpm workspace
 (see `pnpm-workspace.yaml`).
