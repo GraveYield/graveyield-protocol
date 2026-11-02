@@ -280,18 +280,22 @@ mod tests {
 
     /// Closeout hardening (2026-11-02): a MULTI-field update where a later
     /// invalid field follows earlier valid assignments. This pins the
-    /// documented distinction between three layers:
-    ///   - in-memory handler behavior: `apply_config_update` validates and
-    ///     assigns field-by-field, so after a later rejection the earlier
-    ///     VALID assignments are still visible in the struct (partial
-    ///     application is the handler's real semantics);
-    ///   - on-chain transaction atomicity: Anchor only re-serializes the
-    ///     account after the handler returns `Ok`, so the tentative writes
-    ///     are discarded by the transaction revert — the on-chain account
-    ///     keeps its exact pre-call state;
-    ///   - account-level preservation is asserted by the fork suite
-    ///     (`scanner_config_bounds_reject_and_preserve_state`), which runs
-    ///     the real BPF against a real account.
+    /// documented distinction between three layers.
+    ///
+    /// In-memory handler behavior: `apply_config_update` validates and
+    /// assigns field-by-field, so after a later rejection the earlier VALID
+    /// assignments are still visible in the struct (partial application is
+    /// the handler's real semantics).
+    ///
+    /// On-chain transaction atomicity: Anchor only re-serializes the
+    /// account after the handler returns `Ok`, so the tentative writes are
+    /// discarded by the transaction revert; the on-chain account keeps its
+    /// exact pre-call state.
+    ///
+    /// Account-level preservation is asserted by the fork suite
+    /// (`scanner_config_bounds_reject_and_preserve_state`), which runs the
+    /// real BPF against a real account.
+    ///
     /// This test intentionally does NOT pretend the handler is a
     /// transaction; it locks the actual field-by-field semantics so a
     /// future refactor that silently changes validation order or
