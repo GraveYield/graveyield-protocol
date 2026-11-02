@@ -278,6 +278,55 @@ mod tests {
         assert_eq!(cfg.launch_price_oracle, launch_price);
     }
 
+    /// Closeout hardening (2026-11-02): a MULTI-field update where a later
+    /// invalid field follows earlier valid assignments. This pins the
+    /// documented distinction between three layers:
+    ///   - in-memory handler behavior: `apply_config_update` validates and
+    ///     assigns field-by-field, so after a later rejection the earlier
+    ///     VALID assignments are still visible in the struct (partial
+    ///     application is the handler's real semantics);
+    ///   - on-chain transaction atomicity: Anchor only re-serializes the
+    ///     account after the handler returns `Ok`, so the tentative writes
+    ///     are discarded by the transaction revert — the on-chain account
+    ///     keeps its exact pre-call state;
+    ///   - account-level preservation is asserted by the fork suite
+    ///     (`scanner_config_bounds_reject_and_preserve_state`), which runs
+    ///     the real BPF against a real account.
+    /// This test intentionally does NOT pretend the handler is a
+    /// transaction; it locks the actual field-by-field semantics so a
+    /// future refactor that silently changes validation order or
+    /// partial-application behavior is caught.
+    #[test]
+    fn multi_field_update_reverts_6019_after_earlier_valid_assignments() {
+        let mut cfg = base_config();
+        let before = cfg.clone();
+        let mut p = params(None);
+        // Earlier fields: one unbounded scalar (assigned first) and one
+        // valid bounded value — both assignments execute before the
+        // failure point.
+        p.inactivity_seconds = Some(1);
+        p.price_collapse_bps = Some(9_900);
+        // A later invalid field: sub-floor cert TTL reverts 6019.
+        p.cert_ttl_seconds = Some(599);
+        let err = apply_config_update(&mut cfg, &p)
+            .expect_err("the later invalid field must revert 6019");
+        assert_eq!(
+            code_of(&err),
+            6019,
+            "sub-floor cert TTL is CertTtlBelowMinimum"
+        );
+        // In-memory: the earlier valid assignments ARE visible — the
+        // handler is not a transaction (on-chain the revert discards these
+        // tentative writes; the fork test pins the account-level result).
+        assert_eq!(cfg.inactivity_seconds, 1);
+        assert_eq!(cfg.price_collapse_bps, 9_900);
+        // The rejected field itself was never assigned...
+        assert_eq!(cfg.cert_ttl_seconds, before.cert_ttl_seconds);
+        // ...and every field after the failure point is untouched.
+        assert_eq!(cfg.activity_oracle, before.activity_oracle);
+        assert_eq!(cfg.launch_price_oracle, before.launch_price_oracle);
+    }
+
     #[test]
     fn on_chain_6006_6019_codes_match_docs() {
         // Lock the two codes this handler raises against the documented
