@@ -11,9 +11,11 @@
 # Usage: classify_fork_changes.sh <event_name> <base_sha> <head_sha>
 # Prints exactly one word on stdout: "run" or "skip". ALWAYS exits 0 —
 # every unexpected or unrecoverable condition classifies as "run", so the
-# heavy fork job executes (fail-closed). The workflow additionally treats
-# any non-"skip" classification (including a missing one) as "run"; see
-# .github/workflows/fork-harness.yml.
+# heavy fork job executes (fail-closed). This includes the MATCHING step
+# itself: a grep error (exit >= 2) is not readable as "no match" and
+# classifies as "run" — only a clean exit 1 (no match) may produce
+# "skip". The workflow additionally treats any non-"skip" classification
+# (including a missing one) as "run"; see .github/workflows/fork-harness.yml.
 #
 # Policy: the path set below is UNCHANGED from the Stage B inline filter,
 # except that this classifier script itself is now part of the gate, so
@@ -65,8 +67,17 @@ if [[ -z "$changed" ]]; then
   run
 fi
 
-if printf '%s\n' "$changed" | grep -qE "$FORK_PATH_REGEX"; then
-  run
-fi
-
-skip
+# The matching step itself fails closed. grep exit codes: 0 = match,
+# 1 = no match, >= 2 = the tool itself failed (bad invocation, I/O
+# error). Only a clean exit 1 may lead to "skip"; a grep ERROR cannot
+# distinguish "no fork-relevant path" from "could not classify" and is
+# therefore treated like every other unrecoverable condition: run.
+# The diff is passed via a here-string (no pipeline), so no writer-side
+# status (e.g. SIGPIPE) can leak into the decision under `pipefail`.
+grep -qE "$FORK_PATH_REGEX" <<<"$changed"
+grep_status=$?
+case "$grep_status" in
+  0) run ;;   # fork-relevant path matched
+  1) skip ;;  # verified no match on a successful diff and classification
+  *) run ;;   # matching-tool failure — cannot be classified -> run
+esac

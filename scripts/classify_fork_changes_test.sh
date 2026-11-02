@@ -115,6 +115,32 @@ check "7. scheduled run bypasses classification" run schedule "$BASE" "$ORPHAN"
 # --- Scenario 8: manual execution bypasses PR classification ---------------
 check "8. manual dispatch bypasses classification" run workflow_dispatch "$BASE" "$ORPHAN"
 
+# --- Scenario 9: matching-tool failure fails closed -------------------------
+# The classification's grep/matching step itself must fail closed: a grep
+# that ERRORS (exit >= 2) is not readable as "no match" and must classify
+# run. Simulated with a PATH stub — git + bash only, no new deps. The
+# subject diff here is docs-only (would legitimately classify skip with a
+# healthy grep), so any "skip" result would mean the failure leaked.
+stubdir="$tmp/stub-grep"
+mkdir -p "$stubdir"
+DOC_HEAD=$(pr_commit docs/second-note.md "docs again")
+stub_check() { # <name> <expected> <stub_exit_code>
+  local name="$1" expected="$2" rc="$3" got
+  printf '#!/usr/bin/env bash\nexit %s\n' "$rc" > "$stubdir/grep"
+  chmod +x "$stubdir/grep"
+  got="$(PATH="$stubdir:$PATH" bash "$SCRIPT" pull_request "$BASE" "$DOC_HEAD" 2>/dev/null)"
+  if [[ "$got" == "$expected" ]]; then
+    echo "PASS  $name  (grep stub exit=$rc -> $got)"
+    pass=$((pass + 1))
+  else
+    echo "FAIL  $name  expected '$expected', got '${got:-<empty>}'  (grep stub exit=$rc)"
+    fail=$((fail + 1))
+  fi
+}
+stub_check "9a. matching-tool error (grep exit 2) fails closed" run 2
+stub_check "9b. matching-tool no-match (grep exit 1) still classifies skip" skip 1
+stub_check "9c. matching-tool match (grep exit 0) runs" run 0
+
 echo
 echo "classifier fixture tests: $pass passed, $fail failed"
 if [[ $fail -ne 0 ]]; then

@@ -20,8 +20,9 @@
 #
 # The path/label decision is made by a cheap `changes` job whose
 # classification logic lives in scripts/classify_fork_changes.sh and is
-# FAIL-CLOSED: a failed diff, a missing/unresolvable base reference, or an
-# empty diff all classify as "run". The previous inline filter used
+# FAIL-CLOSED: a failed diff, a missing/unresolvable base reference, an
+# empty diff, or a MATCHING-TOOL failure (grep error — only a clean exit
+# 1 counts as "no match") all classify as "run". The previous inline filter used
 # `git diff ... || true`, whose failure mode was FAIL-OPEN — a failed diff
 # could silently skip the fork suites on a code PR (Phase 5.1 post-merge
 # closeout audit finding, corrected 2026-11-02). The heavy job's condition
@@ -83,8 +84,10 @@ jobs:
           set -uo pipefail
           # scripts/classify_fork_changes.sh prints exactly "run" or
           # "skip" and exits 0; every failure mode inside it (failed diff,
-          # missing base, empty diff) classifies as "run" — fail-closed.
-          # Fixture-tested by scripts/classify_fork_changes_test.sh.
+          # missing base, empty diff, matching-tool error) classifies as
+          # "run" — fail-closed.
+          # Fixture-tested by scripts/classify_fork_changes_test.sh (23
+          # scenarios, incl. grep-error fail-closed).
           result="$(bash scripts/classify_fork_changes.sh "$EVENT_NAME" "$BASE_SHA" "$HEAD_SHA")"
           echo "classification: $result"
           echo "fork_relevant=$result" >> "$GITHUB_OUTPUT"
