@@ -282,6 +282,13 @@ mod tests {
     /// invalid field follows earlier valid assignments. This pins the
     /// documented distinction between three layers.
     ///
+    /// Name note (pre-merge review clarification): "partial assign ..."
+    /// is the operative term — the HOST handler assigns field-by-field and
+    /// RETURNS the error; it never reverts (only the on-chain transaction
+    /// revert discards the tentative writes). The name deliberately avoids
+    /// the word "reverts" so the host semantics are not misread as
+    /// transaction semantics.
+    ///
     /// In-memory handler behavior: `apply_config_update` validates and
     /// assigns field-by-field, so after a later rejection the earlier VALID
     /// assignments are still visible in the struct (partial application is
@@ -301,7 +308,7 @@ mod tests {
     /// future refactor that silently changes validation order or
     /// partial-application behavior is caught.
     #[test]
-    fn multi_field_update_reverts_6019_after_earlier_valid_assignments() {
+    fn multi_field_partial_assign_returns_6019_after_earlier_valid_assignments() {
         let mut cfg = base_config();
         let before = cfg.clone();
         let mut p = params(None);
@@ -310,10 +317,10 @@ mod tests {
         // failure point.
         p.inactivity_seconds = Some(1);
         p.price_collapse_bps = Some(9_900);
-        // A later invalid field: sub-floor cert TTL reverts 6019.
+        // A later invalid field: sub-floor cert TTL returns 6019.
         p.cert_ttl_seconds = Some(599);
         let err = apply_config_update(&mut cfg, &p)
-            .expect_err("the later invalid field must revert 6019");
+            .expect_err("the later invalid field must return 6019");
         assert_eq!(
             code_of(&err),
             6019,
