@@ -372,7 +372,10 @@ harness exists yet; the commands below are what actually execute tests):
 ```bash
 # Rust host unit tests (no network, no fixtures):
 cargo test -p grave-scanner
-cargo test -p grave-vault        # host units; fork suites are separate --test targets
+cargo test -p grave-vault --lib   # host units ONLY; a bare `cargo test -p
+                                  # grave-vault` also builds and runs the
+                                  # fork-suite binaries (separate --test
+                                  # targets that skip without fixtures)
 cargo test -p grave-snapshotter
 # TypeScript suites (sdk / indexer / ops / adversary):
 pnpm -r test

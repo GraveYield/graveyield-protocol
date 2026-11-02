@@ -42,8 +42,10 @@ updates:
     # §2.5 addendum): the 0.11.1 carriers ARE reachable — k256 (via
     # solana-sdk → solana-program → solana-secp256k1-recover) and
     # solana-ed25519 (via solana-client → solana-signature) resolve 0.11.1
-    # in the snapshotter's normal host graph (compiled into the snapshotter
-    # host binary's signature/RPC machinery, not the Merkle producer path);
+    # in the snapshotter's normal host graph (hence expected to link into
+    # the snapshotter host binary's signature/RPC machinery, not the
+    # Merkle producer path — final-binary linkage is a build-graph-derived
+    # expectation, NOT independently verified by binary inspection);
     # scanner/vault carry 0.11.1 via anchor-syn proc-macros only. Graph
     # reachability is not evidence of runtime execution, and the on-chain
     # ELFs contain no sha2 crate — a multi-instance tree remains a hygiene
