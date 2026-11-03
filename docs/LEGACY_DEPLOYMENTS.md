@@ -1,23 +1,26 @@
 # Legacy Devnet Deployments — Permanent Frozen Record
 
 > **READ THIS FIRST.** The program IDs in this document are **LEGACY**.
-> The NS-1/NS-2 programs remain deployed and executable on devnet, but
-> they are **operationally frozen** (no signature holder exists for any
-> authority-dependent action; the authority was never revoked on-chain,
-> so they are **not** formally frozen) and **unsupported**. They must
-> never be targeted, upgraded, re-used, or referenced as "the
-> deployment" by any developer, agent, script, or CI job. Until a
-> future NS-3 deployment is executed and recorded in
-> [`docs/DEVNET.md`](DEVNET.md), there is **no active, supported
-> GraveYield devnet deployment**. Decision record: **DR-002** in
-> [`docs/DECISIONS.md`](DECISIONS.md). Owner directive of 2026-11-03.
+> The NS-2 programs are **confirmed deployed and executable on devnet**
+> (read-only verification 2026-11-03, §3), but they are **operationally
+> frozen** (no signature holder exists for any authority-dependent
+> action; the authority was never revoked on-chain, so they are **not**
+> formally frozen) and **unsupported**. The NS-1 deployment is retained
+> in this document as a **historical deployment record**; its current
+> on-chain status has not been established here. No legacy program may
+> be targeted, upgraded, re-used, or referenced as "the deployment" by
+> any developer, agent, script, or CI job. Until a future NS-3
+> deployment is executed and recorded in [`docs/DEVNET.md`](DEVNET.md),
+> there is **no active, supported GraveYield devnet deployment**.
+> Decision record: **DR-002** in [`docs/DECISIONS.md`](DECISIONS.md).
+> Owner directive of 2026-11-03.
 
 ## 1. Deployment lineage at a glance
 
 | Generation | Deployed (UTC) | GraveScanner | GraveVault | Upgrade authority | Status |
 |---|---|---|---|---|---|
-| NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — operationally frozen (authority key dead; DR-001 2026-10-25); not formally frozen on-chain |
-| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — operationally frozen by this record (authority key permanently lost; DR-002); not formally frozen on-chain** |
+| NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — retained as a historical deployment record (DR-001 2026-10-25: authority key dead); current on-chain status not established in this document |
+| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — confirmed deployed and executable (§3); operationally frozen by this record (authority key permanently lost; DR-002); not formally frozen on-chain** |
 | NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the only deployment that may be created; once recorded in `docs/DEVNET.md` it becomes the active, supported deployment |
 
 ## 2. NS-2 deployment record (legacy — operationally frozen; see §5)
@@ -56,7 +59,7 @@ proves **only** the upgrade-authority role:
 
 Its private key is **permanently lost** (§4 below).
 
-## 3. On-chain state (read-only RPC verification, 2026-11-03)
+## 3. NS-2 on-chain state (read-only RPC verification, 2026-11-03)
 
 All four accounts verified live against `https://api.devnet.solana.com`
 via read-only `getAccountInfo`:
@@ -165,8 +168,9 @@ documentation (same acceptance rule NS-2 applied to NS-1's IDs).
   `docs/DEVNET.md` with a matching status line and a deployment date
   after 2026-11-03, using program IDs different from every ID in this
   file.** Until that entry exists, there is no active, supported
-  GraveYield devnet deployment — the legacy NS-1/NS-2 programs remain
-  deployed on devnet but are operationally frozen and unsupported;
+  GraveYield devnet deployment — the NS-2 programs remain deployed on
+  devnet but are operationally frozen and unsupported (NS-1's current
+  on-chain status is not established here; §1);
   build and test against localnet
   (`scripts/devnet/local_rehearsal.sh` / `solana-test-validator`).
 - Any constant in the tree still naming `CuQZes…` / `Bd5smh…` refers to
