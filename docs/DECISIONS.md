@@ -12,7 +12,7 @@
 | ID | Date (UTC) | Decision | Resolves |
 |---|---|---|---|
 | DR-001 | 2026-10-25 | NS-1: deployer key custody resolved — dead key; path B (fresh devnet deployment); current deployment retained as frozen static reference | B1, NS-1 (gates NS-2) |
-| DR-002 | 2026-11-03 | NS-2 legacy freeze — single upgrade/config/oracle authority key permanently lost (forensics 2026-11-03; owner-side search empty); deployments preserved untouched as historical evidence; NS-3 fresh deployment approved, to be executed manually by the owner with owner-held keys | phase-4 assessment B1, decision D1 (branch b) |
+| DR-002 | 2026-11-03 | NS-2 legacy freeze — shared authority key permanently lost (ProgramData upgrade authority verified on-chain; ProtocolConfig authority and both oracle signers verified by read-only config-account decode; forensics 2026-11-03; owner-side search empty); deployments preserved untouched as historical evidence; NS-3 fresh deployment approved, to be executed manually by the owner with owner-held keys | phase-4 assessment B1, decision D1 (branch b) |
 
 ---
 
@@ -95,13 +95,20 @@ correct UTC dates.
 
 ## DR-002 — NS-2 legacy freeze: authority key permanently lost; NS-3 fresh deployment approved (owner-executed) — 2026-11-03
 
-**Decision.** The NS-2 (DR-001 refresh) deployment's single
-upgrade/config/oracle authority key
-(`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`) is **permanently
-unrecoverable**. The two programs (`CuQZes…Ao54`, `Bd5smh…7rg`) and
-their ProgramData accounts are preserved **untouched on-chain as legacy,
-operationally frozen deployments** — never formally frozen on-chain (the
-authority was not revoked); there is simply no key holder left. All
+**Decision.** The NS-2 (DR-001 refresh) deployment's shared authority
+key (`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`) is **permanently
+unrecoverable**. It was the on-chain ProgramData upgrade authority for
+both programs (verified from the ProgramData accounts); read-only
+decodes of both ProtocolConfig accounts independently show it was also
+their `authority` and — in the scanner config — both oracle signers
+(`activity_oracle`, `launch_price_oracle`), consistent with
+`docs/assessments/phase4-assessment.md` §4 B1 and
+`grave-indexer/docs/ORACLE_PIPELINE.md` §2.4. The two programs
+(`CuQZes…Ao54`, `Bd5smh…7rg`) and their ProgramData accounts remain
+deployed and executable on-chain and are preserved **untouched as
+legacy, operationally frozen deployments** — never formally frozen
+on-chain (the authority was not revoked); there is simply no key holder
+left, so every authority-dependent action can never succeed. All
 future development targets a fresh **NS-3** deployment with new program
 IDs. Per the owner's directive, the new deployment authority will be
 generated and secured **manually by the owner**, and the redeployment
@@ -136,7 +143,9 @@ empty; closes decision D1 → branch (b)).
 3. The active-code ID surface (DR-001 consequence 4 catalogue) remains
    as-is until the owner-approved NS-3 sync. Until then, constants
    naming `CuQZes…`/`Bd5smh…` are inert legacy references and there is
-   **no active devnet deployment** (development targets localnet).
+   **no active, supported GraveYield devnet deployment** — the legacy
+   NS-2 programs remain deployed on devnet but are operationally frozen
+   and unsupported (development targets localnet).
 4. A Redeployment Readiness Report (2026-11-03, owner's copy) lists the
    exact future-modification surface, prerequisites, and verification
    steps for NS-3; it is a review artifact, not an authorization.
@@ -144,6 +153,7 @@ empty; closes decision D1 → branch (b)).
 **Verification hook.** NS-3 acceptance mirrors NS-2's (baseline §7):
 both configs decode at spec defaults on the NEW IDs, both drills pass,
 zero references to the NS-2 IDs remain in active code paths (legacy
-mentions allowed only in `docs/LEGACY_DEPLOYMENTS.md` and historical
-appendices), and `docs/DEVNET.md` carries the new signature table with
-correct UTC dates.
+mentions allowed only in `docs/LEGACY_DEPLOYMENTS.md`,
+`docs/DECISIONS.md`, the historical sections of `docs/DEVNET.md`, and
+historical evidence artifacts), and `docs/DEVNET.md` carries the new
+signature table with correct UTC dates.

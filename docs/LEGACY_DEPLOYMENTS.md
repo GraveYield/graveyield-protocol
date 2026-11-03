@@ -1,22 +1,26 @@
 # Legacy Devnet Deployments — Permanent Frozen Record
 
 > **READ THIS FIRST.** The program IDs in this document are **LEGACY**.
-> They are permanently frozen and must never be targeted, upgraded,
-> re-used, or referenced as "the deployment" by any developer, agent,
-> script, or CI job. Until a future NS-3 deployment is executed and
-> recorded in [`docs/DEVNET.md`](DEVNET.md), **no active devnet
-> deployment exists**. Decision record: **DR-002** in
+> The NS-1/NS-2 programs remain deployed and executable on devnet, but
+> they are **operationally frozen** (no signature holder exists for any
+> authority-dependent action; the authority was never revoked on-chain,
+> so they are **not** formally frozen) and **unsupported**. They must
+> never be targeted, upgraded, re-used, or referenced as "the
+> deployment" by any developer, agent, script, or CI job. Until a
+> future NS-3 deployment is executed and recorded in
+> [`docs/DEVNET.md`](DEVNET.md), there is **no active, supported
+> GraveYield devnet deployment**. Decision record: **DR-002** in
 > [`docs/DECISIONS.md`](DECISIONS.md). Owner directive of 2026-11-03.
 
 ## 1. Deployment lineage at a glance
 
 | Generation | Deployed (UTC) | GraveScanner | GraveVault | Upgrade authority | Status |
 |---|---|---|---|---|---|
-| NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — frozen (DR-001, 2026-10-25: key dead) |
-| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — frozen by this record: key permanently lost** |
-| NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the only deployment that may be created |
+| NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — operationally frozen (authority key dead; DR-001 2026-10-25); not formally frozen on-chain |
+| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — operationally frozen by this record (authority key permanently lost; DR-002); not formally frozen on-chain** |
+| NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the only deployment that may be created; once recorded in `docs/DEVNET.md` it becomes the active, supported deployment |
 
-## 2. NS-2 deployment record (frozen by this document)
+## 2. NS-2 deployment record (legacy — operationally frozen; see §5)
 
 Executed 2026-10-25 (epoch 1191); full runbook narrative in
 [`docs/DEVNET.md`](DEVNET.md) (status line there is superseded — see its
@@ -31,11 +35,25 @@ banner).
 | Initialize tx (finalized) | `64nYNYuud68irZpi5jgKL5CQNWRMH8jcXGRYiACoVhBRtvsqLCHCCitXeuKMjUTvzdSu6Syab2XKnEbaNMDT7wki` (slot 514 928 823) | `2venFHC3K7JWKWT61H735uK7Yi38fHvz8EnDTpKmAgSj3P8z5tRuaxQ9g1DBSHTxD4BNiuzXf3auv5M3mrNgbLKf` (slot 514 928 827) |
 | Deployed bytes | CI run 40178764437 (commit `d4661b4`), sha256 `2e367ea0…cf232`, 367 864 B | CI run 40178764437, sha256 `cbbe3b0f…98518`, 407 184 B |
 
-**Shared historical upgrade authority:** `AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`
-— a single key that simultaneously held: program upgrade authority for
-both programs, ProtocolConfig authority for both programs, and both
-oracle signing roles (`activity_oracle`, `launch_price_oracle` —
-`docs/assessments/phase4-assessment.md` §4 B1; `ORACLE_PIPELINE.md`).
+**Shared historical authority:** `AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`
+— one key held every privileged role of the NS-2 deployment. Each role
+is evidenced independently; the ProgramData embedding verified in §3
+proves **only** the upgrade-authority role:
+
+- **Program upgrade authority** (both programs): verified on-chain
+  from the ProgramData accounts (§3).
+- **ProtocolConfig authority** (both programs): verified on-chain by
+  read-only decode of both ProtocolConfig accounts (`authority` field
+  equals this key; `pending_authority` zeroed) — recorded in
+  `docs/assessments/phase4-assessment.md` §4 B1 and re-verified
+  read-only 2026-11-03.
+- **Oracle signing roles** (`activity_oracle`, `launch_price_oracle`,
+  scanner ProtocolConfig): both fields equal this key — recorded from
+  the live config accounts 2026-10-26
+  (`grave-indexer/docs/ORACLE_PIPELINE.md` §2.4) and re-verified
+  read-only 2026-11-03; `initialize` sets both oracles to the authority
+  parameter.
+
 Its private key is **permanently lost** (§4 below).
 
 ## 3. On-chain state (read-only RPC verification, 2026-11-03)
@@ -63,10 +81,19 @@ no upgrade, authority rotation, or close was ever attempted.
    recorded as **"unverified"** (`docs/assessments/phase4-assessment.md`
    §4 B1; `ORACLE_PIPELINE.md`).
 2. Forensic investigation 2026-11-03 (owner's report:
-   `GraveYield_DR-001_Keypair_Custody_Forensics_2026-11-03`): no key
-   material on any VM, no `~/.config/solana`, no shell history, and
-   **zero keypair files ever committed to any repository** (verified via
-   `git log --all --diff-filter=A` across all four repos).
+   `GraveYield_DR-001_Keypair_Custody_Forensics_2026-11-03`). What was
+   actually examined, and nothing more: (a) the original operator
+   workspace is **not searchable** — its contents were destroyed by the
+   recorded 2026-10-26 workspace reset, which is itself the recorded
+   loss event; (b) the **current environment** (a new VM provisioned
+   after that reset) was swept end to end: no `*keypair*` file, no
+   `devnet-keys/`, no `keys/`, no `target/`, no `~/.config/solana`, no
+   shell history, and the canonical addresses absent from every local
+   file; (c) git history of all four repositories shows **zero keypair
+   files ever committed** (`git log --all --diff-filter=A`); (d) the
+   owner-side search of handed-over artifacts and personal storage
+   returned nothing (item 3). No other VM, filesystem, or shell history
+   was searched, and none is claimed.
 3. Owner-side search completed 2026-11-03 with **no findings**
    (owner-confirmed). Decision D1 resolves to branch (b): the key is
    gone.
@@ -86,9 +113,11 @@ no upgrade, authority rotation, or close was ever attempted.
   formally frozen on-chain. They are **operationally frozen**: no
   signature holder exists, so no privileged instruction can ever
   succeed. Treat them as permanently inaccessible.
-- Because the same key was also the config authority and both oracle
-  authorities, protocol-config changes and attestation signing are
-  equally impossible (`docs/assessments/phase4-assessment.md` B1/B2).
+- Because the same key was also the ProtocolConfig authority (both
+  programs) and both oracle signers (verified by read-only
+  ProtocolConfig decode, §2), protocol-config changes and attestation
+  signing are equally impossible
+  (`docs/assessments/phase4-assessment.md` B1/B2).
 
 ## 6. Preservation decision (owner directive, 2026-11-03)
 
@@ -118,17 +147,26 @@ no upgrade, authority rotation, or close was ever attempted.
 7. Deployment credentials must never be committed to Git, printed in
    logs, or exposed in agent output.
 
-The legacy IDs may appear only in: this file, historical/appendix
-documentation, and historical evidence artifacts. After NS-3, they must
-not appear in any active code path (same acceptance rule NS-2 applied to
-NS-1's IDs).
+The legacy IDs may appear only in:
+
+- `docs/LEGACY_DEPLOYMENTS.md` (this file),
+- `docs/DECISIONS.md` (decision records),
+- the historical sections of `docs/DEVNET.md` (the preserved NS-2
+  execution record below its supersession banner),
+- historical evidence artifacts (forensic reports, worklog entries,
+  assessment records, bundles/patches of frozen commits).
+
+After NS-3, they must not appear in any active code path or active
+documentation (same acceptance rule NS-2 applied to NS-1's IDs).
 
 ## 8. How to tell legacy from active
 
 - **Active deployment = the one recorded at the top of
   `docs/DEVNET.md` with a matching status line and a deployment date
   after 2026-11-03, using program IDs different from every ID in this
-  file.** Until that entry exists, there is no active devnet deployment;
+  file.** Until that entry exists, there is no active, supported
+  GraveYield devnet deployment — the legacy NS-1/NS-2 programs remain
+  deployed on devnet but are operationally frozen and unsupported;
   build and test against localnet
   (`scripts/devnet/local_rehearsal.sh` / `solana-test-validator`).
 - Any constant in the tree still naming `CuQZes…` / `Bd5smh…` refers to
@@ -139,8 +177,12 @@ NS-1's IDs).
   `indexer/src/config.ts`, `ops/src/config.ts`, console `data.ts`, and
   the pinned PDA vectors in tests).
 - Do not point admin tooling (`protocol_admin.mjs`) at devnet expecting
-  an active deployment: authority actions would fail, and read-only
-  calls would hit tombstones.
+  an active, supported deployment. The legacy programs are still live
+  and executable on-chain, so read-only RPC queries return real account
+  data. What fails is every authority-dependent action: upgrades,
+  authority changes, close, protocol-config updates, and attestation
+  signing all require a signature from the lost key, so they can never
+  succeed.
 
 ## 9. References
 
