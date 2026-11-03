@@ -12,6 +12,7 @@
 | ID | Date (UTC) | Decision | Resolves |
 |---|---|---|---|
 | DR-001 | 2026-10-25 | NS-1: deployer key custody resolved — dead key; path B (fresh devnet deployment); current deployment retained as frozen static reference | B1, NS-1 (gates NS-2) |
+| DR-002 | 2026-11-03 | NS-2 legacy freeze — shared authority key permanently lost (ProgramData upgrade authority verified on-chain; ProtocolConfig authority and both oracle signers verified by read-only config-account decode; forensics 2026-11-03; owner-side search empty); deployments preserved untouched as historical evidence; NS-3 fresh deployment approved, to be executed manually by the owner with owner-held keys | phase-4 assessment B1, decision D1 (branch b) |
 
 ---
 
@@ -89,3 +90,70 @@ unchanged: both configs decode at spec defaults, both drills pass
 program-owned accounts, zero references to the old IDs remain in active
 code paths, and `docs/DEVNET.md` carries the new signature table with
 correct UTC dates.
+
+---
+
+## DR-002 — NS-2 legacy freeze: authority key permanently lost; NS-3 fresh deployment approved (owner-executed) — 2026-11-03
+
+**Decision.** The NS-2 (DR-001 refresh) deployment's shared authority
+key (`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`) is **permanently
+unrecoverable**. It was the on-chain ProgramData upgrade authority for
+both programs (verified from the ProgramData accounts); read-only
+decodes of both ProtocolConfig accounts independently show it was also
+their `authority` and — in the scanner config — both oracle signers
+(`activity_oracle`, `launch_price_oracle`), consistent with
+`docs/assessments/phase4-assessment.md` §4 B1 and
+`grave-indexer/docs/ORACLE_PIPELINE.md` §2.4. The two programs
+(`CuQZes…Ao54`, `Bd5smh…7rg`) and their ProgramData accounts remain
+deployed and executable on-chain and are preserved **untouched as
+legacy, operationally frozen deployments** — never formally frozen
+on-chain (the authority was not revoked); there is simply no key holder
+left, so every authority-dependent action can never succeed. All
+future development targets a fresh **NS-3** deployment with new program
+IDs. Per the owner's directive, the new deployment authority will be
+generated and secured **manually by the owner**, and the redeployment
+will be executed **manually by the owner with their own assistant, one
+verified step at a time** — agents are not authorized to generate
+credentials, deploy, or perform on-chain transactions.
+
+**Custody answer:** `recoverable = no` (owner-side search 2026-11-03:
+empty; closes decision D1 → branch (b)).
+
+**Evidence basis.**
+
+1. Forensic report 2026-11-03
+   (`GraveYield_DR-001_Keypair_Custody_Forensics_2026-11-03`, owner's
+   copy): keypairs minted 2026-10-25 in the operator-workspace custody
+   directory, consumed by the deployment + drills, destroyed by the
+   recorded 2026-10-26 workspace reset; export to owner recorded as
+   "unverified"; zero keypair files ever committed to any repository.
+2. Read-only RPC verification 2026-11-03: all four accounts live;
+   authority embedding unchanged since the deploy slots
+   (`docs/LEGACY_DEPLOYMENTS.md` §3).
+3. Owner confirmation 2026-11-03: no custody keypairs found in any
+   handed-over artifact or personal storage.
+
+**Consequences.**
+
+1. `docs/LEGACY_DEPLOYMENTS.md` is the canonical frozen record
+   (lineage NS-1 → NS-2 → NS-3, full addresses, on-chain state, binding
+   preservation rules, legacy-vs-active guidance).
+2. `docs/DEVNET.md` carries a supersession banner; its body is preserved
+   unmodified as the historical NS-2 execution record.
+3. The active-code ID surface (DR-001 consequence 4 catalogue) remains
+   as-is until the owner-approved NS-3 sync. Until then, constants
+   naming `CuQZes…`/`Bd5smh…` are inert legacy references and there is
+   **no active, supported GraveYield devnet deployment** — the legacy
+   NS-2 programs remain deployed on devnet but are operationally frozen
+   and unsupported (development targets localnet).
+4. A Redeployment Readiness Report (2026-11-03, owner's copy) lists the
+   exact future-modification surface, prerequisites, and verification
+   steps for NS-3; it is a review artifact, not an authorization.
+
+**Verification hook.** NS-3 acceptance mirrors NS-2's (baseline §7):
+both configs decode at spec defaults on the NEW IDs, both drills pass,
+zero references to the NS-2 IDs remain in active code paths (legacy
+mentions allowed only in `docs/LEGACY_DEPLOYMENTS.md`,
+`docs/DECISIONS.md`, the historical sections of `docs/DEVNET.md`, and
+historical evidence artifacts), and `docs/DEVNET.md` carries the new
+signature table with correct UTC dates.
