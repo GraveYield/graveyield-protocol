@@ -1,5 +1,17 @@
 # Devnet Runbook — GraveYield Protocol
 
+> ⚠️ **STATUS SUPERSEDED — LEGACY DEPLOYMENT (2026-11-03).** The NS-2
+> (DR-001 refresh) deployment documented below is **legacy and
+> permanently frozen**: its single upgrade/config/oracle authority key
+> (`AsB5uPtT…EWXa`) is permanently lost (forensics 2026-11-03; owner
+> search empty; decision **DR-002** in `docs/DECISIONS.md`). Nothing in
+> this runbook may be deployed to, upgraded, or re-used. Full frozen
+> record: **[`docs/LEGACY_DEPLOYMENTS.md`](LEGACY_DEPLOYMENTS.md)**.
+> The future NS-3 deployment uses fresh program IDs, generated and held
+> by the owner, and will be documented here only after it is executed.
+> Until then there is **no active devnet deployment**. The text below is
+> preserved unmodified as the historical execution record.
+
 > **Status: EXECUTED (refresh).** The current devnet deployment is the
 > DR-001 refresh executed on **2026-10-25** (epoch 1191): both programs
 > live under the new program IDs below, both ProtocolConfigs initialized
