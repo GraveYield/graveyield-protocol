@@ -669,7 +669,14 @@ async function cmdDrill(args) {
     }
     console.log(`  OK intruder rejected: ${decoded.name} (${decoded.hex})`);
   }
-  // 5. Authority unpauses; readback restored.
+  // 5. Post-intruder readback: the rejected unauthorized attempt must NOT
+  // have changed the pause state. The authority paused in step 2 and nothing
+  // unpaused it since, so the correct post-intruder expected state is TRUE —
+  // the protocol is STILL paused here, for both programs. This independent
+  // readback pins that the intruder rejection left the pause intact and that
+  // only the authority's own unpause in step 6 restores false.
+  await assertConfig(connection, program, { [pausedField]: true });
+  // 6. Authority unpauses; readback restored.
   await sendAndConfirmTransaction(
     connection,
     new Transaction().add(buildPauseIx(programId, authority.publicKey, false)),

@@ -160,4 +160,45 @@ describe("NS-3 local-rehearsal governance authority (one temporary key, whole li
       "deploy_devnet.sh must keep templating the governance KEYPAIR for the devnet drill",
     );
   });
+
+  test("cmdDrill pins the post-intruder expected state: paused stays TRUE until the authority unpauses", () => {
+    const src = readFileSync(join(HERE, "..", "protocol_admin.mjs"), "utf8");
+    const drill = src.slice(
+      src.indexOf("async function cmdDrill"),
+      src.indexOf("async function main"),
+    );
+    const intruderOk = drill.indexOf(`intruder rejected`);
+    const unpause = drill.indexOf("buildPauseIx(programId, authority.publicKey, false)");
+    const restoredFalse = drill.indexOf(
+      "assertConfig(connection, program, { [pausedField]: false })",
+    );
+    assert.ok(intruderOk !== -1, "intruder-rejection marker missing from cmdDrill");
+    assert.ok(unpause !== -1, "authority unpause missing from cmdDrill");
+    assert.ok(restoredFalse !== -1, "restored-unpaused readback missing from cmdDrill");
+    // Exactly two paused=TRUE readbacks must exist: one right after the
+    // authority pause (step 3) and one immediately after the intruder
+    // rejection (step 5) — the post-intruder expected state is TRUE because
+    // the rejected attempt must not have lifted the authority's pause.
+    const trueReadbacks = [
+      ...drill.matchAll(/assertConfig\(connection, program, \{ \[pausedField\]: true \}\)/g),
+    ].map((m) => m.index);
+    assert.equal(
+      trueReadbacks.length,
+      2,
+      "cmdDrill must read back paused=true after the authority pause AND after the intruder rejection",
+    );
+    const [afterPause, postIntruder] = trueReadbacks;
+    assert.ok(
+      afterPause < intruderOk,
+      "the first paused=true readback must precede the intruder attempt",
+    );
+    assert.ok(
+      intruderOk < postIntruder,
+      "the post-intruder readback (paused stays TRUE) must come after the intruder rejection",
+    );
+    assert.ok(
+      postIntruder < unpause && unpause < restoredFalse,
+      "only after the post-intruder readback may the authority unpause (readback: false restored)",
+    );
+  });
 });
