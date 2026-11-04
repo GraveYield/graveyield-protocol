@@ -35,22 +35,25 @@ const PROD_DEPLOY = join(HERE, "..", "deploy_devnet.sh");
 function logicalLines(path) {
   return readFileSync(path, "utf8")
     .split("\n")
-    .reduce((acc, raw) => {
-      const line = raw.replace(/#.*$/, ""); // strip comments, not strings
-      if (/\\\s*$/.test(line) && acc.open) {
-        acc.buf.push(line.replace(/\\\s*$/, ""));
-      } else if (/\\\s*$/.test(line)) {
-        acc.open = true;
-        acc.buf = [line.replace(/\\\s*$/, "")];
-      } else if (acc.open) {
-        acc.out.push([...acc.buf, line].join(" "));
-        acc.open = false;
-        acc.buf = [];
-      } else {
-        acc.out.push(line);
-      }
-      return acc;
-    }, { open: false, buf: [], out: [] }).out;
+    .reduce(
+      (acc, raw) => {
+        const line = raw.replace(/#.*$/, ""); // strip comments, not strings
+        if (/\\\s*$/.test(line) && acc.open) {
+          acc.buf.push(line.replace(/\\\s*$/, ""));
+        } else if (/\\\s*$/.test(line)) {
+          acc.open = true;
+          acc.buf = [line.replace(/\\\s*$/, "")];
+        } else if (acc.open) {
+          acc.out.push([...acc.buf, line].join(" "));
+          acc.open = false;
+          acc.buf = [];
+        } else {
+          acc.out.push(line);
+        }
+        return acc;
+      },
+      { open: false, buf: [], out: [] },
+    ).out;
 }
 
 const lines = logicalLines(SCRIPT);
@@ -131,9 +134,7 @@ describe("NS-3 local-rehearsal governance authority (one temporary key, whole li
   });
 
   test("the rehearsal stays strictly local — only the loopback validator URL is used", () => {
-    const urls = lines
-      .map((l) => /--url "?([^" ]+)/.exec(l)?.[1])
-      .filter(Boolean);
+    const urls = lines.map((l) => /--url "?([^" ]+)/.exec(l)?.[1]).filter(Boolean);
     assert.ok(urls.length > 0);
     for (const url of urls) {
       assert.equal(url, "$URL", `every RPC target must be the $URL variable: got ${url}`);
