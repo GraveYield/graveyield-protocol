@@ -12,6 +12,17 @@
 //   node protocol_admin.mjs pause        --url <U> --authority <KP> --program scanner|vault --state true|false
 //   node protocol_admin.mjs check        --url <U> --program scanner|vault
 //   node protocol_admin.mjs drill        --url <U> --authority <KP> --intruder <KP> --program scanner|vault
+//   node protocol_admin.mjs register-oracle --url <U> --authority <KP>
+//        [--fee-payer <KP>] [--activity-oracle <PK>] [--launch-price-oracle <PK>]
+//
+// NS-3 authority arrangement (DR-002): the deployer keypair pays fees and
+// holds the initial upgrade authority; the GOVERNANCE authority is the
+// ProtocolConfig authority for both programs; the activity and launch-price
+// oracles are dedicated keys registered post-initialization via
+// `register-oracle` (update_protocol_config). `--fee-payer` on
+// register-oracle keeps the governance key OFF the fee-paying path: the
+// instruction is signed by the governance authority, the transaction fee
+// is paid by the separate fee-payer keypair.
 //
 // `drill` is the Phase 11 "emergency controls tested" exercise, executed
 // against devnet (or a local solana-test-validator rehearsal — see
@@ -48,9 +59,16 @@ import {
 
 // ---------------------------------------------------------------- constants
 
-/** Devnet program IDs — mirrored in Anchor.toml and both declare_id! calls. */
-export const SCANNER_PROGRAM_ID = new PublicKey("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54");
-export const VAULT_PROGRAM_ID = new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
+/**
+ * NS-3 devnet program IDs (owner-generated, owner-held keypairs; DR-002) —
+ * mirrored in Anchor.toml and both declare_id! calls. Deployment and
+ * on-chain acceptance are PENDING: until the owner executes the NS-3
+ * deployment (docs/DEVNET.md), these addresses answer nothing on devnet.
+ * NS-2 (CuQZes…/Bd5smh…) and NS-1 (5JiCVx…/HUyoG5…) are preserved as legacy
+ * records in docs/LEGACY_DEPLOYMENTS.md.
+ */
+export const SCANNER_PROGRAM_ID = new PublicKey("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL");
+export const VAULT_PROGRAM_ID = new PublicKey("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya");
 
 const PROTOCOL_CONFIG_SEED = Buffer.from("protocol_config", "utf8");
 
@@ -180,6 +198,55 @@ function buildPauseIx(programId, authority, paused) {
       { pubkey: authority, isSigner: true, isWritable: false },
     ],
     data: buf,
+  });
+}
+
+/**
+ * GraveScanner::update_protocol_config — variable-length borsh params
+ * (8×Option fields). Used by `register-oracle` to set the dedicated
+ * activity / launch-price oracle signers. Layout (normative):
+ * programs/grave-scanner/src/instructions/update_protocol_config.rs
+ *   Option<u64>, Option<u16>, Option<u64>, Option<u64>, Option<u64>,
+ *   Option<i64>, Option<Pubkey>, Option<Pubkey>
+ * None = 0x00; Some = 0x01 + LE value. Oracle-only update (both oracles,
+ * scalars None) = 8(disc) + 6 + 33 + 33 = 80 bytes — the same shape the
+ * lifecycle harness's register_oracle.mjs pins.
+ * accounts: [protocol_config PDA (mut), authority (signer)]
+ */
+export function buildScannerUpdateProtocolConfigIx({
+  programId,
+  authority,
+  activityOracle = null,
+  launchPriceOracle = null,
+  inactivitySeconds = null,
+  priceCollapseBps = null,
+  minTvlLamports = null,
+  anchorStalenessSeconds = null,
+  lpBurnDustThreshold = null,
+  certTtlSeconds = null,
+}) {
+  const optU64 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; })()]));
+  const optI64 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; })()]));
+  const optU16 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; })()]));
+  const optPk = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), pk(new PublicKey(v))]));
+  const data = Buffer.concat([
+    globalDiscriminator("update_protocol_config"),
+    optU64(inactivitySeconds),
+    optU16(priceCollapseBps),
+    optU64(minTvlLamports),
+    optU64(anchorStalenessSeconds),
+    optU64(lpBurnDustThreshold),
+    optI64(certTtlSeconds),
+    optPk(activityOracle),
+    optPk(launchPriceOracle),
+  ]);
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: configPda(programId), isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    data,
   });
 }
 
@@ -455,6 +522,43 @@ async function cmdCheck(args) {
   }
 }
 
+async function cmdRegisterOracle(args) {
+  const url = requireOpt(args, "url");
+  const authority = await loadKeypair(requireOpt(args, "authority"));
+  const feePayer = args["fee-payer"] !== undefined ? await loadKeypair(args["fee-payer"]) : authority;
+  const program = "scanner"; // update_protocol_config is a GraveScanner instruction
+  const activity = args["activity-oracle"] !== undefined ? new PublicKey(args["activity-oracle"]) : null;
+  const launch = args["launch-price-oracle"] !== undefined ? new PublicKey(args["launch-price-oracle"]) : null;
+  if (!activity && !launch) {
+    throw new Error("nothing to update: pass --activity-oracle <PK> and/or --launch-price-oracle <PK>");
+  }
+  const connection = new Connection(url, "confirmed");
+  const ix = buildScannerUpdateProtocolConfigIx({
+    programId: programIdFor(program),
+    authority: authority.publicKey,
+    activityOracle: activity,
+    launchPriceOracle: launch,
+  });
+  // The instruction is signed by the governance authority; the transaction
+  // FEE is paid by the separate fee payer (deployer). Both must sign the
+  // transaction; only the authority is an instruction-level signer.
+  const tx = new Transaction().add(ix);
+  tx.feePayer = feePayer.publicKey;
+  const signers = feePayer.publicKey.equals(authority.publicKey)
+    ? [authority]
+    : [feePayer, authority];
+  console.log(
+    `[scanner] update_protocol_config — authority ${authority.publicKey.toBase58()}, fee payer ${feePayer.publicKey.toBase58()}` +
+      `${activity ? `, activity_oracle → ${activity.toBase58()}` : ""}${launch ? `, launch_price_oracle → ${launch.toBase58()}` : ""}`,
+  );
+  const sig = await sendAndConfirmTransaction(connection, tx, signers);
+  console.log(`  tx ${sig}`);
+  const expect = {};
+  if (activity) expect.activityOracle = activity.toBase58();
+  if (launch) expect.launchPriceOracle = launch.toBase58();
+  await assertConfig(connection, program, expect);
+}
+
 async function cmdDrill(args) {
   const url = requireOpt(args, "url");
   const authority = await loadKeypair(requireOpt(args, "authority"));
@@ -529,11 +633,13 @@ async function main() {
       return cmdPause(args);
     case "check":
       return cmdCheck(args);
+    case "register-oracle":
+      return cmdRegisterOracle(args);
     case "drill":
       return cmdDrill(args);
     default:
       console.error(
-        "usage: protocol_admin.mjs <init-scanner|init-vault|init-all|pause|check|drill> --url <U> ... (see header comment)",
+        "usage: protocol_admin.mjs <init-scanner|init-vault|init-all|pause|check|register-oracle|drill> --url <U> ... (see header comment)",
       );
       process.exitCode = 2;
   }

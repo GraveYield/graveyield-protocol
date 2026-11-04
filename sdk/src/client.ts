@@ -87,9 +87,15 @@ import {
   type LaunchPriceDerivation,
 } from "./launchPriceAttestation.js";
 
-/** Default devnet program IDs — DR-001/NS-2 fresh devnet deployment (2026-10-25). */
-export const DEVNET_SCANNER_PROGRAM_ID = "CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54";
-export const DEVNET_VAULT_PROGRAM_ID = "Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg";
+/**
+ * NS-3 devnet program IDs — the assigned GraveYield devnet deployment
+ * (DR-002, owner-generated owner-held keypairs). Deployment and on-chain
+ * acceptance are PENDING (docs/DEVNET.md NS-3 record); the NS-2 deployment
+ * (CuQZes…/Bd5smh…) is preserved as a legacy record in
+ * docs/LEGACY_DEPLOYMENTS.md.
+ */
+export const DEVNET_SCANNER_PROGRAM_ID = "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL";
+export const DEVNET_VAULT_PROGRAM_ID = "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya";
 
 /** Result of `evaluatePool` — the criteria bitmap + per-criterion pass/fail + PDAs. */
 export interface EvaluatePoolOutcome {

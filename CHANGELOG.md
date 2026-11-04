@@ -1,5 +1,66 @@
 # Changelog
 
+## [Unreleased — NS-3 identity synchronization (DR-002; deployment pending)]
+
+### Changed
+
+- **NS-3 identity sync (one atomic change window)** — every active
+  identity surface now names the owner-generated, owner-held NS-3
+  program IDs: both `declare_id!` calls, `Anchor.toml` (localnet +
+  devnet), `deploy_devnet.sh` identity gates,
+  `protocol_admin.mjs` constants, the lifecycle harness (`lib.mjs`,
+  `pin_elfs.mjs`, `prepare_local_accounts.mjs`), the SDK defaults
+  (`sdk/src/client.ts`), the indexer and ops defaults, all six
+  grave-vault fork suites, the SDK PDA/devnet-smoke vectors, the
+  adversary and ops test fixtures. NS-3 is **assigned but NOT deployed**:
+  until the owner executes the deployment recorded in `docs/DEVNET.md`,
+  nothing on devnet answers at the new addresses. The NS-2 and NS-1
+  historical records are preserved verbatim
+  (`docs/LEGACY_DEPLOYMENTS.md`, `docs/DECISIONS.md`, `docs/DEVNET.md`
+  historical sections, `BASELINE_REPORT.md`, assessments, live example
+  artifacts, `CHANGELOG.md` history).
+- **NS-3 authority arrangement implemented in tooling** —
+  `protocol_admin.mjs` gains `register-oracle`: the GraveScanner
+  `update_protocol_config` instruction built from the normative borsh
+  layout (80-byte both-oracles shape), signed by the governance
+  authority with a SEPARATE fee payer (`--fee-payer`), then readback-
+  asserted. `initialize` is unchanged on-chain: it starts both oracle
+  signer fields at the initial configuration authority (the governance
+  key under NS-3), and the dedicated oracles are registered
+  post-initialization. The pending-authority/timelock fields remain
+  reserved write-only state (no functional transfer instruction —
+  documented as such).
+- **Deployment/build separation (keypair-free preparation)** —
+  `deploy_devnet.sh --build-only` builds both ELFs with no keypairs, no
+  RPC and no transactions; the deploy path now byte-checks the ELFs'
+  embedded `declare_id!` against the expected program IDs before any
+  deploy (closes the partial-sync window flagged as risk R-1 in the
+  Stage 1 inspection). New `scripts/devnet/ns3_verify_elf.mjs`,
+  `ns3_identities.mjs`, `ns3_derive_pdas.mjs`, `ns3_verify_sync.mjs`
+  and the `test/ns3_sync.test.mjs` regression battery (M-1: the
+  cross-repository identity-sync assertion the Stage 1 report found
+  missing).
+- **NS-3 local rehearsal path** — `scripts/devnet/local_rehearsal_ns3.sh`
+  exercises the full production sequence on a local
+  `solana-test-validator` with TEST identities and locally built ELFs:
+  programs loaded at the NS-3 IDs via `--bpf-program`, governance-
+  authority initialization, both emergency-control drills, and
+  separate-signer oracle registration. No owner keypair and no public
+  cluster is touched. `pin_elfs.mjs` gains `--local-so` for the same
+  pre-deployment ELF-source policy (provenance honestly recorded as
+  "local build"); after the owner's deployment the default devnet-dump
+  provenance path applies unchanged.
+- **Documentation status flip (preparation language)** — `docs/DEVNET.md`
+  carries the NS-3 preparation record (identities, pre-deployment
+  derivations, authority arrangement) above the preserved NS-2 record;
+  `docs/technical-documentation.md`, `sdk/README.md`,
+  `docs/PRE_MAINNET_CHECKLIST.md` (KEYS-003) and the
+  `docs/LEGACY_DEPLOYMENTS.md` NS-3 lineage row state assignment +
+  pending-deployment status. The NS-3 ProtocolConfig PDAs
+  (`5PK9pz…kKKe` / `5aocH2…nda`, bump 255) are pre-deployment
+  derivations, not on-chain facts; ProgramData addresses remain PENDING
+  until read from the deployed program accounts.
+
 ## [Unreleased — NS-2 devnet refresh executed (DR-001)]
 
 ### Changed

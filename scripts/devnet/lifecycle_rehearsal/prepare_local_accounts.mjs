@@ -283,10 +283,10 @@ const pushUnique = (line) => {
   if (!flagLines.includes(line)) flagLines.push(line);
 };
 pushUnique(
-  `--bpf-program CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54 ${join(artifacts, "grave_scanner.so")}`,
+  `--bpf-program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL ${join(artifacts, "grave_scanner.so")}`,
 );
 pushUnique(
-  `--bpf-program Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg ${join(artifacts, "grave_vault.so")}`,
+  `--bpf-program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya ${join(artifacts, "grave_vault.so")}`,
 );
 pushUnique(
   `--bpf-program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 ${join(fixtures, "raydium_v4.so")}`,

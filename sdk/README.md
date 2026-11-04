@@ -145,17 +145,25 @@ behavior. The three fixes were backported here verbatim on 2026-10-24
 the salvor-bots suite, and the drift gate above now makes any future
 divergence a CI failure.
 
-## Devnet program IDs (real, deployed)
+## NS-3 devnet program IDs (assigned; deployment PENDING)
 
-| Program | Devnet ID |
+| Program | NS-3 ID |
 |---|---|
-| GraveScanner | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
-| GraveVault | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
-| Scanner ProtocolConfig PDA | `Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD` |
-| Vault ProtocolConfig PDA | `hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS` |
+| GraveScanner | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
+| GraveVault | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
+| Scanner ProtocolConfig PDA | `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe` |
+| Vault ProtocolConfig PDA | `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` |
 
-The devnet smoke tests assert these addresses and decode the live
-ProtocolConfigs against the spec default tables
+The config PDAs are the pre-deployment derivations of `['protocol_config']`
+under the assigned IDs (bump 255; `node scripts/devnet/ns3_derive_pdas.mjs`
+reproduces them). They become on-chain facts only after the owner executes
+the NS-3 deployment recorded in `docs/DEVNET.md` — until then nothing on
+devnet answers at these addresses. Historical deployments (NS-2
+`CuQZes…Ao54` / `Bd5smh…s7rg`, NS-1 `5JiCVx…zvNF` / `HUyoG5…ox3v6`) are
+preserved in `docs/LEGACY_DEPLOYMENTS.md`.
+
+The devnet smoke tests assert the NS-3 derivations and (once the deployment
+exists) decode the live ProtocolConfigs against the spec default tables
 (`SCANNER_PROTOCOL_CONFIG_DEFAULTS` / `VAULT_PROTOCOL_CONFIG_DEFAULTS`).
 
 ## LOCKER-002

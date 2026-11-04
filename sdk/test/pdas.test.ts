@@ -6,11 +6,13 @@
 // `programs/grave-vault/src/constants.rs`. Drift here would surface as
 // Anchor `ConstraintSeeds` reverts on chain.
 //
-// The devnet program IDs (CuQZes... / Bd5smh...) are the REAL deployed
-// addresses (DR-001/NS-2 fresh devnet deployment, 2026-10-25 — see
-// docs/DECISIONS.md; the pre-refresh deployment is a frozen static
-// reference). Test vectors derived against them pin the canonical PDAs
-// the SDK will reproduce on chain.
+// The NS-3 devnet program IDs (EFJpKt… / 7VxUGJ…) are the ASSIGNED
+// deployment identities (DR-002, owner-generated owner-held keypairs).
+// The ProtocolConfig PDAs below are the pre-deployment derivations of
+// ['protocol_config'] under those IDs (bump 255) — after the owner
+// executes the NS-3 deployment they must match the on-chain readbacks
+// byte-exactly. The NS-2 (CuQZes…/Bd5smh…) and NS-1 (5JiCVx…/HUyoG5…)
+// deployments are preserved in docs/LEGACY_DEPLOYMENTS.md.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -31,8 +33,8 @@ import {
   vaultSolHoldingPda,
 } from "../src/index.js";
 
-const SCANNER = new PublicKey("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54");
-const VAULT = new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
+const SCANNER = new PublicKey("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL");
+const VAULT = new PublicKey("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya");
 const AMM = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 const POOL = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 const HOLDER = new PublicKey("11111111111111111111111111111111");
@@ -42,8 +44,8 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     const pda = scannerProtocolConfigPda(SCANNER);
     assert.equal(
       pda.toBase58(),
-      "Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD",
-      "scanner ProtocolConfig PDA must match the devnet-deployed value (DR-001 fresh deployment)",
+      "5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe",
+      "scanner ProtocolConfig PDA must match the pre-deployment NS-3 derivation (bump 255)",
     );
   });
 
@@ -51,8 +53,8 @@ describe("PDA derivation — deterministic, canonical seeds", () => {
     const pda = vaultProtocolConfigPda(VAULT);
     assert.equal(
       pda.toBase58(),
-      "hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS",
-      "vault ProtocolConfig PDA must match the devnet-deployed value (DR-001 fresh deployment)",
+      "5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda",
+      "vault ProtocolConfig PDA must match the pre-deployment NS-3 derivation (bump 255)",
     );
   });
 
