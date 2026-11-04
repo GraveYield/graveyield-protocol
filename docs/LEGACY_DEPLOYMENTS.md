@@ -121,10 +121,11 @@ no upgrade, authority rotation, or close was ever attempted.
 - The NS-2 deployments are preserved **untouched** as permanent,
   verifiable historical evidence of the DR-001 refresh and its drills —
   same precedent as NS-1 under DR-001 consequence 3.
-- All future work uses **fresh program IDs (NS-3)**. The NS-3 keys will
-  be generated and held **by the project owner**; the owner and their
-  own assistant will execute the redeployment manually, one verified
-  step at a time (DR-002).
+- The next supported devnet deployment will be **NS-3**, using fresh
+  program IDs. The owner generates and retains all NS-3 keypairs and
+  manually executes deployment transactions. Agents may assist with
+  preparation and verification but must not handle private keys or
+  independently execute deployment transactions (DR-002).
 - Recorded as decision **DR-002** in `docs/DECISIONS.md`.
 
 ## 7. Where legacy IDs appear

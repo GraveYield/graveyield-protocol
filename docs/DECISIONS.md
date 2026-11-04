@@ -105,13 +105,12 @@ programs, ProtocolConfig authority for both, and both scanner oracle
 signers (role verification: `docs/LEGACY_DEPLOYMENTS.md` §2–§3) — so
 no authority-dependent action on NS-2 can be signed anymore. The NS-2
 programs remain deployed on devnet and are preserved untouched as a
-historical record; they are not the active deployment target. All
-future work targets a fresh **NS-3** deployment with newly generated
-deployment identities (fresh program IDs and keys). The owner controls
-key generation, custody, and deployment: the NS-3 keys will be
-generated and held by the owner, and the redeployment will be executed
+historical record; they are not the active deployment target. The next
+supported devnet deployment will be **NS-3**, using fresh program IDs
+and owner-controlled keypairs. The redeployment will be executed
 manually by the owner with their own assistant, one verified step at a
-time.
+time; agents may assist with preparation and verification but must not
+handle private keys or independently execute deployment transactions.
 
 **Custody answer:** `recoverable = no` (owner-side search 2026-11-03:
 empty; closes decision D1 → branch (b)).

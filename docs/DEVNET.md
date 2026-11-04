@@ -8,8 +8,10 @@
 > fresh program IDs, keys generated and held by the owner, executed
 > manually by the owner and documented here once deployed. Full record:
 > [`docs/LEGACY_DEPLOYMENTS.md`](LEGACY_DEPLOYMENTS.md). The runbook
-> below is preserved as the NS-2 execution record; the same procedure
-> serves the upcoming NS-3 deployment and local rehearsals.
+> below preserves the NS-2 execution record and serves as a procedural
+> reference for NS-3 deployment and local rehearsals. All NS-2-specific
+> IDs, addresses, and configuration values must be replaced and
+> independently verified before NS-3 execution.
 
 > **Status: EXECUTED (refresh).** The current devnet deployment is the
 > DR-001 refresh executed on **2026-10-25** (epoch 1191): both programs
