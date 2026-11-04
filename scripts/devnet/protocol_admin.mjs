@@ -288,6 +288,22 @@ export function configPda(programId) {
 }
 
 /**
+ * Assemble the register-oracle TRANSACTION (pure, no RPC): the instruction
+ * plus the fee-payer wiring. The GOVERNANCE authority is the ONLY
+ * instruction-level signer; the fee payer (deployer under the NS-3
+ * arrangement) is the transaction-level fee payer and, when different
+ * from the authority, an additional transaction-level signature. Exported
+ * for offline tests — the fee-payer/authority separation is a wire
+ * property the review pins.
+ */
+export function assembleOracleUpdateTransaction({ instruction, authorityPubkey, feePayerPubkey }) {
+  const tx = new Transaction().add(instruction);
+  tx.feePayer = feePayerPubkey;
+  const instructionSignerCount = feePayerPubkey.equals(authorityPubkey) ? 1 : 2;
+  return { tx, instructionSignerCount };
+}
+
+/**
  * Byte-exact sync PDA derivation — web3.js 3.x removed the 1.x
  * `PublicKey.findProgramAddressSync` static, and this script derives PDAs
  * in synchronous instruction-builder contexts. Mirrors the algorithm in
@@ -575,14 +591,23 @@ async function cmdRegisterOracle(args) {
     activityOracle: activity,
     launchPriceOracle: launch,
   });
+  const { tx, instructionSignerCount } = assembleOracleUpdateTransaction({
+    instruction: ix,
+    authorityPubkey: authority.publicKey,
+    feePayerPubkey: feePayer.publicKey,
+  });
   // The instruction is signed by the governance authority; the transaction
   // FEE is paid by the separate fee payer (deployer). Both must sign the
   // transaction; only the authority is an instruction-level signer.
-  const tx = new Transaction().add(ix);
-  tx.feePayer = feePayer.publicKey;
   const signers = feePayer.publicKey.equals(authority.publicKey)
     ? [authority]
     : [feePayer, authority];
+  if (signers.length !== instructionSignerCount) {
+    throw new Error(
+      `signer wiring invariant broken: transaction carries ${signers.length} signers ` +
+        `but the instruction set requires ${instructionSignerCount}`,
+    );
+  }
   console.log(
     `[scanner] update_protocol_config — authority ${authority.publicKey.toBase58()}, fee payer ${feePayer.publicKey.toBase58()}` +
       `${activity ? `, activity_oracle → ${activity.toBase58()}` : ""}${launch ? `, launch_price_oracle → ${launch.toBase58()}` : ""}`,
