@@ -19,11 +19,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
 import { NS3, NS3_PDAS, configPdaWithBump, findProgramAddressSync } from "../ns3_identities.mjs";
-import {
-  checkProtocolInternal,
-  checkPinnedPdaVectors,
-  LEGACY_IDS,
-} from "../ns3_verify_sync.mjs";
+import { checkProtocolInternal, checkPinnedPdaVectors, LEGACY_IDS } from "../ns3_verify_sync.mjs";
 
 describe("NS-3 identity synchronization (M-1)", () => {
   test("all ACTIVE identity surfaces agree on the NS-3 program IDs", () => {

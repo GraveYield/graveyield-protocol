@@ -19,7 +19,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PublicKey } from "@solana/web3.js";
-import { NS3, NS3_PDAS, configPdaWithBump, findProgramAddressSync } from "./ns3_identities.mjs";
+import { NS3, NS3_PDAS, configPdaWithBump } from "./ns3_identities.mjs";
 
 const DEVNET_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = dirname(dirname(DEVNET_DIR));
@@ -46,19 +46,43 @@ export const PROTOCOL_ACTIVE_SURFACES = [
   ["Anchor.toml", /grave_vault\s*=\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/g],
   ["scripts/devnet/deploy_devnet.sh", /EXPECTED_SCANNER="([1-9A-HJ-NP-Za-km-z]{43,44})"/],
   ["scripts/devnet/deploy_devnet.sh", /EXPECTED_VAULT="([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["scripts/devnet/protocol_admin.mjs", /SCANNER_PROGRAM_ID = new PublicKey\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/],
-  ["scripts/devnet/protocol_admin.mjs", /VAULT_PROGRAM_ID = new PublicKey\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/],
+  [
+    "scripts/devnet/protocol_admin.mjs",
+    /SCANNER_PROGRAM_ID = new PublicKey\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/,
+  ],
+  [
+    "scripts/devnet/protocol_admin.mjs",
+    /VAULT_PROGRAM_ID = new PublicKey\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/,
+  ],
   ["scripts/devnet/lifecycle_rehearsal/lib.mjs", /scanner: pk\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/],
   ["scripts/devnet/lifecycle_rehearsal/lib.mjs", /vault: pk\("([1-9A-HJ-NP-Za-km-z]{43,44})"\)/],
-  ["scripts/devnet/lifecycle_rehearsal/pin_elfs.mjs", /SCANNER_ID = "([1-9A-HJ-NP-Za-km-z]{43,44})"/],
+  [
+    "scripts/devnet/lifecycle_rehearsal/pin_elfs.mjs",
+    /SCANNER_ID = "([1-9A-HJ-NP-Za-km-z]{43,44})"/,
+  ],
   ["scripts/devnet/lifecycle_rehearsal/pin_elfs.mjs", /VAULT_ID = "([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["scripts/devnet/lifecycle_rehearsal/prepare_local_accounts.mjs", /--bpf-program ([1-9A-HJ-NP-Za-km-z]{43,44}) \$\{join\(artifacts, "grave_(?:scanner|vault)\.so"\)\}/g],
+  [
+    "scripts/devnet/lifecycle_rehearsal/prepare_local_accounts.mjs",
+    /--bpf-program ([1-9A-HJ-NP-Za-km-z]{43,44}) \$\{join\(artifacts, "grave_(?:scanner|vault)\.so"\)\}/g,
+  ],
   ["sdk/src/client.ts", /DEVNET_SCANNER_PROGRAM_ID = "([1-9A-HJ-NP-Za-km-z]{43,44})"/],
   ["sdk/src/client.ts", /DEVNET_VAULT_PROGRAM_ID = "([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["indexer/src/config.ts", /DEVNET_SCANNER_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["indexer/src/config.ts", /DEVNET_VAULT_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["ops/src/config.ts", /DEVNET_SCANNER_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/],
-  ["ops/src/config.ts", /DEVNET_VAULT_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/],
+  [
+    "indexer/src/config.ts",
+    /DEVNET_SCANNER_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/,
+  ],
+  [
+    "indexer/src/config.ts",
+    /DEVNET_VAULT_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/,
+  ],
+  [
+    "ops/src/config.ts",
+    /DEVNET_SCANNER_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/,
+  ],
+  [
+    "ops/src/config.ts",
+    /DEVNET_VAULT_PROGRAM_ID = new PublicKey\(\s*"([1-9A-HJ-NP-Za-km-z]{43,44})"/,
+  ],
 ];
 
 export function read(rel) {
@@ -104,7 +128,8 @@ export function checkProtocolInternal() {
       }
     }
   }
-  if (problems.length > 0) throw new Error(`NS-3 identity sync broken:\n  - ${problems.join("\n  - ")}`);
+  if (problems.length > 0)
+    throw new Error(`NS-3 identity sync broken:\n  - ${problems.join("\n  - ")}`);
   return { ok: true, scannerSurfaces: [...seen.scanner], vaultSurfaces: [...seen.vault] };
 }
 
@@ -118,16 +143,21 @@ export function checkPinnedPdaVectors() {
   if (vaultPda !== NS3_PDAS.vaultConfigPda) problems.push("vault PDA self-check failed");
 
   const pdasTest = read("sdk/test/pdas.test.ts");
-  if (!pdasTest.includes(NS3.scannerProgramId)) problems.push("sdk/test/pdas.test.ts: NS-3 scanner ID not pinned");
-  if (!pdasTest.includes(NS3.vaultProgramId)) problems.push("sdk/test/pdas.test.ts: NS-3 vault ID not pinned");
-  if (!pdasTest.includes(scannerPda)) problems.push(`sdk/test/pdas.test.ts: derived scanner PDA ${scannerPda} not pinned`);
-  if (!pdasTest.includes(vaultPda)) problems.push(`sdk/test/pdas.test.ts: derived vault PDA ${vaultPda} not pinned`);
+  if (!pdasTest.includes(NS3.scannerProgramId))
+    problems.push("sdk/test/pdas.test.ts: NS-3 scanner ID not pinned");
+  if (!pdasTest.includes(NS3.vaultProgramId))
+    problems.push("sdk/test/pdas.test.ts: NS-3 vault ID not pinned");
+  if (!pdasTest.includes(scannerPda))
+    problems.push(`sdk/test/pdas.test.ts: derived scanner PDA ${scannerPda} not pinned`);
+  if (!pdasTest.includes(vaultPda))
+    problems.push(`sdk/test/pdas.test.ts: derived vault PDA ${vaultPda} not pinned`);
 
   const smoke = read("sdk/test/devnetSmoke.test.ts");
   if (!smoke.includes(scannerPda) || !smoke.includes(vaultPda)) {
     problems.push("sdk/test/devnetSmoke.test.ts: NS-3 config PDA vectors missing");
   }
-  if (problems.length > 0) throw new Error(`NS-3 PDA vector pins broken:\n  - ${problems.join("\n  - ")}`);
+  if (problems.length > 0)
+    throw new Error(`NS-3 PDA vector pins broken:\n  - ${problems.join("\n  - ")}`);
   return { ok: true, scannerPda, vaultPda };
 }
 
@@ -168,11 +198,18 @@ export function checkCrossRepo(reposDir) {
       results.push({
         repo: "salvor-bots",
         check: "test/devnetSmoke.test.ts free of NS-1-era PDA vectors (BL-4)",
-        ok: !salvorSmoke.text.includes(LEGACY_IDS.ns1ScannerConfigPda) && !salvorSmoke.text.includes(LEGACY_IDS.ns1VaultConfigPda),
+        ok:
+          !salvorSmoke.text.includes(LEGACY_IDS.ns1ScannerConfigPda) &&
+          !salvorSmoke.text.includes(LEGACY_IDS.ns1VaultConfigPda),
       });
     }
   } else {
-    results.push({ repo: "salvor-bots", check: "src mirror", ok: null, note: "sibling checkout not found — skipped" });
+    results.push({
+      repo: "salvor-bots",
+      check: "src mirror",
+      ok: null,
+      note: "sibling checkout not found — skipped",
+    });
   }
 
   // console: data.ts constants
@@ -188,7 +225,12 @@ export function checkCrossRepo(reposDir) {
         consoleData.text.includes(NS3_PDAS.vaultConfigPda),
     });
   } else {
-    results.push({ repo: "graveyield-console", check: "data.ts constants", ok: null, note: "sibling checkout not found — skipped" });
+    results.push({
+      repo: "graveyield-console",
+      check: "data.ts constants",
+      ok: null,
+      note: "sibling checkout not found — skipped",
+    });
   }
 
   // grave-indexer: config defaults
@@ -202,7 +244,12 @@ export function checkCrossRepo(reposDir) {
         indexerConfig.text.includes(NS3.vaultProgramId),
     });
   } else {
-    results.push({ repo: "grave-indexer", check: "config defaults", ok: null, note: "sibling checkout not found — skipped" });
+    results.push({
+      repo: "grave-indexer",
+      check: "config defaults",
+      ok: null,
+      note: "sibling checkout not found — skipped",
+    });
   }
 
   return results;
@@ -218,7 +265,9 @@ function main() {
 
   let failures = 0;
   const internal = checkProtocolInternal();
-  console.log(`OK protocol-internal NS-3 sync (${internal.scannerSurfaces.length}+${internal.vaultSurfaces.length} surfaces)`);
+  console.log(
+    `OK protocol-internal NS-3 sync (${internal.scannerSurfaces.length}+${internal.vaultSurfaces.length} surfaces)`,
+  );
   const pda = checkPinnedPdaVectors();
   console.log(`OK pinned PDA vectors (scanner ${pda.scannerPda}, vault ${pda.vaultPda})`);
   for (const r of checkCrossRepo(reposDir)) {

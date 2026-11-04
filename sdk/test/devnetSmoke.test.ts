@@ -128,7 +128,26 @@ describe("devnet smoke (read-only)", { skip: SKIP }, () => {
 
   skipIf(
     "evaluatePool walks all six criteria against a real Raydium V4 pool (read-only)",
-    async () => {
+    async (t) => {
+      // evaluatePool needs the initialized scanner ProtocolConfig —
+      // client.ensureConfigs() throws "…not initialized on this cluster"
+      // before the pool is ever touched. NS-3 is assigned but NOT yet
+      // deployed/initialized, so like the config-decode tests above this
+      // test reports "deployment pending" instead of failing on the
+      // not-yet-initialized cluster; after the owner executes the NS-3
+      // deployment (docs/DEVNET.md) the fetch below resolves and the
+      // assertions run for real.
+      const scannerCfg = await fetchScannerProtocolConfig(
+        connection,
+        scannerProtocolConfigPda(client.graveScannerProgramId),
+      );
+      if (!scannerCfg) {
+        t.skip(
+          "NS-3 deployment pending: scanner ProtocolConfig not initialized on devnet yet " +
+            "(owner executes deployment per docs/DEVNET.md — this test validates evaluatePool afterward)",
+        );
+        return;
+      }
       // A real mainnet Raydium V4 pool that exists on devnet? No — devnet
       // has no Raydium V4 pools. So we use a hardcoded test pool address
       // and just assert that evaluatePool throws a recoverable error

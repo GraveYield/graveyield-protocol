@@ -225,10 +225,41 @@ export function buildScannerUpdateProtocolConfigIx({
   lpBurnDustThreshold = null,
   certTtlSeconds = null,
 }) {
-  const optU64 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; })()]));
-  const optI64 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; })()]));
-  const optU16 = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; })()]));
-  const optPk = (v) => (v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), pk(new PublicKey(v))]));
+  const optU64 = (v) =>
+    v === null
+      ? Buffer.from([0x00])
+      : Buffer.concat([
+          Buffer.from([0x01]),
+          (() => {
+            const b = Buffer.alloc(8);
+            b.writeBigUInt64LE(BigInt(v));
+            return b;
+          })(),
+        ]);
+  const optI64 = (v) =>
+    v === null
+      ? Buffer.from([0x00])
+      : Buffer.concat([
+          Buffer.from([0x01]),
+          (() => {
+            const b = Buffer.alloc(8);
+            b.writeBigInt64LE(BigInt(v));
+            return b;
+          })(),
+        ]);
+  const optU16 = (v) =>
+    v === null
+      ? Buffer.from([0x00])
+      : Buffer.concat([
+          Buffer.from([0x01]),
+          (() => {
+            const b = Buffer.alloc(2);
+            b.writeUInt16LE(v);
+            return b;
+          })(),
+        ]);
+  const optPk = (v) =>
+    v === null ? Buffer.from([0x00]) : Buffer.concat([Buffer.from([0x01]), pk(new PublicKey(v))]);
   const data = Buffer.concat([
     globalDiscriminator("update_protocol_config"),
     optU64(inactivitySeconds),
@@ -525,12 +556,17 @@ async function cmdCheck(args) {
 async function cmdRegisterOracle(args) {
   const url = requireOpt(args, "url");
   const authority = await loadKeypair(requireOpt(args, "authority"));
-  const feePayer = args["fee-payer"] !== undefined ? await loadKeypair(args["fee-payer"]) : authority;
+  const feePayer =
+    args["fee-payer"] !== undefined ? await loadKeypair(args["fee-payer"]) : authority;
   const program = "scanner"; // update_protocol_config is a GraveScanner instruction
-  const activity = args["activity-oracle"] !== undefined ? new PublicKey(args["activity-oracle"]) : null;
-  const launch = args["launch-price-oracle"] !== undefined ? new PublicKey(args["launch-price-oracle"]) : null;
+  const activity =
+    args["activity-oracle"] !== undefined ? new PublicKey(args["activity-oracle"]) : null;
+  const launch =
+    args["launch-price-oracle"] !== undefined ? new PublicKey(args["launch-price-oracle"]) : null;
   if (!activity && !launch) {
-    throw new Error("nothing to update: pass --activity-oracle <PK> and/or --launch-price-oracle <PK>");
+    throw new Error(
+      "nothing to update: pass --activity-oracle <PK> and/or --launch-price-oracle <PK>",
+    );
   }
   const connection = new Connection(url, "confirmed");
   const ix = buildScannerUpdateProtocolConfigIx({

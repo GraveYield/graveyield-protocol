@@ -41,7 +41,9 @@ for (const [k, v] of Object.entries({ artifacts, fixtures, rpc })) {
 // When given, the locally built ELFs are pinned instead of devnet dumps
 // (honest provenance: "local build"), and no devnet RPC dump is performed.
 const localSo = args["local-so"]
-  ? String(args["local-so"]).split(/[\s,]+/).filter(Boolean)
+  ? String(args["local-so"])
+      .split(/[\s,]+/)
+      .filter(Boolean)
   : null;
 if (localSo && localSo.length !== 2) {
   console.error("--local-so expects exactly two paths: <scanner.so> <vault.so>");
