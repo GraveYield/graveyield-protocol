@@ -2,8 +2,8 @@
 # local_rehearsal_ns3.sh — NS-3 deployment REHEARSAL on a local
 # solana-test-validator using TEST IDENTITIES and LOCAL ARTIFACTS ONLY.
 #
-# This is the NS-3 preparation path (DR-002): it exercises the EXACT
-# production initialization sequence the owner will run on devnet —
+# This is the NS-3 preparation path (DR-002): it exercises the production
+# initialization sequence in its exact SHAPE —
 #
 #   deploy (ELFs loaded at the NS-3 program IDs) →
 #   init-scanner/init-vault with the GOVERNANCE authority (fee payer =
@@ -13,12 +13,25 @@
 #   dedicated activity + launch-price oracle keys) →
 #   config readback.
 #
+# LOCAL AUTHORITY CORRECTION (fix/ns3-local-rehearsal-governance-authority):
+# the governance authority used throughout THIS rehearsal is a single
+# TEMPORARY keypair — the same throwaway key initializes both
+# ProtocolConfigs, runs the emergency-control drills, and registers the
+# oracles, so the authority stored in the temporary ProtocolConfig
+# accounts always equals the key that later signs administrative
+# operations. The permanent NS-3 governance public key is printed for
+# contrast but NEVER enters the local validator state. Production devnet
+# behavior is unchanged: deploy_devnet.sh + docs/DEVNET.md still
+# initialize with the owner's permanent governance key
+# (BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5) there.
+#
 # …without touching any owner keypair:
 #   * program keypairs are NEVER needed — the validator loads the locally
 #     built ELFs directly at the NS-3 declare_id! addresses
 #     (`solana-test-validator --bpf-program <ID> <so>`, upgrades disabled);
 #   * deployer / governance / intruder / oracle keys are minted into a
-#     mktemp dir and discarded with it;
+#     mktemp dir and discarded with it (the temporary governance key is
+#     the ONE authority for the rehearsal's whole lifecycle);
 #   * everything targets http://127.0.0.1:8899; nothing leaves the machine;
 #     no devnet/mainnet RPC is contacted; no transaction is submitted to
 #     any public cluster.
@@ -78,13 +91,25 @@ solana-keygen new --no-bip39-passphrase -s -o "$TMP/launch_price_oracle.json" -f
 DEPLOYER="$TMP/deployer.json"
 GOVERNANCE="$TMP/governance.json"
 INTRUDER="$TMP/intruder.json"
+# The rehearsal's ONE governance authority for its whole lifecycle: this
+# TEMPORARY keypair's public key is what both ProtocolConfigs store at
+# initialize, and the same keypair signs every later administrative
+# operation (drills, oracle registration). A collision with the permanent
+# NS-3 governance key is refused loudly — that key must never enter the
+# local validator state.
+REHEARSAL_GOVERNANCE_PK="$(solana-keygen pubkey "$GOVERNANCE")"
+if [[ "$REHEARSAL_GOVERNANCE_PK" == "$GOVERNANCE_PUBKEY" ]]; then
+  echo "REFUSING: the freshly minted rehearsal governance key collided with the" >&2
+  echo "permanent NS-3 governance pubkey ($GOVERNANCE_PUBKEY) — regenerate and re-run." >&2
+  exit 1
+fi
 echo "NOTE: the rehearsal's governance/oracle keys are THROWAWAYS. On devnet the"
 echo "owner uses the real custody keys whose public keys are pinned above:"
 echo "  governance        $GOVERNANCE_PUBKEY"
 echo "  activity oracle   $ACTIVITY_ORACLE_PUBKEY"
 echo "  launch-price oracle $LAUNCH_PRICE_ORACLE_PUBKEY"
 echo "deployer:   $(solana-keygen pubkey "$DEPLOYER")"
-echo "governance: $(solana-keygen pubkey "$GOVERNANCE") (throwaway)"
+echo "governance: $REHEARSAL_GOVERNANCE_PK (throwaway — the rehearsal's ONLY authority)"
 
 echo "== [2/6] start solana-test-validator (localnet only) =="
 solana-test-validator --reset --quiet --warp-slot 1 \
@@ -111,9 +136,15 @@ echo "== [3/6] programs loaded at the NS-3 IDs — verify on-chain identity =="
 solana --url "$URL" program show "$EXPECTED_SCANNER"
 solana --url "$URL" program show "$EXPECTED_VAULT"
 
-echo "== [4/6] initialize with the GOVERNANCE authority (deployer pays fees) =="
-node "$DEVNET_DIR/protocol_admin.mjs" init-scanner --url "$URL" --deployer "$DEPLOYER" --authority "$GOVERNANCE_PUBKEY"
-node "$DEVNET_DIR/protocol_admin.mjs" init-vault   --url "$URL" --deployer "$DEPLOYER" --authority "$GOVERNANCE_PUBKEY"
+echo "== [4/6] initialize with the TEMPORARY governance authority (deployer pays fees) =="
+# The ProtocolConfig authority stored on-chain is the TEMPORARY governance
+# PUBLIC key (the deployer keypair only signs the fee). protocol_admin.mjs
+# reads both configs back right after each initialize and fails unless the
+# stored authority equals this key — the same key the drills below sign
+# with. On devnet the owner passes the PERMANENT governance pubkey here
+# instead (docs/DEVNET.md) — this script must not change that.
+node "$DEVNET_DIR/protocol_admin.mjs" init-scanner --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
+node "$DEVNET_DIR/protocol_admin.mjs" init-vault   --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
 
 echo "== [5/6] emergency-control drills (governance is the authority) =="
 node "$DEVNET_DIR/protocol_admin.mjs" drill --url "$URL" --program scanner \
@@ -128,8 +159,9 @@ node "$DEVNET_DIR/protocol_admin.mjs" register-oracle --url "$URL" \
   --launch-price-oracle "$(solana-keygen pubkey "$TMP/launch_price_oracle.json")"
 
 echo ""
-echo "NS-3 LOCAL REHEARSAL COMPLETE — deploy-at-declare_id, governance-authority"
-echo "initialization, both drills, and separate-signer oracle registration all"
-echo "behaved per the NS-3 authority arrangement on both programs. All identities"
-echo "used were throwaways (discarded); no owner keypair was touched; nothing was"
-echo "submitted to any public cluster."
+echo "NS-3 LOCAL REHEARSAL COMPLETE — deploy-at-declare_id, temporary-governance-"
+echo "authority initialization (the SAME key signed init, both drills, and oracle"
+echo "registration), and separate-signer oracle registration all behaved per the"
+echo "NS-3 authority arrangement on both programs. All identities used were"
+echo "throwaways (discarded); no owner keypair was touched; nothing was submitted"
+echo "to any public cluster."
