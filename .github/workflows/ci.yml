@@ -114,16 +114,29 @@ jobs:
   # additionally catches salvor-side-only edits: a push to GraveYield/
   # salvor-bots cannot trigger this workflow, so without the schedule the
   # mirror could drift for weeks unnoticed.
+  #
+  # Companion-branch resolution: when this workflow runs for a branch
+  # push/PR whose branch name also exists on GraveYield/salvor-bots, the
+  # mirror is validated against THAT branch so the two companion PRs can
+  # travel through review in tandem (e.g. ns3/devnet-preparation exists
+  # on both repos). Otherwise — pushes and crons on main — the check
+  # enforces main == main with the same strict byte-equality as before.
+  # A red main build after a protocol-side merge means: merge the
+  # salvor-bots companion PR first (the mirror drifted or is mid-sync).
   sdk-sync-check:
     name: sdk sync (salvor-bots mirror)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: GraveYield/salvor-bots
-          ref: main
-          path: _salvor-bots
+      - name: Check out salvor-bots mirror (companion branch if present, else main)
+        run: |
+          set -euo pipefail
+          SALVOR_REF="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          if ! git ls-remote --exit-code --heads https://github.com/GraveYield/salvor-bots.git "$SALVOR_REF" >/dev/null 2>&1; then
+            SALVOR_REF="main"
+          fi
+          echo "salvor-bots mirror ref: $SALVOR_REF"
+          git clone --depth 1 --branch "$SALVOR_REF" https://github.com/GraveYield/salvor-bots.git _salvor-bots
       - name: Fail on any SDK divergence
         run: |
           set -euo pipefail

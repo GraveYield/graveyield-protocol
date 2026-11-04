@@ -81,7 +81,7 @@ function harness(): Harness {
   };
 
   const observer = new VaultObserver({
-    vaultProgramId: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
+    vaultProgramId: new PublicKey("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"),
     chain,
     health,
     alerts,
@@ -109,7 +109,7 @@ function owned(pubkey: PublicKey, data: Uint8Array): OwnedAccount {
   return {
     pubkey,
     data,
-    owner: new PublicKey("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
+    owner: new PublicKey("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"),
     lamports: 1_000_000n,
   };
 }

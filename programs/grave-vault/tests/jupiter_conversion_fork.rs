@@ -85,7 +85,7 @@ fn vault_id() -> Pubkey {
     grave_vault::ID
 }
 fn scanner_id() -> Pubkey {
-    Pubkey::from_str("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54").unwrap()
+    Pubkey::from_str("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL").unwrap()
 }
 fn spl_token_id() -> Pubkey {
     anchor_spl::token::ID

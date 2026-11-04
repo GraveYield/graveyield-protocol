@@ -50,11 +50,17 @@ pub mod state;
 
 use instructions::*;
 
-// Devnet program ID (real keypair, deployed per docs/DEVNET.md; mirrored in
-// Anchor.toml). The devnet keypair is a throwaway and MUST NOT be reused for
-// mainnet: mainnet ships with fresh keypairs generated under custody and
-// synced here + into Anchor.toml (KEYS-003).
-declare_id!("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg");
+// NS-3 devnet program ID (owner-generated, owner-held keypair; mirrored in
+// Anchor.toml). Assigned per DR-002 for the NS-3 redeployment — deployment
+// and on-chain acceptance are PENDING (docs/DEVNET.md carries the NS-3
+// preparation record until the owner executes the deployment). The vault
+// crate compiles the GraveScanner NS-3 ID in via its grave_scanner crate
+// dependency (EligibilityCert seeds::program), so scanner and vault ELFs
+// must always be rebuilt together from the same synchronized tree. The NS-2
+// deployment (Bd5smh…s7rg) and the NS-1 frozen static reference (HUyoG5…ox3v6)
+// are preserved in docs/LEGACY_DEPLOYMENTS.md — never reuse their keypairs
+// for mainnet (KEYS-003).
+declare_id!("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya");
 
 #[program]
 pub mod grave_vault {

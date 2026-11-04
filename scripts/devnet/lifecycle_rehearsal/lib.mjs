@@ -17,7 +17,8 @@ if (typeof globalThis.require === "undefined") {
   globalThis.require = createRequire(import.meta.url);
 }
 
-// --- program ids (NS-2 identity — local ELFs are devnet dumps) -------------------
+// --- program ids (NS-3 identity — see docs/DEVNET.md; local ELFs are locally
+// --- built until the owner's deployment makes devnet dumps possible) -------
 let W3M = null; // the salvor-checkout web3.js module (single instance — fix 13)
 
 export async function initWeb3(salvorBotsPath) {
@@ -54,8 +55,8 @@ export function pk(s) {
 export let IDS = null;
 export function initIds() {
   IDS = {
-    scanner: pk("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54"),
-    vault: pk("Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg"),
+    scanner: pk("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"),
+    vault: pk("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"),
     raydiumV4: pk("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"),
     uncxLocker: pk("GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo"),
     wsolMint: pk("So11111111111111111111111111111111111111112"),

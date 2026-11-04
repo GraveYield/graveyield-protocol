@@ -80,7 +80,7 @@ use solana_sdk::{
 use solana_sdk_ids::system_program;
 use solana_sdk_ids::sysvar::instructions;
 fn scanner_id() -> Pubkey {
-    Pubkey::from_str("CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54").unwrap()
+    Pubkey::from_str("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL").unwrap()
 }
 fn ed25519_id() -> Pubkey {
     Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()

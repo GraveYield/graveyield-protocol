@@ -1,5 +1,41 @@
 # Devnet Runbook — GraveYield Protocol
 
+> **NS-3 PREPARATION RECORD (assigned, NOT yet deployed — 2026-11-04).**
+> The NS-3 identities below are owner-generated, owner-held public keys
+> (DR-002); the repository synchronization is complete and the deployment
+> itself is **PENDING** — nothing on devnet answers at these addresses
+> until the owner executes the deployment. Do not treat any
+> NS-3 address as live until this file records the deployment signatures.
+>
+> | NS-3 role | Public key |
+> |---|---|
+> | GraveScanner program ID (owner-held keypair, NOT an authority) | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
+> | GraveVault program ID (owner-held keypair, NOT an authority) | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
+> | Deployer / fee payer / initial upgrade authority | `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` |
+> | Governance authority (ProtocolConfig, both programs) | `BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5` |
+> | Activity oracle (dedicated, C1) | `2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o` |
+> | Launch-price oracle (dedicated, C2) | `97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee` |
+>
+> Pre-deployment derivations (byte-exact, locally computed — must match
+> the on-chain readbacks): scanner ProtocolConfig PDA
+> `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe`, vault ProtocolConfig
+> PDA `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` (both
+> `['protocol_config']`, bump 255; reproduce with
+> `node scripts/devnet/ns3_derive_pdas.mjs`). ProgramData addresses stay
+> PENDING until they are read from the deployed program accounts.
+>
+> Authority arrangement: the deployer pays fees and is the initial
+> upgrade authority; the governance authority is the initial and
+> permanent ProtocolConfig authority; `initialize` starts both oracle
+> signer fields at the governance authority and `register-oracle`
+> (`update_protocol_config`) re-points them to the dedicated keys — the
+> pending-authority/timelock fields are reserved write-only state, not
+> enforced mechanisms. The full keypair-free rehearsal path is
+> `scripts/devnet/local_rehearsal_ns3.sh` (test identities, local ELFs);
+> the build-only path is `scripts/devnet/deploy_devnet.sh --build-only`.
+> Cross-repo NS-3 sync is asserted by
+> `scripts/devnet/test/ns3_sync.test.mjs` + `scripts/devnet/ns3_verify_sync.mjs`.
+
 > **Notice (DR-002, 2026-11-03).** The NS-2 (DR-001 refresh) deployment
 > documented below is **superseded**: its shared authority key
 > (`AsB5uPtT…EWXa`) was permanently lost (forensics 2026-11-03), so

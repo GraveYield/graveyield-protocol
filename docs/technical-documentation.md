@@ -434,22 +434,31 @@ requirement in the current build notes.
 
 ## 9. Devnet deployment status
 
-As recorded in [`DEVNET.md`](DEVNET.md), both programs are deployed on
-Solana devnet, both ProtocolConfig PDAs are initialized, and the
-emergency-control drill was executed on 9 October 2026. The drill verified
-authority pause, readback, rejection of an intruder pause attempt,
-authority unpause, and state readback on both programs.
+As recorded in [`DEVNET.md`](DEVNET.md), the NS-1 deployment's
+emergency-control drill was executed on 9 October 2026 (authority pause,
+readback, rejection of an intruder pause attempt, authority unpause, and
+state readback on both programs); NS-2 repeated the drill on 2026-10-25.
+For NS-3 the drill is part of the owner's post-deployment acceptance —
+it has NOT been executed yet.
 
-| Program | Devnet program ID |
+| Program | NS-3 devnet program ID (assigned; deployment pending) |
 |---------|-------------------|
-| GraveScanner | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
-| GraveVault | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
+| GraveScanner | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
+| GraveVault | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
 
-> **Devnet refresh (2026-10-25).** Per `docs/DECISIONS.md` (DR-001, NS-1/NS-2),
-> the protocol was redeployed to devnet with fresh program keypairs; the
-> deployment above is the active one. The original 9 October 2026 deployment
-> (`5JiCVx…` / `HUyoG5…`, drill executed against it the same day) is retained
-> untouched as a frozen static reference — historical record only.
+> **NS-3 redeployment (assigned 2026-11-04, deployment PENDING).** Per
+> `docs/DECISIONS.md` (DR-002) the NS-3 identities are owner-generated and
+> owner-held; the table above names the assigned program IDs, but NS-3 is
+> NOT deployed or initialized yet — see the NS-3 preparation record at the
+> top of [`DEVNET.md`](DEVNET.md). Until the owner executes the deployment,
+> no address above is live.
+>
+> **Historical deployments (preserved, untouched):** the NS-2 refresh
+> (`CuQZes…Ao54` / `Bd5smh…s7rg`, deployed 2026-10-25, authority key lost
+> per DR-002) and the original 9 October 2026 NS-1 deployment (`5JiCVx…` /
+> `HUyoG5…`, drill executed against it the same day, authority key dead per
+> DR-001) are retained on-chain as historical records —
+> [`LEGACY_DEPLOYMENTS.md`](LEGACY_DEPLOYMENTS.md) is the canonical record.
 
 **Deployment qualification.** Devnet is not mainnet. The current devnet
 upgrade authority is the deployer keypair, not the intended production

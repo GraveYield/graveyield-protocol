@@ -17,7 +17,7 @@
 |---|---|---|---|---|---|
 | NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — retained as a historical deployment record (DR-001 2026-10-25: authority key dead); current on-chain status not established in this document |
 | **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — confirmed deployed and executable (§3); authority key permanently lost (DR-002); authority not revoked on-chain** |
-| NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the next supported deployment; becomes the active deployment once recorded in `docs/DEVNET.md` |
+| NS-3 | — (deployment pending) | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` (assigned) | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` (assigned) | owner deployer key `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` (initial upgrade authority, owner-held) | Preparation — identities assigned (DR-002); repository sync complete; NOT deployed or initialized yet. Becomes the active deployment once recorded in `docs/DEVNET.md` |
 
 ## 2. NS-2 deployment record (legacy)
 
