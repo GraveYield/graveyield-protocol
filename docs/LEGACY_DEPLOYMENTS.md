@@ -1,29 +1,25 @@
-# Legacy Devnet Deployments — Permanent Frozen Record
+# Legacy Devnet Deployments — Historical Record
 
-> **READ THIS FIRST.** The program IDs in this document are **LEGACY**.
-> The NS-2 programs are **confirmed deployed and executable on devnet**
-> (read-only verification 2026-11-03, §3), but they are **operationally
-> frozen** (no signature holder exists for any authority-dependent
-> action; the authority was never revoked on-chain, so they are **not**
-> formally frozen) and **unsupported**. The NS-1 deployment is retained
-> in this document as a **historical deployment record**; its current
-> on-chain status has not been established here. No legacy program may
-> be targeted, upgraded, re-used, or referenced as "the deployment" by
-> any developer, agent, script, or CI job. Until a future NS-3
-> deployment is executed and recorded in [`docs/DEVNET.md`](DEVNET.md),
-> there is **no active, supported GraveYield devnet deployment**.
-> Decision record: **DR-002** in [`docs/DECISIONS.md`](DECISIONS.md).
-> Owner directive of 2026-11-03.
+> The program IDs in this document are **legacy**. NS-2 is **confirmed
+> deployed and executable on devnet** (read-only verification
+> 2026-11-03, §3), but it is **superseded**: its authority key was lost
+> (§4), and it is not the active deployment target. The NS-1 deployment
+> is retained in this document as a **historical deployment record**;
+> its current on-chain status has not been established here. References
+> to the legacy deployments remain valid for historical documentation
+> and on-chain verification; NS-3 is the next supported deployment
+> (§1, §6). Decision record: **DR-002** in
+> [`docs/DECISIONS.md`](DECISIONS.md).
 
 ## 1. Deployment lineage at a glance
 
 | Generation | Deployed (UTC) | GraveScanner | GraveVault | Upgrade authority | Status |
 |---|---|---|---|---|---|
 | NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — retained as a historical deployment record (DR-001 2026-10-25: authority key dead); current on-chain status not established in this document |
-| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — confirmed deployed and executable (§3); operationally frozen by this record (authority key permanently lost; DR-002); not formally frozen on-chain** |
-| NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the only deployment that may be created; once recorded in `docs/DEVNET.md` it becomes the active, supported deployment |
+| **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — confirmed deployed and executable (§3); authority key permanently lost (DR-002); authority not revoked on-chain** |
+| NS-3 | — | TBD | TBD | TBD (owner-generated, owner-held) | Future — the next supported deployment; becomes the active deployment once recorded in `docs/DEVNET.md` |
 
-## 2. NS-2 deployment record (legacy — operationally frozen; see §5)
+## 2. NS-2 deployment record (legacy)
 
 Executed 2026-10-25 (epoch 1191); full runbook narrative in
 [`docs/DEVNET.md`](DEVNET.md) (status line there is superseded — see its
@@ -111,11 +107,9 @@ no upgrade, authority rotation, or close was ever attempted.
   `AsB5u…` (§3).
 - An ed25519 private key cannot be reconstructed from its public key,
   and the chain offers no override or recovery path.
-- **Formal vs operational freeze (owner-mandated distinction):** the
-  authority was **never revoked on-chain** — these programs are *not*
-  formally frozen on-chain. They are **operationally frozen**: no
-  signature holder exists, so no privileged instruction can ever
-  succeed. Treat them as permanently inaccessible.
+- The authority was **never revoked on-chain**, so these programs are
+  not formally frozen; there is simply no signature holder left, so no
+  privileged instruction can succeed.
 - Because the same key was also the ProtocolConfig authority (both
   programs) and both oracle signers (verified by read-only
   ProtocolConfig decode, §2), protocol-config changes and attestation
@@ -127,51 +121,39 @@ no upgrade, authority rotation, or close was ever attempted.
 - The NS-2 deployments are preserved **untouched** as permanent,
   verifiable historical evidence of the DR-001 refresh and its drills —
   same precedent as NS-1 under DR-001 consequence 3.
-- All future work uses **fresh program IDs (NS-3)**. The new deployment
-  authority will be generated and secured **manually by the project
-  owner**; the owner and their own assistant will execute the
-  redeployment manually, one verified step at a time. Agents are NOT
-  authorized to generate credentials, deploy, build a deployment, or
-  perform any on-chain transaction.
+- The next supported devnet deployment will be **NS-3**, using fresh
+  program IDs. The owner generates and retains all NS-3 keypairs and
+  manually executes deployment transactions. Agents may assist with
+  preparation and verification but must not handle private keys or
+  independently execute deployment transactions (DR-002).
 - Recorded as decision **DR-002** in `docs/DECISIONS.md`.
 
-## 7. Binding preservation rules
+## 7. Where legacy IDs appear
 
-1. Do not upgrade, close, withdraw, transfer, or modify either legacy
-   program or its ProgramData account.
-2. Do not attempt to recover, replace, or bypass the lost authority.
-3. Do not generate new program keypairs or authority wallets (agents).
-4. Do not deploy any program (agents).
-5. Do not change the legacy program IDs in source code or configuration
-   until the owner-approved NS-3 sync.
-6. Do not delete or overwrite deployment artifacts, keypairs, manifests,
-   or historical records; do not remove deployment history from
-   documentation.
-7. Deployment credentials must never be committed to Git, printed in
-   logs, or exposed in agent output.
-
-The legacy IDs may appear only in:
+The NS-1/NS-2 IDs remain valid for historical documentation and on-chain
+verification. They appear in:
 
 - `docs/LEGACY_DEPLOYMENTS.md` (this file),
 - `docs/DECISIONS.md` (decision records),
 - the historical sections of `docs/DEVNET.md` (the preserved NS-2
-  execution record below its supersession banner),
+  execution record below its supersession notice),
 - historical evidence artifacts (forensic reports, worklog entries,
-  assessment records, bundles/patches of frozen commits).
+  assessment records, bundles/patches of frozen commits),
+- the inert ID constants in the tree pending the NS-3 ID sync (§8).
 
-After NS-3, they must not appear in any active code path or active
-documentation (same acceptance rule NS-2 applied to NS-1's IDs).
+Once NS-3 is recorded in `docs/DEVNET.md`, active code paths and active
+documentation point at the NS-3 IDs (the same acceptance rule NS-2
+applied to NS-1's IDs, DR-001 consequence 4).
+
+Deployment credentials are never committed to Git, printed in logs, or
+exposed in agent output.
 
 ## 8. How to tell legacy from active
 
-- **Active deployment = the one recorded at the top of
-  `docs/DEVNET.md` with a matching status line and a deployment date
-  after 2026-11-03, using program IDs different from every ID in this
-  file.** Until that entry exists, there is no active, supported
-  GraveYield devnet deployment — the NS-2 programs remain deployed on
-  devnet but are operationally frozen and unsupported (NS-1's current
-  on-chain status is not established here; §1);
-  build and test against localnet
+- **Active deployment** = the one recorded at the top of
+  `docs/DEVNET.md` with a deployment date after 2026-11-03, using
+  program IDs different from every ID in this file. Until the NS-3
+  entry exists, build and test against localnet
   (`scripts/devnet/local_rehearsal.sh` / `solana-test-validator`).
 - Any constant in the tree still naming `CuQZes…` / `Bd5smh…` refers to
   the LEGACY deployment. Those constants are inert placeholders pending
@@ -180,13 +162,11 @@ documentation (same acceptance rule NS-2 applied to NS-1's IDs).
   `deploy_devnet.sh` expected IDs, `protocol_admin.mjs`, SDK constants,
   `indexer/src/config.ts`, `ops/src/config.ts`, console `data.ts`, and
   the pinned PDA vectors in tests).
-- Do not point admin tooling (`protocol_admin.mjs`) at devnet expecting
-  an active, supported deployment. The legacy programs are still live
-  and executable on-chain, so read-only RPC queries return real account
-  data. What fails is every authority-dependent action: upgrades,
+- Read-only RPC queries against the legacy programs return real account
+  data — the programs remain deployed and executable on-chain. What
+  cannot succeed is every authority-dependent action: upgrades,
   authority changes, close, protocol-config updates, and attestation
-  signing all require a signature from the lost key, so they can never
-  succeed.
+  signing all require a signature from the lost key (§5).
 
 ## 9. References
 
