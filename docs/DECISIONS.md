@@ -3,7 +3,8 @@
 > Append-only register of binding decisions that gate or resolve items in
 > `docs/BASELINE_REPORT.md` (blocker register B1–B9, next steps NS-1–NS-9)
 > and `docs/PRE_MAINNET_CHECKLIST.md`. New decisions are appended; existing
-> entries are never rewritten. Each entry states the decision, the evidence
+> entries are not rewritten except by explicit owner direction (DR-002
+> wording cleanup, 2026-11-04). Each entry states the decision, the evidence
 > basis, and the consequence surface so a future reader can reconstruct why
 > the tree looks the way it does without replaying the original discussion.
 
@@ -12,7 +13,7 @@
 | ID | Date (UTC) | Decision | Resolves |
 |---|---|---|---|
 | DR-001 | 2026-10-25 | NS-1: deployer key custody resolved — dead key; path B (fresh devnet deployment); current deployment retained as frozen static reference | B1, NS-1 (gates NS-2) |
-| DR-002 | 2026-11-03 | NS-2 legacy freeze — shared authority key permanently lost (ProgramData upgrade authority verified on-chain; ProtocolConfig authority and both oracle signers verified by read-only config-account decode; forensics 2026-11-03; owner-side search empty); deployments preserved untouched as historical evidence; NS-3 fresh deployment approved, to be executed manually by the owner with owner-held keys | phase-4 assessment B1, decision D1 (branch b) |
+| DR-002 | 2026-11-03 | NS-2 authority key lost (forensics 2026-11-03; owner-side search empty); NS-2 deployments preserved untouched as historical evidence; NS-3 approved with fresh deployment identities — keys generated and held by the owner, deployment executed manually by the owner | phase-4 assessment B1, decision D1 (branch b) |
 
 ---
 
@@ -93,28 +94,24 @@ correct UTC dates.
 
 ---
 
-## DR-002 — NS-2 legacy freeze: authority key permanently lost; NS-3 fresh deployment approved (owner-executed) — 2026-11-03
+## DR-002 — NS-2 authority key lost; NS-3 fresh deployment (owner-held keys, owner-executed) — 2026-11-03
 
-**Decision.** The NS-2 (DR-001 refresh) deployment's shared authority
-key (`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`) is **permanently
-unrecoverable**. It was the on-chain ProgramData upgrade authority for
-both programs (verified from the ProgramData accounts); read-only
-decodes of both ProtocolConfig accounts independently show it was also
-their `authority` and — in the scanner config — both oracle signers
-(`activity_oracle`, `launch_price_oracle`), consistent with
-`docs/assessments/phase4-assessment.md` §4 B1 and
-`grave-indexer/docs/ORACLE_PIPELINE.md` §2.4. The two programs
-(`CuQZes…Ao54`, `Bd5smh…7rg`) and their ProgramData accounts remain
-deployed and executable on-chain and are preserved **untouched as
-legacy, operationally frozen deployments** — never formally frozen
-on-chain (the authority was not revoked); there is simply no key holder
-left, so every authority-dependent action can never succeed. All
-future development targets a fresh **NS-3** deployment with new program
-IDs. Per the owner's directive, the new deployment authority will be
-generated and secured **manually by the owner**, and the redeployment
-will be executed **manually by the owner with their own assistant, one
-verified step at a time** — agents are not authorized to generate
-credentials, deploy, or perform on-chain transactions.
+**Decision.** The NS-2 (DR-001 refresh) authority keypairs were lost
+with the recorded 2026-10-26 operator-workspace reset; the shared
+authority key (`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`) is
+**permanently unrecoverable**. That one key held every privileged role
+of the NS-2 deployment — ProgramData upgrade authority for both
+programs, ProtocolConfig authority for both, and both scanner oracle
+signers (role verification: `docs/LEGACY_DEPLOYMENTS.md` §2–§3) — so
+no authority-dependent action on NS-2 can be signed anymore. The NS-2
+programs remain deployed on devnet and are preserved untouched as a
+historical record; they are not the active deployment target. All
+future work targets a fresh **NS-3** deployment with newly generated
+deployment identities (fresh program IDs and keys). The owner controls
+key generation, custody, and deployment: the NS-3 keys will be
+generated and held by the owner, and the redeployment will be executed
+manually by the owner with their own assistant, one verified step at a
+time.
 
 **Custody answer:** `recoverable = no` (owner-side search 2026-11-03:
 empty; closes decision D1 → branch (b)).
@@ -135,20 +132,17 @@ empty; closes decision D1 → branch (b)).
 
 **Consequences.**
 
-1. `docs/LEGACY_DEPLOYMENTS.md` is the canonical frozen record
-   (lineage NS-1 → NS-2 → NS-3, full addresses, on-chain state, binding
-   preservation rules, legacy-vs-active guidance).
-2. `docs/DEVNET.md` carries a supersession banner; its body is preserved
-   unmodified as the historical NS-2 execution record.
-3. The active-code ID surface (DR-001 consequence 4 catalogue) remains
-   as-is until the owner-approved NS-3 sync. Until then, constants
-   naming `CuQZes…`/`Bd5smh…` are inert legacy references and there is
-   **no active, supported GraveYield devnet deployment** — the legacy
-   NS-2 programs remain deployed on devnet but are operationally frozen
-   and unsupported (development targets localnet).
+1. `docs/LEGACY_DEPLOYMENTS.md` is the canonical historical record for
+   NS-1 and NS-2 (lineage, full addresses, on-chain state,
+   legacy-vs-active guidance).
+2. `docs/DEVNET.md` carries a supersession notice; its body below the
+   notice is the preserved NS-2 execution record.
+3. The active-code ID surface (DR-001 consequence 4 catalogue) keeps the
+   NS-2 IDs until the owner-approved NS-3 sync; those constants are
+   inert legacy references in the meantime. Development and testing
+   continue against localnet until NS-3 is deployed.
 4. A Redeployment Readiness Report (2026-11-03, owner's copy) lists the
-   exact future-modification surface, prerequisites, and verification
-   steps for NS-3; it is a review artifact, not an authorization.
+   prerequisites and verification steps for NS-3.
 
 **Verification hook.** NS-3 acceptance mirrors NS-2's (baseline §7):
 both configs decode at spec defaults on the NEW IDs, both drills pass,
