@@ -38,7 +38,9 @@
 //  AccountNotInitialized precedes the handler's 6015);  8 scanner remaining
 //  accounts include the UNCX marker PDA (6020 otherwise);  9 loader flags
 //  written after holder dumps;  10 SLOT-HASH from the sysvar (F1);  11 v0/ALT
-//  salvage tx (F2);  12 market nonce re-pin (F3, in prepare_local_accounts);
+//  salvage tx (F2);  12 market nonce re-pin (F3, in prepare_local_accounts —
+//  HISTORICAL: that re-pin is RETIRED since the salvor-side Finding E
+//  remediation; the market now loads UNMODIFIED);
 //  13 single web3 instance from the salvor checkout + 3.x simulate adapter.
 import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -75,7 +77,8 @@ import { registerOracles, readbackAssertOracles } from "./register_oracle.mjs";
 import { classifyReconciliation } from "./monitor_gate.mjs";
 import { loadProvenanceManifest } from "../ns3_check_provenance.mjs";
 import { matchOnChainProgramData } from "./elf_dump.mjs";
-import { COMPONENT_CLASSIFICATION, writeSummaryFiles } from "./summarize.mjs";
+import { gitProvenance } from "./provenance.mjs";
+import { COMPONENT_CLASSIFICATION, completeReporting, w1ExitStatus } from "./summarize.mjs";
 
 // --- args --------------------------------------------------------------------
 const args = {};
@@ -251,6 +254,11 @@ const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
   url,
   ...gitMeta(),
   toolchain: toolchainMeta(),
+  // W1 §11: the salvor-bots checkout is part of the execution environment
+  // (fleet-core submit path + monitor reconcile) — its exact source revision
+  // is recorded here, or the limitation is stated explicitly (never silently
+  // presented as complete provenance).
+  salvor_provenance: gitProvenance(salvorBots),
   program_ids: {
     scanner: IDS.scanner.toBase58(),
     vault: IDS.vault.toBase58(),
@@ -1919,16 +1927,19 @@ const doc = report.finish({
   fleet_events: fleetEvents.length,
   component_classification: COMPONENT_CLASSIFICATION,
 });
-// W1 §11: the readable Markdown summary next to the machine-readable JSON —
-// including the REAL/MOCK/STUB/EXTERNAL/NOT TESTED classifications and the
-// proves / does-not-prove sections. Written even on failure (exit below).
-try {
-  const mdPath = writeSummaryFiles(doc, report.outPath);
-  console.log(`run summary: ${mdPath}`);
-} catch (e) {
-  console.error(`summary write failed (report JSON is intact): ${e?.message ?? e}`);
-}
-if (!doc.all_pass) process.exit(1);
+// W1 §11: BOTH reports are mandatory — the machine-readable JSON (already
+// written by finish()) AND the readable Markdown summary. A Markdown
+// generation failure is FATAL even when every lifecycle stage passed: a
+// missing mandatory report must never yield a successful completion status.
+// completeReporting stamps the JSON with an explicit `reporting` marker
+// (complete:false + the error) so an on-disk report can never masquerade as
+// complete, and w1ExitStatus preserves genuine stage failures alongside any
+// reporting failure (never overwritten, never relabeled).
+const reporting = completeReporting(doc, report.outPath);
+if (reporting.ok) console.log(`run summary: ${reporting.mdPath}`);
+const exitStatus = w1ExitStatus(doc, reporting);
+for (const reason of exitStatus.reasons) console.error(`W1 INCOMPLETE: ${reason}`);
+if (exitStatus.code !== 0) process.exit(exitStatus.code);
 console.log(
   `W1 LIFECYCLE REHEARSAL COMPLETE — 16 stages + adversarial battery all green (ALT ${ALT_ADDRESS.toBase58()}, salvage ${FLEET_SIGNATURE})`,
 );

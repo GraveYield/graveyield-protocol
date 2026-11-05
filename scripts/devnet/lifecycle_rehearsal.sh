@@ -4,9 +4,15 @@
 #
 #   bash scripts/devnet/lifecycle_rehearsal.sh [--url http://127.0.0.1:8899] [--keep]
 #
+#   (--url is accepted ONLY as an exact match of the fixed local endpoint
+#   http://127.0.0.1:8899 — see the W1 EXECUTION BOUNDARY guard below. Any
+#   other value, e.g. a public cluster URL, is rejected before the script
+#   performs ANY operation.)
+#
 # Pipeline: keygen → ELF provenance (LOCAL authenticated build + approved-hash
 # gate — NS-3; NO devnet/mainnet program dumps) → local account prep (C6
-# re-pin, F3 market re-pin, holder ATAs) → snapshotter build → validator boot
+# supply re-pin, market identity gate — the F3 market re-pin is RETIRED,
+# holder ATAs) → snapshotter build → validator boot
 # (no_uring wrapper, word-split loader flags — run-1 fix) →
 # drive_lifecycle.mjs → run report JSON + Markdown summary at
 # target/lifecycle-rehearsal/.
@@ -35,17 +41,32 @@ cd "$REPO_ROOT"
 
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$HOME/.local/share/solana/bin:$HOME/.cargo/bin:$PATH"
 
-URL="http://127.0.0.1:8899"
+LOCAL_RPC="http://127.0.0.1:8899"
 KEEP=0
 SALVOR_BOTS="${SALVOR_BOTS:-$REPO_ROOT/../salvor-bots}"
+REQUESTED_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --url) URL="$2"; shift 2 ;;
+    --url) REQUESTED_URL="$2"; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --salvor-bots) SALVOR_BOTS="$2"; shift 2 ;;
     *) echo "unknown arg $1"; exit 2 ;;
   esac
 done
+
+# W1 EXECUTION BOUNDARY (strictly local, enforced BEFORE any operation):
+# the rehearsal runs ONLY against the local validator endpoint. This guard
+# is deliberately the FIRST thing after argument parsing — it must precede
+# directory/key creation, toolchain checks, Solana CLI invocations,
+# airdrops, validator boot, and every transaction-bearing operation. The
+# driver's own endpoint guard (drive_lifecycle.mjs stage 1) is retained as
+# defense-in-depth. An invalid --url is NEVER silently ignored.
+if [[ -n "$REQUESTED_URL" && "$REQUESTED_URL" != "$LOCAL_RPC" ]]; then
+  echo "REFUSING: --url '${REQUESTED_URL}' is not the local validator endpoint." >&2
+  echo "The W1 rehearsal executes ONLY against ${LOCAL_RPC} — no Devnet/Mainnet or other RPC target is permitted." >&2
+  echo "No keys were generated, no airdrops or transactions were attempted, and no validator was started." >&2
+  exit 3
+fi
 
 ARTIFACTS="$REPO_ROOT/target/lifecycle-rehearsal"
 FIXTURES="$ARTIFACTS/fixtures"
@@ -88,7 +109,7 @@ node "$REPO_ROOT/scripts/devnet/ns3_check_provenance.mjs" \
 node "$HR_DIR/pin_elfs.mjs" --artifacts "$ARTIFACTS" --fixtures "$FIXTURES" \
   --local-so "$SCANNER_SO $VAULT_SO"
 
-echo "== [3/7] local account prep (C6 supply re-pin, F3 market re-pin, holder ATAs) =="
+echo "== [3/7] local account prep (C6 supply re-pin, market identity gate — F3 market re-pin RETIRED, holder ATAs) =="
 node "$HR_DIR/prepare_local_accounts.mjs" --artifacts "$ARTIFACTS" --fixtures "$FIXTURES" --keys "$KEYS" --salvorBots "$SALVOR_BOTS"
 
 echo "== [4/7] snapshotter build (real Rust bin) =="
@@ -121,29 +142,29 @@ trap cleanup EXIT
 
 scripts/no_uring solana-test-validator \
   --reset --quiet --warp-slot 1 --slots-per-epoch 32 \
-  --url "$URL" \
+  --url "$LOCAL_RPC" \
   "${VAL_ARGS[@]}" >"$VAL_LOG" 2>&1 &
 PIDS+=($!)
 
 for i in $(seq 1 90); do
-  if solana --url "$URL" cluster-version >/dev/null 2>&1; then break; fi
+  if solana --url "$LOCAL_RPC" cluster-version >/dev/null 2>&1; then break; fi
   if ! kill -0 "${PIDS[-1]}" 2>/dev/null; then echo "validator died — tail of $VAL_LOG:"; tail -20 "$VAL_LOG"; exit 1; fi
   sleep 1
 done
-solana --url "$URL" cluster-version >/dev/null || { echo "validator did not come up"; tail -20 "$VAL_LOG"; exit 1; }
-echo "validator up at $URL"
+solana --url "$LOCAL_RPC" cluster-version >/dev/null || { echo "validator did not come up"; tail -20 "$VAL_LOG"; exit 1; }
+echo "validator up at $LOCAL_RPC"
 
 echo "== [6/7] funding (local airdrops — local keys only) =="
 for k in authority intruder salvor claimant_a claimant_b; do
-  solana --url "$URL" airdrop 50 "$KEYS/$k.json" >/dev/null 2>&1 || \
-    solana --url "$URL" airdrop 10 "$KEYS/$k.json" >/dev/null
+  solana --url "$LOCAL_RPC" airdrop 50 "$KEYS/$k.json" >/dev/null 2>&1 || \
+    solana --url "$LOCAL_RPC" airdrop 10 "$KEYS/$k.json" >/dev/null
 done
 echo "funded"
 
 echo "== [7/7] lifecycle driver (16 stages + adversarial battery) =="
 DRIVER_EXIT=0
 node "$HR_DIR/drive_lifecycle.mjs" \
-  --url "$URL" \
+  --url "$LOCAL_RPC" \
   --artifacts "$ARTIFACTS" \
   --fixtures "$FIXTURES" \
   --keys "$KEYS" \

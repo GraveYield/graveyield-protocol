@@ -5,7 +5,7 @@
 // actually exercised in THIS run (REAL / MOCK / STUB / EXTERNAL / NOT
 // TESTED). A green suite is not proof of production integration — the
 // "what this run does NOT prove" section is mandatory reading.
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 
 // W1 §9 classification. Sources: the driver's actual call paths (verified at
 // inspection, docs/W1_NS3_REHEARSAL_INSPECTION.md) + this run's report.
@@ -44,7 +44,7 @@ export const COMPONENT_CLASSIFICATION = [
     component: "Salvor components (fleet-core ExecutionPipeline, InMemoryFleetStore)",
     classification: "REAL",
     detail:
-      'salvor-bots fleet-core mode:"live" submit path executed against the local validator over a real v0/ALT transaction (F2); market fixture adapted to fleet-core\'s vault-signer scheme (F3 — documented deviation)',
+      'salvor-bots fleet-core mode:"live" submit path executed against the local validator over a real v0/ALT transaction (F2); the local market is the UNMODIFIED real mainnet fixture — fleet-core (since the salvor-side Finding E remediation) derives the market vault signer with the REAL OpenBook v1 rule ([market, stored_nonce_le], stored nonce preserved) and the October-era string-seed re-pin is RETIRED (contrast record only); the exact source revision is recorded in the run metadata (salvor_provenance)',
   },
   {
     component: "Monitoring (@graveyield/monitor reconcile)",
@@ -59,10 +59,10 @@ export const COMPONENT_CLASSIFICATION = [
       "real precompile verify + scanner offset/signer/staleness checks; attestations signed by local throwaway oracle keys (never production custody)",
   },
   {
-    component: "Raydium V4 CPI (withdraw + swap legs)",
+    component: "Raydium V4 withdrawal CPI",
     classification: "REAL",
     detail:
-      "REAL mainnet raydium_v4.so bytes loaded locally at the canonical program ID; the vault's withdraw CPI executes against it with real mainnet pool/vault accounts",
+      "REAL mainnet raydium_v4.so bytes loaded locally at the canonical program ID; the vault's withdraw CPI executes against it with real mainnet pool/vault accounts. ONLY the withdraw leg is exercised — the conversion/swap leg is config-skipped and covered by the Jupiter v6 entry (NOT TESTED)",
   },
   {
     component: "Serum/OpenBook market leg",
@@ -115,24 +115,78 @@ export const PROVES = [
 ];
 
 export const DOES_NOT_PROVE = [
-  "real Jupiter v6 route execution (conversion leg is config-skipped; the route shim is never executed on-chain)",
+  "real Jupiter v6 route execution or any Raydium conversion/swap leg (the conversion leg is config-skipped; the route shim is never executed on-chain)",
   "public-cluster behavior: devnet/mainnet state, fees, congestion, production oracle attestation delivery (the NS-3 deployment acceptance is an owner-executed read-only step)",
   "fleet-core discovery against a LIVE public-cluster market (the local market IS the real mainnet fixture, unmodified, and the real OpenBook rule is validated locally — but live-cluster markets can present account states a static fixture cannot)",
   "production custody-key operations (throwaway identities only, by design — PR #81)",
 ];
 
-// Markdown table-cell escaping. Backslashes MUST be escaped BEFORE the
-// pipe: a cell value containing `\|` (or a lone trailing `\`) would
-// otherwise survive as an unescaped backslash and either absorb the
-// escaped pipe (a `\\` renders as a literal `\`, leaving the pipe live as
-// a cell separator and silently adding a column) or escape the cell's
-// trailing character. Doubling `\` first keeps every output pipe
-// odd-backslash-escaped and the column layout unambiguous.
-// (CodeQL js/incomplete-string-escaping-or-encoding — alert #1.)
+// Markdown table-cell escaping. The transformation ORDER is load-bearing:
+//   1. string coercion (nullish → ""),
+//   2. CRLF / LF / CR line breaks → single space (a raw newline inside a
+//      table cell would split the row and inject extra table lines),
+//   3. backslash doubling — MUST precede the pipe escape: a cell value
+//      containing `\|` (or a lone trailing `\`) would otherwise survive as
+//      an unescaped backslash and either absorb the escaped pipe (a `\\`
+//      renders as a literal `\`, leaving the pipe live as a cell separator
+//      and silently adding a column) or escape the cell's trailing
+//      character,
+//   4. pipe escape.
+// Doubling `\` first keeps every output pipe odd-backslash-escaped and the
+// column layout unambiguous. (CodeQL js/incomplete-string-escaping-or-encoding
+// — alert #1.)
 export function esc(s) {
   return String(s ?? "")
+    .replace(/\r\n/g, " ")
+    .replace(/[\r\n]/g, " ")
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|");
+}
+
+// Writes the mandatory Markdown summary and stamps the machine-readable JSON
+// with an explicit `reporting` marker. Reporting is part of the W1 result:
+// a missing Markdown summary (or an unstampeable JSON) makes the run
+// INCOMPLETE even if every lifecycle stage passed. Returns { ok, error,
+// mdPath }; on failure `error` names the exact reporting operation that
+// failed (MARKDOWN vs JSON) and the JSON — when writable — records
+// reporting.complete = false so an on-disk report can never masquerade as
+// complete. Genuine lifecycle results are never touched.
+export function completeReporting(doc, outJsonPath) {
+  let error = null;
+  let mdPath = null;
+  try {
+    mdPath = writeSummaryFiles(doc, outJsonPath);
+  } catch (e) {
+    error = `MARKDOWN summary generation FAILED — mandatory W1 report missing: ${e?.message ?? e}`;
+  }
+  try {
+    const onDisk = JSON.parse(readFileSync(outJsonPath, "utf8"));
+    onDisk.reporting = {
+      complete: error === null,
+      markdown_path: mdPath,
+      error,
+    };
+    writeFileSync(outJsonPath, JSON.stringify(onDisk, null, 2) + "\n");
+  } catch (e) {
+    const jsonErr = `JSON report update FAILED — cannot stamp reporting status onto ${outJsonPath}: ${e?.message ?? e}`;
+    error = error ? `${error} | ${jsonErr}` : jsonErr;
+  }
+  return { ok: error === null, error, mdPath };
+}
+
+// Final exit decision for the W1 driver. Genuine lifecycle failures and
+// reporting failures are reported SIDE BY SIDE — a reporting error must
+// never overwrite (or be written over) a real stage failure, and a passing
+// lifecycle must never mask a missing mandatory report.
+export function w1ExitStatus(doc, reporting) {
+  const reasons = [];
+  if (!doc.all_pass)
+    reasons.push(
+      "lifecycle results: at least one stage or adversarial case FAILED (see the run report JSON for the exact failures)",
+    );
+  if (reporting && !reporting.ok)
+    reasons.push(`mandatory reporting incomplete: ${reporting.error}`);
+  return { code: reasons.length === 0 ? 0 : 1, reasons };
 }
 
 export function renderSummary(doc) {
@@ -153,6 +207,18 @@ export function renderSummary(doc) {
   lines.push(
     `- programs: scanner \`${m.program_ids?.scanner}\` · vault \`${m.program_ids?.vault}\` · raydium_v4 \`${m.program_ids?.raydium_v4}\``,
   );
+  // Salvor checkout provenance (W1 §11): the fleet-core/monitor source
+  // revision is part of the execution environment. Missing provenance is
+  // stated explicitly — never silently omitted.
+  const sp = m.salvor_provenance ?? {};
+  if (sp.inspectable) {
+    lines.push(
+      `- salvor-bots: \`${sp.head}\`${sp.branch ? ` @ ${sp.branch}` : ""}${sp.repository ? ` · ${sp.repository}` : ""} · ${sp.dirty === true ? "DIRTY working tree" : sp.dirty === false ? "clean" : "dirty/clean UNKNOWN"}`,
+    );
+  } else {
+    lines.push(`- salvor-bots: provenance UNAVAILABLE (path: ${sp.path ?? "n/a"})`);
+  }
+  if (sp.note) lines.push(`  - LIMITATION: ${sp.note}`);
   const stage1 = (doc.stages ?? []).find((s) => Number(s.id) === 1);
   if (stage1?.genesis_hash) lines.push(`- local validator genesis: \`${stage1.genesis_hash}\``);
   lines.push("");

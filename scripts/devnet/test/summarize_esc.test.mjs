@@ -2,13 +2,15 @@
 // escaping (CodeQL alert #1 — js/incomplete-string-escaping-or-encoding).
 //
 // summarize.mjs renders free-form stage/adversarial detail strings into
-// Markdown table rows. esc() must escape EVERY backslash BEFORE escaping
-// pipes: a cell value containing `\|` (or a trailing `\`) under the old
-// pipe-only order produced `\\|` — the doubled backslash renders as a
-// literal `\` and the pipe stayed a LIVE cell separator, silently adding a
-// column to the generated run summary. These tests pin the corrected
-// behavior end-to-end: any future escape-order regression breaks the
-// column-count assertions below.
+// Markdown table rows. esc() must (1) normalize CRLF/LF/CR line breaks to a
+// single space (a raw newline inside a cell would split the row and inject
+// extra table lines) and (2) escape EVERY backslash BEFORE escaping pipes:
+// a cell value containing `\|` (or a trailing `\`) under the old pipe-only
+// order produced `\\|` — the doubled backslash renders as a literal `\` and
+// the pipe stayed a LIVE cell separator, silently adding a column to the
+// generated run summary. These tests pin the corrected behavior end-to-end:
+// any future escape-order or newline-normalization regression breaks the
+// string and column-count assertions below.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { esc, renderSummary } from "../lifecycle_rehearsal/summarize.mjs";
@@ -64,6 +66,54 @@ describe("summarize.mjs Markdown cell escaping (esc)", () => {
     assert.equal(splitCells(`| ${esc(esc("a\\|b"))} |`).length, 3);
     // The escaped output never leaves a live pipe in the cell.
     assert.equal(splitCells(`| ${esc("a\\|b")} |`).length, 3);
+  });
+
+  test("REGRESSION (W1 review): LF and CR line breaks normalize to a single space", () => {
+    // A raw newline inside a table cell would split the row and inject extra
+    // table lines into the generated summary. LF, CRLF and lone CR must all
+    // become a single space BEFORE the backslash/pipe escapes run.
+    assert.equal(esc("row1\nrow2"), "row1 row2");
+    assert.equal(esc("row1\r\nrow2"), "row1 row2");
+    assert.equal(esc("a\rb"), "a b");
+    // No line-break character may survive into the cell.
+    for (const v of ["a\nb", "a\r\nb", "a\rb", "\n", "\r\n", "\r"]) {
+      assert.ok(!/[\r\n]/.test(esc(v)), `newline survived for ${JSON.stringify(v)}`);
+    }
+  });
+
+  test("REGRESSION (W1 review): combined backslashes, pipes and newlines", () => {
+    // The order matters: newline normalization runs FIRST, then backslash
+    // doubling, then the pipe escape. `x\\\n|y` → "x\\\ \|y" — the pipe stays
+    // odd-backslash-escaped and no newline survives.
+    assert.equal(esc("x\\\n|y"), "x\\\\ \\|y");
+    assert.equal(esc("end\\\n"), "end\\\\ ");
+    assert.equal(esc("a\nb|c\nd"), "a b\\|c d");
+    for (const out of [esc("x\\\n|y"), esc("end\\\n"), esc("a\nb|c\nd")]) {
+      assert.ok(!/[\r\n]/.test(out), "newline survived a combined value");
+      assert.equal(splitCells(`| ${out} |`).length, 3, "combined value split the cell");
+    }
+  });
+
+  test("renderSummary: multi-line stage detail stays a single table row", () => {
+    const doc = {
+      started_at: "2026-11-05T00:00:00Z",
+      finished_at: "2026-11-05T01:00:00Z",
+      all_pass: true,
+      stages: [
+        {
+          id: 1,
+          name: "multiline stage",
+          pass: true,
+          detail: "line1\nline2 | col\r\nline3",
+        },
+      ],
+      adversarial: [],
+    };
+    const md = renderSummary(doc);
+    const stageRows = md.split("\n").filter((l) => l.includes("multiline stage"));
+    assert.equal(stageRows.length, 1, "a newline in a cell split the row");
+    assert.equal(splitCells(stageRows[0]).length, 6, "stage row lost its column shape");
+    assert.ok(!/[\r\n]/.test(stageRows[0].replace(/\\\|/g, "X")), "newline survived in the row");
   });
 
   test("renderSummary: hostile stage/adversarial strings keep the table shape", () => {
