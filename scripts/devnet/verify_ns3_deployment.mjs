@@ -5,7 +5,8 @@
 //
 // WHAT IT IS: an independent on-chain acceptance gate for the NS-3 devnet
 // deployment. It talks to a cluster ONLY through read-only RPC
-// (getAccountInfo / getEpochInfo) and verifies that what is actually live
+// (getAccountInfo / getEpochInfo / getGenesisHash) and verifies that what
+// is actually live
 // at the NS-3 addresses matches the approved arrangement:
 //
 //   A. Program accounts & ProgramData — both programs exist, are
@@ -32,6 +33,13 @@
 //   E. NS-1/NS-2 residual identities — the four legacy program IDs are
 //      probed read-only and REPORTED (present/absent + upgrade authority
 //      status). Report-only: legacy residue never flips the NS-3 verdict.
+//   G. Cluster identity (runs FIRST — before any deployment state is
+//      interpreted) — the RPC endpoint's getGenesisHash must equal the
+//      pinned, independently verified Solana Devnet genesis hash
+//      (DEVNET_GENESIS_HASH below). A different cluster is an IMMEDIATE
+//      FAIL and no deployment check is evaluated on foreign bytes; a
+//      failed/unreadable genesis response is UNVERIFIED, which forces
+//      overall INCOMPLETE — acceptance is blocked either way.
 //
 // VERDICT SEMANTICS — read before trusting the output:
 //   * PASS  — the check ran and the chain matches the approved value.
@@ -102,6 +110,20 @@ export const TOOL_NAME = "verify_ns3_deployment";
 
 /** The BPF upgradeable loader — the only legitimate owner of program accounts. */
 export const BPF_LOADER_UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
+
+/**
+ * Pinned Solana Devnet genesis hash — the cluster-identity anchor (fix G):
+ * the RPC endpoint must report exactly this genesis BEFORE any deployment
+ * state is interpreted. Independently verified on 2026-11-06 from three
+ * sources: (1) live `getGenesisHash` on https://api.devnet.solana.com;
+ * (2) the official Anza cluster documentation, whose devnet validator
+ * example pins `--expected-genesis-hash` to this exact value
+ * (docs.anza.xyz — "Available Solana Clusters"); (3) an independent
+ * chain-config reference cross-check. A devnet genesis reset would change
+ * the live value — that failure mode is deliberate: the pin is
+ * re-verified by a human and re-pinned consciously, never silently.
+ */
+export const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 
 /** Anchor account discriminator = first 8 bytes of sha256("account:<Name>"). */
 export function accountDiscriminator(name) {
@@ -331,11 +353,71 @@ export async function runVerification(options = {}) {
     context = { slot: null, epoch: null, commitment, error: "getEpochInfo failed (RPC transport)" };
   }
 
+  // ---- genesis gate (fix G): establish WHICH cluster this is before any
+  // deployment state is interpreted. getGenesisHash is read-only and cheap.
+  let genesisHash = null;
+  try {
+    genesisHash = await connection.getGenesisHash();
+  } catch (err) {
+    context.genesisError = `getGenesisHash failed (RPC transport): ${err.message ?? err}`;
+  }
+  context.genesisHash = genesisHash;
+
   const checks = [];
   const add = (section, id, title, status, detail) =>
     checks.push({ section, id, title, status, detail });
   const unverifiedId = (section, id, title, err) =>
     add(section, id, title, UNVERIFIED, `not verified — RPC failure: ${err.message ?? err}`);
+
+  // ------------------------------------SECTION G — cluster identity (fix G)
+  // The genesis hash is the cluster's fingerprint. It must equal the pinned
+  // Solana Devnet genesis BEFORE any deployment state is interpreted: a
+  // different cluster is not a misconfigured deployment, it is a different
+  // world — so a mismatch fails closed right here and sections A–E never
+  // evaluate against foreign bytes.
+  if (genesisHash === null) {
+    add(
+      "G",
+      "G1 devnet",
+      "RPC endpoint reports the pinned Solana Devnet genesis hash",
+      UNVERIFIED,
+      `${context.genesisError ?? "getGenesisHash failed"} — cluster identity could NOT be established ` +
+        `(pinned Devnet genesis: ${DEVNET_GENESIS_HASH}); acceptance is blocked (INCOMPLETE) until ` +
+        "the endpoint reports it",
+    );
+  } else if (genesisHash !== DEVNET_GENESIS_HASH) {
+    add(
+      "G",
+      "G1 devnet",
+      "RPC endpoint reports the pinned Solana Devnet genesis hash",
+      FAIL,
+      `endpoint genesis ${genesisHash} != pinned Devnet ${DEVNET_GENESIS_HASH} — this is NOT the ` +
+        "approved cluster. No deployment state is interpreted on a foreign cluster; " +
+        "point --url at Solana Devnet (https://api.devnet.solana.com) and re-run",
+    );
+    // Fail closed immediately — no deployment check runs on a foreign cluster.
+    const countsNow = {
+      pass: checks.filter((c) => c.status === PASS).length,
+      fail: checks.filter((c) => c.status === FAIL).length,
+      unverified: checks.filter((c) => c.status === UNVERIFIED).length,
+      info: checks.filter((c) => c.status === INFO).length,
+    };
+    return {
+      checks,
+      overall: countsNow.fail > 0 ? "FAIL" : countsNow.unverified > 0 ? "INCOMPLETE" : "PASS",
+      counts: countsNow,
+      context,
+      identities,
+    };
+  } else {
+    add(
+      "G",
+      "G1 devnet",
+      "RPC endpoint reports the pinned Solana Devnet genesis hash",
+      PASS,
+      `genesis ${genesisHash} matches the pinned Devnet identity`,
+    );
+  }
 
   // Cached, never-throwing account fetcher.
   const cache = new Map();
@@ -1038,6 +1120,9 @@ function renderTerminal(result) {
     `context: slot ${context.slot ?? "unknown"} epoch ${context.epoch ?? "unknown"} commitment ${context.commitment}${context.error ? ` (${context.error})` : ""}`,
   );
   lines.push(
+    `cluster: genesis ${context.genesisHash ?? "unknown"}${context.genesisError ? ` (${context.genesisError})` : ""} — pinned Devnet ${DEVNET_GENESIS_HASH}`,
+  );
+  lines.push(
     `identities: deployer ${identities.deployer.value} [${identities.deployer.source}], governance ${identities.governance.value} [${identities.governance.source}], activity oracle ${identities.activityOracle.value} [${identities.activityOracle.source}], launch-price oracle ${identities.launchPriceOracle.value} [${identities.launchPriceOracle.source}]`,
   );
   let section = "";
@@ -1045,6 +1130,7 @@ function renderTerminal(result) {
     if (c.section !== section) {
       section = c.section;
       const titles = {
+        G: "Section G — cluster identity (pinned Solana Devnet genesis hash; runs before any deployment state)",
         A: "Section A — program accounts, ProgramData relationship, upgrade authority",
         B: "Section B — ProtocolConfig PDA, schema decode, governance authority, approved defaults",
         C: "Section C — dedicated oracle signers",

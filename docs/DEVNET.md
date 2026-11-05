@@ -71,8 +71,8 @@ Hard rules that hold in ALL modes:
   a keypair file by accident).
 - No transaction is ever submitted to a public cluster from any path
   other than mode 2. Mode 1 targets `http://127.0.0.1:8899` only; mode
-  3 performs read-only RPC (`getAccountInfo` / `getEpochInfo`) and
-  cannot sign or send anything by construction.
+  3 performs read-only RPC (`getAccountInfo` / `getEpochInfo` /
+  `getGenesisHash`) and cannot sign or send anything by construction.
 - Agents may prepare, build, verify, and report — the deployment
   transactions themselves are the owner's.
 
@@ -81,6 +81,7 @@ Hard rules that hold in ALL modes:
 | Item | Value |
 |------|-------|
 | Cluster | Solana devnet — `https://api.devnet.solana.com` (always passed explicitly) |
+| Devnet genesis hash (pinned) | `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` — verified independently (live RPC + Anza cluster docs); the acceptance verifier refuses a different cluster |
 | GraveScanner program ID | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
 | GraveVault program ID | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
 | ProtocolConfig PDA seeds | `["protocol_config"]` under each program's ID, bump 255 |
@@ -310,7 +311,14 @@ node scripts/devnet/verify_ns3_deployment.mjs --url https://api.devnet.solana.co
 ```
 
 The verifier derives everything from the pinned NS-3 identities and
-reports five sections, each item PASS / FAIL / UNVERIFIED:
+reports six sections, each item PASS / FAIL / UNVERIFIED:
+
+- **G — cluster identity (runs FIRST)**: the endpoint's `getGenesisHash`
+  must equal the pinned, independently verified Solana Devnet genesis
+  hash (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`) before any
+  deployment state is interpreted. A different cluster is an immediate
+  `FAIL` (no deployment check is evaluated on foreign bytes); a failed
+  genesis request is `UNVERIFIED`, which forces `INCOMPLETE`.
 
 - **A — program accounts**: both programs exist, are executable, are
   owned by the BPF upgradeable loader, and their REAL ProgramData

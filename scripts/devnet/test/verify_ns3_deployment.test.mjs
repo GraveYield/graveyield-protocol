@@ -4,9 +4,9 @@
 // post-deployment acceptance verifier.
 //
 // EVERY test runs fully offline: the cluster is a local JSON-RPC mock
-// (node:http) serving getAccountInfo / getEpochInfo responses built with
-// the real byte layouts. Nothing contacts a public cluster and no keypair
-// material exists anywhere in this suite.
+// (node:http) serving getAccountInfo / getEpochInfo / getGenesisHash
+// responses built with the real byte layouts. Nothing contacts a public
+// cluster and no keypair material exists anywhere in this suite.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -27,6 +27,7 @@ import {
   accountDiscriminator,
   strictBool,
   BPF_LOADER_UPGRADEABLE,
+  DEVNET_GENESIS_HASH,
 } from "../verify_ns3_deployment.mjs";
 import { decodeProtocolConfig } from "../protocol_admin.mjs";
 import { NS3_LEGACY_IDS } from "../ns3_verify_elf.mjs";
@@ -98,6 +99,14 @@ function handleRpc(req, state) {
         id: req.id,
         result: { absoluteSlot: SLOT, blockHeight: SLOT - 200, epoch: 800, slotIndex: 345 },
       };
+    case "getGenesisHash":
+      // default: the pinned Devnet genesis; a scenario may override it
+      // (wrong-cluster) via state.genesisHash
+      return {
+        jsonrpc: "2.0",
+        id: req.id,
+        result: state.genesisHash ?? DEVNET_GENESIS_HASH,
+      };
     case "getVersion":
       return { jsonrpc: "2.0", id: req.id, result: { "solana-core": "3.0.10" } };
     default:
@@ -128,6 +137,10 @@ async function withRpc(state, fn, { failAll = false, captured = null } = {}) {
         return;
       }
       const batch = Array.isArray(payload) ? payload : [payload];
+      if (state.failGenesis && batch.some((r) => r?.method === "getGenesisHash")) {
+        res.destroy(); // transport failure on the genesis request ONLY (scenario G4)
+        return;
+      }
       const results = batch.map((r) => handleRpc(r, state));
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(Array.isArray(payload) ? results : results[0]));
@@ -973,5 +986,101 @@ describe("hardening — ProgramData pointer must be the loader-derived PDA", () 
   test("H2. the derived-PDA fixture arrangement PASSes (positives still work)", async () => {
     const r = await withRpc(fullState(), (url) => runVerification({ url }));
     assert.match(checkOf(r, "A4 ")[0].detail, /independently derived loader PDA/);
+  });
+});
+
+// ===========================================================================
+// Genesis gate — the RPC endpoint must BE Solana Devnet (pinned genesis)
+//
+// The literals below are INDEPENDENTLY VERIFIED (2026-11-06) against three
+// sources: live `getGenesisHash` on api.devnet.solana.com, the official
+// Anza cluster docs (docs.anza.xyz — the devnet validator example pins
+// --expected-genesis-hash to this exact value), and an independent
+// chain-config reference. They are hardcoded on purpose: if the verifier's
+// pin ever drifts from the REAL Devnet genesis (or someone re-pins it to a
+// foreign cluster), this battery must fail. The wrong-cluster scenario uses
+// the REAL mainnet genesis — the most plausible wrong-cluster mistake.
+// ===========================================================================
+describe("genesis gate — pinned Solana Devnet genesis hash", () => {
+  const REAL_DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+  const REAL_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+
+  test("G1a. the verifier pin equals the independently verified Devnet genesis (no silent re-pin)", () => {
+    assert.equal(DEVNET_GENESIS_HASH, REAL_DEVNET_GENESIS);
+  });
+
+  test("G1b. correct Devnet genesis → G1 PASSes FIRST, acceptance proceeds", async () => {
+    const s = fullState();
+    s.genesisHash = REAL_DEVNET_GENESIS;
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const g = checkOf(r, "G1 ")[0];
+    assert.equal(g.status, "PASS");
+    assert.match(g.detail, new RegExp(REAL_DEVNET_GENESIS));
+    assert.equal(r.context.genesisHash, REAL_DEVNET_GENESIS);
+    // cluster identity is established BEFORE any deployment state: G1 is
+    // the first check the verifier ever emits
+    assert.equal(r.checks[0].id, "G1 devnet");
+  });
+
+  test("G2. a different cluster (real mainnet genesis) → FAIL, deployment state NOT interpreted", async () => {
+    const s = fullState();
+    s.genesisHash = REAL_MAINNET_GENESIS;
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    const g = checkOf(r, "G1 ")[0];
+    assert.equal(g.status, "FAIL");
+    assert.match(g.detail, new RegExp(REAL_MAINNET_GENESIS));
+    assert.match(g.detail, new RegExp(REAL_DEVNET_GENESIS));
+    assert.equal(r.context.genesisHash, REAL_MAINNET_GENESIS);
+    // fail closed immediately: exactly ONE check exists — the genesis gate.
+    // Sections A–E never evaluate against foreign-cluster bytes.
+    assert.equal(r.checks.length, 1);
+    assert.equal(r.counts.fail, 1);
+    assert.equal(r.counts.pass, 0);
+  });
+
+  test("G3. CLI exits 1 on a foreign cluster", async () => {
+    const s = fullState();
+    s.genesisHash = REAL_MAINNET_GENESIS;
+    await withRpc(s, async (url) => {
+      const out = await runCli(url, ["--json"]);
+      assert.equal(out.code, 1, out.stdout + out.stderr);
+      const j = JSON.parse(out.stdout);
+      assert.equal(j.overall, "FAIL");
+      assert.equal(j.checks.length, 1);
+      assert.match(j.checks[0].detail, new RegExp(REAL_MAINNET_GENESIS));
+      return null;
+    });
+  });
+
+  test("G4. genesis-hash request fails → UNVERIFIED, overall INCOMPLETE even with everything else PASS", async () => {
+    const s = fullState();
+    s.failGenesis = true; // transport failure on the genesis request ONLY
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "INCOMPLETE");
+    const g = checkOf(r, "G1 ")[0];
+    assert.equal(g.status, "UNVERIFIED");
+    assert.match(g.detail, /getGenesisHash failed/);
+    assert.match(g.detail, new RegExp(REAL_DEVNET_GENESIS));
+    assert.equal(r.context.genesisHash, null);
+    assert.match(r.context.genesisError, /getGenesisHash failed/);
+    // no FAIL anywhere — the cluster is simply unproven
+    assert.equal(r.counts.fail, 0);
+    assert.equal(r.counts.unverified, 1);
+    // the remaining checks still ran as diagnostics, but they can never
+    // outweigh the missing cluster identity: acceptance stays blocked
+    assert.equal(checkOf(r, "A1 ")[0].status, "PASS");
+  });
+
+  test("G5. CLI exits 3 when the genesis request fails (never passes on partial evidence)", async () => {
+    const s = fullState();
+    s.failGenesis = true;
+    await withRpc(s, async (url) => {
+      const out = await runCli(url, ["--json"]);
+      assert.equal(out.code, 3, out.stdout + out.stderr);
+      assert.equal(JSON.parse(out.stdout).overall, "INCOMPLETE");
+      return null;
+    });
   });
 });

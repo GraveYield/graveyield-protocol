@@ -737,6 +737,57 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     );
   });
 
+  test("B9. a tampered tool BINARY under a VALID stamp is replaced from the authenticated archive", () => {
+    // Strongest adversarial cache claim available: the compiler binary
+    // inside the cache is swapped for attacker-controlled bytes while the
+    // plaintext stamp still reads exactly the manifest pin. The stamp is
+    // never load-bearing (fix B), so the cache must be rebuilt from the
+    // hash-verified archive and the tampered compiler must not survive.
+    const { run, log, pt } = setupScenario({ stampSha: "manifest" });
+    const tampered = "#!/bin/sh\necho TAMPERED-COMPILER; exit 0\n";
+    const cargoPaths = ["v1.51", "v1.57"].map((v) =>
+      path.join(SBX, "home", ".cache", "solana", v, "platform-tools", "rust", "bin", "cargo"),
+    );
+    for (const p of cargoPaths) writeFileSync(p, tampered, { mode: 0o755 });
+
+    const r = run();
+    assert.equal(r.code, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /seeded from the verified archive/);
+    assert.equal(deploysInLog(log).length, 2, "a re-seeded cache still leads to a normal deploy");
+    // the tampered compiler bytes did NOT survive: no TAMPERED-COMPILER marker
+    for (const p of cargoPaths) {
+      assert.doesNotMatch(readFileSync(p, "utf8"), /TAMPERED-COMPILER/);
+    }
+    // belt and braces: every cache binary is byte-identical to a fresh
+    // extraction of the VERIFIED archive — not merely "not tampered"
+    const extract = mkdtempSync(path.join(tmpdir(), "gy-pt-extract-"));
+    try {
+      execFileSync("tar", ["xjf", pt.good, "-C", extract]);
+      for (const p of cargoPaths) {
+        assert.deepEqual(
+          [...readFileSync(p)],
+          [...readFileSync(path.join(extract, "rust", "bin", "cargo"))],
+        );
+      }
+    } finally {
+      rmSync(extract, { recursive: true, force: true });
+    }
+    // the stamp is rewritten to the manifest pin (same value it already had)
+    const stamp = readFileSync(
+      path.join(
+        SBX,
+        "home",
+        ".cache",
+        "solana",
+        "v1.51",
+        "platform-tools",
+        ".graveyield-pinned-sha256",
+      ),
+      "utf8",
+    ).trim();
+    assert.equal(stamp, pt.sha);
+  });
+
   // ========================================================================
   // Fix D — deployment-CLI identity on EVERY deploy path, before keypairs
   // ========================================================================
