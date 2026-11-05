@@ -12,7 +12,10 @@
 //      executable, are owned by the BPF upgradeable loader, and their
 //      REAL ProgramData account (decoded from the program account's
 //      embedded pointer, NOT inferred from any config) exists, is owned
-//      by the loader, and names the deployer as upgrade authority.
+//      by the loader, and names the deployer as upgrade authority. The
+//      embedded pointer must ALSO equal the INDEPENDENTLY derived
+//      ProgramData address (PDA([program_id], BPFLoaderUpgradeable)) —
+//      the recorded arrangement is never taken on trust.
 //   B. ProtocolConfig — the PDA is derived INDEPENDENTLY (['protocol_config']
 //      under each program ID, bump 255) and must equal the pinned
 //      derivation; the account exists, is owned by its program, carries a
@@ -55,22 +58,44 @@
 //   - programs/grave-scanner/src/state/protocol_config.rs  (schema + offsets)
 //   - programs/grave-vault/src/state/protocol_config.rs    (schema + offsets)
 //   - programs/*/src/constants.rs                          (seeds/defaults)
-//   - docs/LEGACY_DEPLOYMENTS.md §3  (loader account layouts, verified
-//     read-only on-chain: program account = 4-byte tag + 32-byte
-//     ProgramData pointer; ProgramData = 4-byte tag + 8-byte slot +
-//     1-byte authority-set flag + 32-byte upgrade authority)
+//   - docs/LEGACY_DEPLOYMENTS.md §3  (loader account layouts). The
+//     UpgradeableLoaderState wire format was verified INDEPENDENTLY on
+//     2026-11-05 against (1) the anza-xyz/solana-sdk loader-v3-interface
+//     sources (enum ordinal order + size_of_program()=36 /
+//     size_of_programdata_metadata()=45) and (2) live devnet
+//     getAccountInfo bytes of the NS-2 programs:
+//       program account     = u32 tag 2 LE + 32-byte ProgramData pointer
+//                             (36 B total)
+//       ProgramData account = u32 tag 3 LE + u64 slot + 1-byte
+//                             authority-set flag + 32-byte upgrade
+//                             authority (45 B metadata)
+//     and the ProgramData ADDRESS is derivable offline:
+//       get_program_data_address(program_id) =
+//         PDA([program_id], BPFLoaderUpgradeable)  — bump 255 for both
+//     NS-3 programs; the verifier re-derives it and refuses a program
+//     account whose embedded pointer is anything else.
 //
 // CLI:
-//   node verify_ns3_deployment.mjs --url <RPC_URL> [--commitment confirmed|finalized]
-//        [--deployer <PK>] [--governance <PK>] [--activity-oracle <PK>]
-//        [--launch-price-oracle <PK>] [--json]
+//   node verify_ns3_deployment.mjs --url <RPC_URL> [--commitment finalized|confirmed] [--json]
+//
+//   Commitment default is FINALIZED. "confirmed" is a DIAGNOSTIC override
+//   only: an acceptance run reported with the default is decided on
+//   finalized (root) state; passing --commitment confirmed is for
+//   debugging a just-submitted deployment and is recorded verbatim in the
+//   output context.
+//
+//   IDENTITY OVERRIDES WERE REMOVED (security fix C): --deployer,
+//   --governance, --activity-oracle and --launch-price-oracle no longer
+//   exist. The verifier always checks the 8 pinned NS-3 identities
+//   (NS3 + the two derived ProtocolConfig PDAs in ns3_identities.mjs) —
+//   acceptance identities are constants, not options, so a caller can
+//   never coax a PASS by feeding the verifier a different arrangement.
 //
 // Exit codes: 0 overall PASS; 1 overall FAIL; 3 overall INCOMPLETE
 // (unverified checks); 2 usage error.
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { NS3, NS3_PDAS, configPdaWithBump } from "./ns3_identities.mjs";
+import { NS3, NS3_PDAS, configPdaWithBump, programDataPda } from "./ns3_identities.mjs";
 import { NS3_LEGACY_IDS } from "./ns3_verify_elf.mjs";
 
 export const TOOL_NAME = "verify_ns3_deployment";
@@ -129,9 +154,15 @@ export function parseProgramAccount(data) {
 }
 
 /**
- * Parse a BPF-upgradeable PROGRAMDATA account (>=45 B: u32 tag=1 + u64 slot
- * + 1-byte authority-set flag + 32-byte upgrade authority at offset 13).
- * Throws on any structural mismatch.
+ * Parse a BPF-upgradeable PROGRAMDATA account (45 B metadata: u32 tag=3 +
+ * u64 slot + 1-byte authority-set flag + 32-byte upgrade authority at
+ * offset 13). Throws on any structural mismatch.
+ *
+ * Tag values are the UpgradeableLoaderState bincode enum ordinals
+ * (u32 LE): 0=Uninitialized, 1=Buffer, 2=Program, 3=ProgramData —
+ * verified against the anza-xyz/solana-sdk loader-v3-interface sources
+ * AND live on-chain bytes (see the header). A ProgramData account whose
+ * tag is anything but 3 is not a ProgramData account.
  */
 export function parseProgramDataAccount(data) {
   const buf = Buffer.from(data);
@@ -139,8 +170,11 @@ export function parseProgramDataAccount(data) {
     throw new Error(`ProgramData account too small (${buf.length} B; header alone is 13 B)`);
   }
   const tag = buf.readUInt32LE(0);
-  if (tag !== 1) {
-    throw new Error(`ProgramData account tag ${tag} != 1 (not a ProgramData account)`);
+  if (tag !== 3) {
+    throw new Error(
+      `ProgramData account tag ${tag} != 3 (UpgradeableLoaderState::ProgramData discriminant is 3; ` +
+        "this is not a ProgramData account)",
+    );
   }
   const slot = buf.readBigUInt64LE(4);
   const flag = buf.readUInt8(12);
@@ -181,7 +215,12 @@ export function decodeScannerConfig(data) {
     anchorStalenessSeconds: v.getBigUint64(98, true),
     lpBurnDustThreshold: v.getBigUint64(106, true),
     certTtlSeconds: v.getBigInt64(114, true),
-    paused: v.getUint8(122) === 1,
+    // Strict boolean decode (fix E): the on-chain bool is one byte and
+    // borsh only ever emits 0/1. Any other byte means the account does
+    // not match the current schema (corruption, a different program, or
+    // a crafted account) and MUST fail the decode instead of being
+    // silently coerced ("x === 1" would read 2/255 as false).
+    paused: strictBool(v.getUint8(122), "scanner paused"),
     activityOracle: pk(123),
     launchPriceOracle: pk(155),
     bump: v.getUint8(187),
@@ -212,9 +251,24 @@ export function decodeVaultConfig(data) {
     maxSlippageBps: v.getUint16(94, true),
     jupiterDustThresholdLamports: v.getBigUint64(96, true),
     timelockSeconds: v.getBigInt64(104, true),
-    emergencyPaused: v.getUint8(112) === 1,
+    // Strict boolean decode (fix E) — same rationale as `paused`.
+    emergencyPaused: strictBool(v.getUint8(112), "vault emergency_paused"),
     bump: v.getUint8(113),
   };
+}
+
+/**
+ * Strict boolean decode (fix E): only the borsh bool encodings 0 and 1
+ * are legal; anything else throws with the field name and the offending
+ * byte so the check fails closed instead of coercing garbage to false.
+ */
+export function strictBool(byte, field) {
+  if (byte !== 0 && byte !== 1) {
+    throw new Error(
+      `${field} byte is ${byte} (boolean fields encode ONLY 0/1 — account does not match the current schema)`,
+    );
+  }
+  return byte === 1;
 }
 
 // ------------------------------------------------------------------ core
@@ -229,29 +283,27 @@ const INFO = "INFO";
  * conditions (usage mistakes still throw). Returns
  * { checks, overall, counts, context, identities }.
  */
-export async function runVerification({
-  url,
-  commitment = "confirmed",
-  deployer = NS3.deployer,
-  governance = NS3.governanceAuthority,
-  activityOracle = NS3.activityOracle,
-  launchPriceOracle = NS3.launchPriceOracle,
-} = {}) {
+export async function runVerification(options = {}) {
+  const { url, commitment = "finalized" } = options;
   if (!url) throw new Error("runVerification requires an explicit RPC url");
+  // Fix C — identity overrides are REMOVED at the API boundary too: any
+  // attempt to pass them fails closed instead of being silently ignored.
+  for (const k of ["deployer", "governance", "activityOracle", "launchPriceOracle"]) {
+    if (k in options) {
+      throw new Error(
+        `runVerification no longer accepts '${k}': acceptance identities are the PINNED NS-3 constants, not options`,
+      );
+    }
+  }
+  if (commitment !== "finalized" && commitment !== "confirmed") {
+    throw new Error("commitment must be 'finalized' (default) or 'confirmed' (diagnostic)");
+  }
+  // The 8 pinned NS-3 identities — constants, never caller-supplied.
   const identities = {
-    deployer: { value: deployer, source: deployer === NS3.deployer ? "pinned" : "flag" },
-    governance: {
-      value: governance,
-      source: governance === NS3.governanceAuthority ? "pinned" : "flag",
-    },
-    activityOracle: {
-      value: activityOracle,
-      source: activityOracle === NS3.activityOracle ? "pinned" : "flag",
-    },
-    launchPriceOracle: {
-      value: launchPriceOracle,
-      source: launchPriceOracle === NS3.launchPriceOracle ? "pinned" : "flag",
-    },
+    deployer: { value: NS3.deployer, source: "pinned" },
+    governance: { value: NS3.governanceAuthority, source: "pinned" },
+    activityOracle: { value: NS3.activityOracle, source: "pinned" },
+    launchPriceOracle: { value: NS3.launchPriceOracle, source: "pinned" },
   };
   const pk = (b58) => new PublicKey(b58);
   const scannerProgram = pk(NS3.scannerProgramId);
@@ -384,10 +436,16 @@ export async function runVerification({
         "executable=false — the loader would refuse to invoke it",
       );
     }
-    // A+3 ProgramData relationship — decode the REAL pointer.
+    // A+3 ProgramData relationship — decode the REAL pointer AND verify it
+    // against the INDEPENDENTLY derived ProgramData address (fix: never
+    // trust the recorded/pointed arrangement on its own).
     let pd = null;
+    let derivedPd = null;
+    let pointerIsDerived = true;
     try {
       pd = parseProgramAccount(info.data);
+      derivedPd = programDataPda(p.programId);
+      pointerIsDerived = pd.programdata.equals(derivedPd);
     } catch (err) {
       add(
         "A",
@@ -476,12 +534,33 @@ export async function runVerification({
       );
       continue;
     }
+    if (!pointerIsDerived) {
+      add(
+        "A",
+        `A${p.n + 3} ${base}`,
+        "ProgramData account decodes from the program account pointer",
+        FAIL,
+        `ProgramData pointer ${pd.programdata.toBase58()} is NOT the loader-derived ProgramData address of ${addr} ` +
+          `(expected ${derivedPd.toBase58()} = PDA([program_id], BPFLoaderUpgradeable), ` +
+          "solana_loader_v3_interface::get_program_data_address) — the approved deployment arrangement " +
+          "always yields the derived address; a foreign pointer is refused",
+      );
+      add(
+        "A",
+        `A${p.n + 4} ${base}`,
+        `upgrade authority (real ProgramData) is the deployer ${identities.deployer.value}`,
+        FAIL,
+        "cannot trust the upgrade authority of a ProgramData account reached through a non-derived pointer",
+      );
+      continue;
+    }
     add(
       "A",
       `A${p.n + 3} ${base}`,
       "ProgramData account decodes from the program account pointer",
       PASS,
-      `program account -> ProgramData ${pd.programdata.toBase58()} (owner loader, tag 1, slot ${decodedPd.slot})`,
+      `program account -> ProgramData ${pd.programdata.toBase58()} (owner loader, tag 3, slot ${decodedPd.slot}; ` +
+        "pointer == independently derived loader PDA)",
     );
     programData[base] = { programdata: pd.programdata, decoded: decodedPd };
     // A+4 upgrade authority = deployer (decoded from the REAL ProgramData).
@@ -1016,51 +1095,34 @@ function parseArgs(argv) {
 function usageError(message) {
   console.error(`usage error: ${message}`);
   console.error(
-    "usage: node verify_ns3_deployment.mjs --url <RPC_URL> [--commitment confirmed|finalized] " +
-      "[--deployer <PK>] [--governance <PK>] [--activity-oracle <PK>] [--launch-price-oracle <PK>] [--json]",
+    "usage: node verify_ns3_deployment.mjs --url <RPC_URL> [--commitment finalized|confirmed] [--json]\n" +
+      "  --commitment defaults to FINALIZED; 'confirmed' is a diagnostic override for a just-submitted deploy.\n" +
+      "  Identity flags (--deployer/--governance/--activity-oracle/--launch-price-oracle) were REMOVED:\n" +
+      "  this verifier always checks the 8 pinned NS-3 identities (constants in ns3_identities.mjs).",
   );
   process.exit(2);
 }
 
-/** Public-key valued flag: reject file paths (never touch keypair files). */
-function requirePubkeyArg(args, name) {
-  const v = args[name];
-  if (v === undefined) return undefined;
-  if (typeof v !== "string" || v.length === 0) usageError(`--${name} needs a public key`);
-  if (existsSync(v)) {
-    usageError(
-      `--${name} must be a PUBLIC KEY, but "${v}" is an existing file path. ` +
-        "This verifier is strictly read-only and never reads keypair files.",
-    );
-  }
-  try {
-    const p = new PublicKey(v);
-    if (p.toBase58() !== v) usageError(`--${name} is not a canonical base58 public key`);
-  } catch {
-    usageError(`--${name} is not a valid base58 public key`);
-  }
-  return v;
-}
+/** Identity-override flags removed by fix C — never accepted again. */
+const REMOVED_IDENTITY_FLAGS = ["deployer", "governance", "activity-oracle", "launch-price-oracle"];
 
 async function main() {
   const args = parseArgs(process.argv);
   if (!args.url) usageError("--url is REQUIRED (this tool never assumes a cluster)");
-  if (args.commitment !== undefined && !["confirmed", "finalized"].includes(args.commitment)) {
-    usageError("--commitment must be 'confirmed' or 'finalized'");
+  for (const f of REMOVED_IDENTITY_FLAGS) {
+    if (args[f] !== undefined) {
+      usageError(
+        `--${f} is no longer accepted: acceptance identities are the PINNED NS-3 constants, not options. ` +
+          "Re-run without identity flags.",
+      );
+    }
   }
-  const overrides = {
-    deployer: requirePubkeyArg(args, "deployer"),
-    governance: requirePubkeyArg(args, "governance"),
-    activityOracle: requirePubkeyArg(args, "activity-oracle"),
-    launchPriceOracle: requirePubkeyArg(args, "launch-price-oracle"),
-  };
-  for (const k of Object.keys(overrides)) {
-    if (overrides[k] === undefined) delete overrides[k];
+  if (args.commitment !== undefined && !["finalized", "confirmed"].includes(args.commitment)) {
+    usageError("--commitment must be 'finalized' (default) or 'confirmed' (diagnostic)");
   }
   const result = await runVerification({
     url: args.url,
-    commitment: args.commitment ?? "confirmed",
-    ...overrides,
+    commitment: args.commitment ?? "finalized",
   });
   if (args.json) {
     console.log(

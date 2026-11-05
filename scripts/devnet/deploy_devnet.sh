@@ -22,13 +22,31 @@
 #         built for any other sbpf version is refused;
 #       - structural NS-3 identity (embedded declare_id! in an allocated
 #         section, no NS-1/NS-2 legacy ID bytes anywhere);
-#       - when building: the platform-tools tarball is hash-verified
-#         against the manifest and pinned into the cargo-build-sbf cache.
+#       - when building: the platform-tools ARCHIVE is re-verified against
+#         the manifest and the cargo-build-sbf cache is re-seeded from the
+#         VERIFIED archive (fix B: a plaintext cache stamp is never trusted).
 #     The gate applies to the normal build+deploy flow, --build-only,
 #     --skip-build (pre-placed or CI-produced artifacts), and every
 #     re-run/retry: there is no flag, path, or environment that skips it.
 #     If the digests differ, the gate stays closed — re-pin only after an
 #     independently reviewed rebuild (docs/DEVNET.md), never to go green.
+#   * DEPLOYMENT-CLI IDENTITY (fix D): `solana --version` and
+#     `solana-keygen --version` are verified against the manifest pin on
+#     EVERY deploy path (normal, --skip-build, retries) BEFORE any owner
+#     keypair path is touched (existence checks included) — the CLI that
+#     reads owner keys and submits transactions is a separate trust
+#     surface from the build toolchain, and its identity is proven first.
+#   * BUILD-TOOLCHAIN IDENTITY (fix D, build paths only): cargo-build-sbf
+#     and the platform-tools cache are verified BEFORE the owner keypairs
+#     are seeded into target/ (a toolchain refusal must never leave owner
+#     key material copied into the build tree).
+#   * ANCHOR IS NOT ON THE DEPLOY PATH (fix D finding, verified): this
+#     script builds with cargo-build-sbf (pinned agave 3.0.10 toolchain)
+#     and deploys with `solana program deploy`; anchor 1.2.2 is used only
+#     by the CI `anchor build` flow and is NOT required at deployment
+#     time. The v1.57 platform-tools cache (anchor 1.2.2's resolution) is
+#     still seeded — from the hash-verified archive only — so that an
+#     accidental anchor invocation can never resolve unverified bytes.
 #   * The program keypairs determine the on-chain addresses; the ELF's
 #     declare_id! (NS-3: EFJpKt… / 7VxUGJ…) must match them. The script refuses
 #     to build if target/deploy already holds a DIFFERENT keypair (stale build
@@ -114,13 +132,20 @@ run_provenance_gate() {
   node "$PROVENANCE_CHECKER" "${gate_args[@]}"
 }
 
-# Pin platform-tools (build paths only): cargo-build-sbf resolves its
-# toolchain from per-version cache directories and skips its own download
-# whenever the directory exists — so the pinned v1.54 toolchain is seeded
-# into every directory this flow may resolve (v1.51 = cargo-build-sbf
-# 3.0.10's default; v1.57 = anchor 1.2.2's override), exactly like CI.
-# A pre-existing cache WITHOUT a matching provenance stamp is refused:
-# its contents were not hash-verified by this gate.
+# Pin platform-tools (build paths only) — THE ARCHIVE IS THE ONLY TRUST
+# ANCHOR (fix B). A pre-seeded cache directory carries a plaintext stamp
+# that anyone (or any corrupted tool) can write, so the stamp is NEVER
+# trusted as evidence of the directory's contents. Instead, every run:
+#   1. obtains the archive — reusing the local archive copy ONLY after its
+#      SHA-256 re-verifies against the shared manifest, otherwise
+#      downloading it fresh; a download whose digest mismatches the pin
+#      aborts the run BEFORE anything is extracted (fail closed);
+#   2. re-seeds EVERY cache directory this flow may resolve (v1.51 =
+#      cargo-build-sbf 3.0.10's default; v1.57 = anchor 1.2.2's override —
+#      anchor itself is NOT required on the deploy path, but the cache is
+#      seeded so an accidental resolution can never pick unverified bytes)
+#      from the VERIFIED archive, overwriting whatever was there before;
+#   3. writes the stamp last — informational, never load-bearing.
 pin_platform_tools() {
   require_node
   local pt_sha pt_ver pt_url
@@ -128,61 +153,59 @@ pin_platform_tools() {
   pt_ver="$(manifest_field toolchain.platform_tools.version)"
   pt_url="$(manifest_field toolchain.platform_tools.url)"
   local cache_root="$HOME/.cache/solana"
+  local archive="$cache_root/.graveyield-platform-tools-v$pt_ver.tar.bz2"
 
-  # Pass 1 — validate whatever is already on disk (fail-closed).
-  local need_seed=0 v dest stamp
-  for v in v1.51 v1.57; do
-    dest="$cache_root/$v/platform-tools"
-    stamp="$dest/.graveyield-pinned-sha256"
-    if [[ -d "$dest" && -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
-      if [[ ! -f "$stamp" ]] || [[ "$(cat "$stamp" 2>/dev/null)" != "$pt_sha" ]]; then
-        echo "REFUSING: $dest exists but was not seeded from the pinned platform-tools" >&2
-        echo "v$pt_ver (missing/mismatched provenance stamp $stamp)." >&2
-        echo "Remediation: rm -rf '$cache_root/v1.51' '$cache_root/v1.57' and re-run —" >&2
-        echo "the script re-seeds both from the hash-verified tarball." >&2
-        exit 1
-      fi
-      echo "platform-tools v$pt_ver cache OK: $dest (stamp $pt_sha)"
+  # Pass 1 — a hash-verified archive, one way or another.
+  if [[ -f "$archive" ]]; then
+    echo "== platform-tools archive re-verification: $archive =="
+    if node "$PROVENANCE_CHECKER" --manifest "$PROVENANCE_MANIFEST" \
+      --platform-tools-tarball "$archive" >/dev/null; then
+      echo "platform-tools v$pt_ver archive OK (sha256 $pt_sha)"
     else
-      need_seed=1
+      echo "cached platform-tools archive does NOT match the manifest pin - deleting and re-downloading" >&2
+      rm -f "$archive"
     fi
-  done
-  if (( need_seed == 0 )); then
-    return 0
+  fi
+  if [[ ! -f "$archive" ]]; then
+    command -v curl >/dev/null || {
+      echo "REFUSING: curl not on PATH - cannot fetch the pinned platform-tools tarball." >&2
+      exit 2
+    }
+    local tmp
+    tmp="$(mktemp /tmp/platform-tools.XXXXXX.tar.bz2)"
+    echo "downloading platform-tools v$pt_ver -> $tmp"
+    curl -sSL --fail -o "$tmp" "$pt_url" || {
+      echo "REFUSING: platform-tools v$pt_ver download failed - build toolchain unproven." >&2
+      rm -f "$tmp"
+      exit 1
+    }
+    echo "== platform-tools archive verification (against the shared manifest) =="
+    if ! node "$PROVENANCE_CHECKER" --manifest "$PROVENANCE_MANIFEST" \
+      --platform-tools-tarball "$tmp"; then
+      echo "REFUSING: platform-tools tarball failed the manifest digest check - NOTHING was" >&2
+      echo "extracted and nothing will be built; the build toolchain is unproven." >&2
+      rm -f "$tmp"
+      exit 1
+    fi
+    mkdir -p "$cache_root"
+    mv -f "$tmp" "$archive"
   fi
 
-  # Pass 2 — ONE download, hash-verified against the shared manifest, then
-  # seeded into every missing cache directory. The verified tarball is kept
-  # for the provenance gate below (verified twice: once here, once with the
-  # ELFs — two different trust moments, one file).
-  command -v curl >/dev/null || {
-    echo "REFUSING: curl not on PATH — cannot fetch the pinned platform-tools tarball." >&2
-    exit 2
-  }
-  local tmp
-  tmp="$(mktemp /tmp/platform-tools.XXXXXX.tar.bz2)"
-  echo "downloading platform-tools v$pt_ver -> $tmp"
-  curl -sSL --fail -o "$tmp" "$pt_url" || {
-    echo "REFUSING: platform-tools v$pt_ver download failed — build toolchain unproven." >&2
-    rm -f "$tmp"
-    exit 1
-  }
-  node "$PROVENANCE_CHECKER" --manifest "$PROVENANCE_MANIFEST" \
-    --platform-tools-tarball "$tmp" >/dev/null || {
-    echo "REFUSING: platform-tools tarball failed the manifest digest check." >&2
-    rm -f "$tmp"
-    exit 1
-  }
+  # Pass 2 — seed every resolvable version dir FROM THE VERIFIED ARCHIVE
+  # ONLY (the rm -rf means a foreign or tampered cache cannot survive).
+  local v dest
   for v in v1.51 v1.57; do
     dest="$cache_root/$v/platform-tools"
-    if [[ ! -d "$dest" || -z "$(ls -A "$dest" 2>/dev/null)" ]]; then
-      mkdir -p "$dest"
-      tar xjf "$tmp" -C "$dest"
-      printf '%s\n' "$pt_sha" > "$dest/.graveyield-pinned-sha256"
-      echo "seeded $dest (platform-tools v$pt_ver, sha256 $pt_sha)"
-    fi
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    tar xjf "$archive" -C "$dest"
+    printf '%s\n' "$pt_sha" > "$dest/.graveyield-pinned-sha256"
+    echo "platform-tools v$pt_ver cache seeded from the verified archive: $dest"
   done
-  PLATFORM_TOOLS_TARBALL="$tmp"
+  # The verified archive is kept (not deleted) so the provenance gate below
+  # can verify it a second time alongside the ELFs, and so the next run's
+  # re-verification works offline.
+  PLATFORM_TOOLS_TARBALL="$archive"
 }
 
 # The build toolchain must be the pinned one (manifest toolchain.solana_cli).
@@ -198,8 +221,44 @@ check_build_toolchain_version() {
   echo "cargo-build-sbf version OK: $got"
 }
 
+# Deployment-CLI identity (fix D) — a trust surface DISTINCT from the
+# build toolchain: this is the binary that reads the owner keypair files
+# and submits the deploy transactions, so its identity is verified
+# against the shared manifest pin BEFORE any owner keypair path is
+# touched (existence checks included), on EVERY deploy path (normal,
+# --skip-build, and every retry/re-run — nothing caches this verdict).
+check_deploy_cli() {
+  require_node
+  local want got
+  want="$(manifest_field toolchain.solana_cli)"
+  command -v solana >/dev/null || {
+    echo "REFUSING: solana CLI not on PATH - the deployment CLI identity cannot be verified." >&2
+    exit 2
+  }
+  command -v solana-keygen >/dev/null || {
+    echo "REFUSING: solana-keygen not on PATH - the deployment CLI identity cannot be verified." >&2
+    exit 2
+  }
+  got="$(solana --version 2>/dev/null || true)"
+  if [[ "$got" != *"$want"* ]]; then
+    echo "REFUSING: solana --version '$got' does not match the pinned deployment CLI $want." >&2
+    echo "The deployment CLI reads the owner keypairs and submits the deploy transactions;" >&2
+    echo "its identity is verified first, before any keypair path is touched (docs/DEVNET.md)." >&2
+    exit 1
+  fi
+  got="$(solana-keygen --version 2>/dev/null || true)"
+  if [[ "$got" != *"$want"* ]]; then
+    echo "REFUSING: solana-keygen --version '$got' does not match the pinned deployment CLI $want." >&2
+    exit 1
+  fi
+  echo "deployment CLI identity OK: solana + solana-keygen $want"
+}
+
 if (( BUILD_ONLY == 1 )); then
   # Build-only preparation path: no keypairs, no RPC, no transactions.
+  # No deployment-CLI identity check here by design: this path never
+  # touches a keypair and never submits a transaction (fix D scopes the
+  # CLI check to deploy paths).
   require_node
   command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
   pin_platform_tools
@@ -211,12 +270,24 @@ if (( BUILD_ONLY == 1 )); then
   # Fail-closed provenance gate: build-only produces no deployment, but it
   # must NOT mark bytes "ready" that are not exactly the recorded digests.
   run_provenance_gate
-  if [[ -n "${PLATFORM_TOOLS_TARBALL:-}" && -f "${PLATFORM_TOOLS_TARBALL:-}" ]]; then
-    rm -f "$PLATFORM_TOOLS_TARBALL"
-  fi
+  # NOTE: the verified platform-tools archive is intentionally KEPT (no
+  # rm): the next run re-verifies the very same bytes instead of
+  # re-downloading (fix B).
   echo "== build-only complete — ELFs in target/deploy/ are provenance-verified (gitignored). Nothing was deployed. =="
   exit 0
 fi
+
+# ------------------------------------------------------------------
+# DEPLOY PATH — order is security-mandated (fixes B + D):
+#   [0] deployment-CLI identity   (BEFORE any owner keypair path is touched)
+#   [1] keypair existence + identity (the verified CLI reads the pubkeys)
+#   [2] deployer funding
+#   [3] build-toolchain identity + platform-tools archive (BEFORE seeding)
+#   [4] seed owner keypairs into target/deploy
+#   [5] cargo build / --skip-build
+#   [6] fail-closed provenance gate
+#   [7] solana program deploy
+# ------------------------------------------------------------------
 
 for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
   if [[ -z "${!req}" ]]; then
@@ -225,13 +296,14 @@ for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
   fi
 done
 
+echo "== [0/7] deployment-CLI identity (before any keypair path is touched) =="
+check_deploy_cli
+
 for kp in "$SCANNER_KP" "$VAULT_KP" "$DEPLOYER_KP"; do
   [[ -f "$kp" ]] || { echo "keypair not found: $kp" >&2; exit 2; }
 done
 
-command -v solana >/dev/null || { echo "solana CLI not on PATH" >&2; exit 2; }
-
-echo "== [0/5] identity checks =="
+echo "== [1/7] keypair identity checks =="
 SCANNER_ID="$(solana-keygen pubkey "$SCANNER_KP")"
 VAULT_ID="$(solana-keygen pubkey "$VAULT_KP")"
 DEPLOYER="$(solana-keygen pubkey "$DEPLOYER_KP")"
@@ -248,7 +320,7 @@ echo "scanner: $SCANNER_ID"
 echo "vault:   $VAULT_ID"
 echo "deployer: $DEPLOYER"
 
-echo "== [1/5] deployer funding =="
+echo "== [2/7] deployer funding =="
 # Lamport-exact check: digit-stripping the human SOL display mis-reads
 # decimals ("0.5" -> "05"; "5.9" -> "59" would PASS a >= 6 test).
 BAL_LAMPORTS="$(solana --url "$URL" balance --lamports "$DEPLOYER_KP" | tr -dc '0-9')"
@@ -260,7 +332,23 @@ if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
   exit 1
 fi
 
-echo "== [2/5] seed build keypairs (target/deploy, gitignored) =="
+echo "== [3/7] build-toolchain identity + platform-tools archive (before owner keypairs are seeded) =="
+if (( SKIP_BUILD == 0 )); then
+  # The SBF toolchain is only required when this script builds; --skip-build
+  # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
+  # Both build paths pin platform-tools v1.54 (archive hash-verified EVERY
+  # run) so the bytes are reproducible against the recorded digests. This
+  # verification deliberately runs BEFORE step [4] seeds the owner
+  # keypairs: a toolchain refusal must never leave owner key material
+  # copied into the build tree (fix B).
+  command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
+  pin_platform_tools
+  check_build_toolchain_version
+else
+  echo "--skip-build set: no build toolchain resolution (the deployment-CLI identity above still applies in full)"
+fi
+
+echo "== [4/7] seed build keypairs (target/deploy, gitignored) =="
 mkdir -p target/deploy
 for pair in "grave_scanner:$SCANNER_KP:$EXPECTED_SCANNER" "grave_vault:$VAULT_KP:$EXPECTED_VAULT"; do
   name="${pair%%:*}"; rest="${pair#*:}"; kp="${rest%%:*}"; want="${rest##*:}"
@@ -278,15 +366,8 @@ for pair in "grave_scanner:$SCANNER_KP:$EXPECTED_SCANNER" "grave_vault:$VAULT_KP
   echo "seeded $dest"
 done
 
-echo "== [3/5] cargo build-sbf (scanner, vault) =="
+echo "== [5/7] cargo build-sbf (scanner, vault) =="
 if (( SKIP_BUILD == 0 )); then
-  # The SBF toolchain is only required when this script builds; --skip-build
-  # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
-  # Both build paths pin platform-tools v1.54 (hash-verified) so the bytes
-  # are reproducible against the recorded digests.
-  command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
-  pin_platform_tools
-  check_build_toolchain_version
   # Build per package directory (the repo's canonical SBF build pattern,
   # mirroring scripts/build_fork_harness.sh): agave 3.0.10's
   # cargo-build-sbf rejects `-p` in its own parser, and cargo passthrough
@@ -298,21 +379,19 @@ else
   echo "--skip-build set: reusing existing ELFs (the provenance gate below still applies in full)"
 fi
 
-echo "== [3b/5] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
+echo "== [6/7] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
 # This gate is the deployment precondition: no `solana program deploy` below
 # runs unless both ELFs match scripts/devnet/provenance.manifest.json byte
 # for byte, are SBPF v0, and carry the NS-3 identities structurally. It
 # covers the build path AND --skip-build (pre-placed/CI artifacts), and
 # therefore every retry/recovery re-run of this script.
 run_provenance_gate
-if [[ -n "${PLATFORM_TOOLS_TARBALL:-}" && -f "${PLATFORM_TOOLS_TARBALL:-}" ]]; then
-  rm -f "$PLATFORM_TOOLS_TARBALL"
-fi
+# NOTE: the verified platform-tools archive is intentionally KEPT (no rm)
+# so the next run re-verifies the same bytes offline (fix B).
 
-echo "== [4/5] artifact summary =="
+echo "== [7/7] artifact summary + solana program deploy =="
 ls -la target/deploy/grave_scanner.so target/deploy/grave_vault.so
 
-echo "== [5/5] solana program deploy =="
 solana --url "$URL" program deploy target/deploy/grave_scanner.so \
   --program-id "$SCANNER_KP" --keypair "$DEPLOYER_KP" --output json
 solana --url "$URL" program deploy target/deploy/grave_vault.so \

@@ -131,9 +131,13 @@ script and CI (PR #82 provenance, values recorded verbatim):
    allocated ELF section and no NS-1/NS-2 legacy ID bytes appear
    anywhere (`ns3_verify_elf.mjs`, reused, not duplicated).
 4. **Toolchain integrity** — when building, the platform-tools v1.54
-   tarball is hash-verified against the manifest and pinned (with a
-   provenance stamp) into every `cargo-build-sbf` cache directory the
-   flow may resolve; a pre-existing cache WITHOUT the stamp is refused.
+   ARCHIVE is hash-verified against the manifest on every run, and every
+   `cargo-build-sbf` cache directory the flow may resolve is re-seeded
+   from the VERIFIED archive (overwriting whatever was there). A
+   pre-existing cache is never trusted on the basis of its plaintext
+   stamp — the stamp is informational; the archive digest is the only
+   trust anchor. A download whose digest mismatches the pin aborts the
+   run before anything is extracted.
 
 `deploy_devnet.sh` runs this gate on EVERY path — the normal build+deploy
 flow, `--build-only`, `--skip-build`, custom/pre-placed artifacts in
@@ -188,6 +192,14 @@ scripts/devnet/deploy_devnet.sh \
 
 Stages, each with a hard refusal on mismatch:
 
+0. **Deployment-CLI identity** — `solana --version` and
+   `solana-keygen --version` must match the manifest pin
+   (`toolchain.solana_cli`) — verified on EVERY deploy path (normal,
+   `--skip-build`, retries) BEFORE any owner keypair path is touched
+   (existence checks included). The deployment CLI is the binary that
+   reads the owner keys and submits the transactions; its identity is
+   proven first, and it is a separate trust surface from the build
+   toolchain.
 1. **Identity check** — each keypair's pubkey must equal the compiled
    `declare_id!` value. An ELF deployed under an address different from
    its declared ID would fail every Anchor owner check at runtime; the
@@ -195,21 +207,33 @@ Stages, each with a hard refusal on mismatch:
 2. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
    against 6 000 000 000 (never by digit-stripping the human SOL display,
    which mis-reads decimals).
-3. **Artifact seeding** — copies the keypairs into the gitignored
+3. **Build-toolchain identity** (build paths only) — `cargo-build-sbf --version`
+   must match the manifest pin and the platform-tools archive is
+   re-verified and re-seeded (see §1 check 4). This runs BEFORE the
+   owner keypairs are seeded into `target/`: a toolchain refusal must
+   never leave owner key material copied into the build tree.
+4. **Artifact seeding** — copies the keypairs into the gitignored
    `target/deploy/` for `cargo build-sbf`; refuses if that directory
    already holds a DIFFERENT keypair (stale artifacts would silently
    deploy under the wrong address).
-4. **Build** — per package directory: `cargo build-sbf` in
+5. **Build** — per package directory: `cargo build-sbf` in
    `programs/grave-scanner` then `programs/grave-vault` (agave 3.0.10's
    `cargo-build-sbf` rejects workspace `-p` selection), with
    platform-tools v1.54 pinned and hash-verified. Skipped entirely with
    `--skip-build` (CI-produced artifacts), which does not require the
    SBF toolchain — the provenance gate still applies IN FULL, so
    `--skip-build` cannot smuggle in bytes the manifest does not pin.
-5. **Provenance gate** — digests + SBPF v0 + structural identity, from
+6. **Provenance gate** — digests + SBPF v0 + structural identity, from
    the shared manifest. No deploy command runs unless it passes.
-6. **Deploy** — `solana program deploy` with the matching
+7. **Deploy** — `solana program deploy` with the matching
    `--program-id` keypair; the deployer becomes the upgrade authority.
+
+> **Anchor is not on the deploy path (verified):** this flow builds with
+> `cargo build-sbf` and deploys with `solana program deploy`; anchor
+> 1.2.2 is used only by the CI `anchor build` job and is NOT required at
+> deployment time. The v1.57 platform-tools cache (anchor 1.2.2's
+> resolution) is still seeded — from the hash-verified archive only — so
+> an accidental anchor invocation can never resolve unverified bytes.
 
 Redeploys after the first deployment are UPGRADES (same address, same
 upgrade authority) and follow the normal `solana program deploy` re-run;
@@ -279,7 +303,10 @@ only):
 
 ```bash
 node scripts/devnet/verify_ns3_deployment.mjs --url https://api.devnet.solana.com
-# machine-readable: add --json; stricter context: --commitment finalized
+# machine-readable: add --json. The acceptance default is commitment
+# FINALIZED; pass --commitment confirmed ONLY as a diagnostic for a
+# just-submitted deployment. Identity flags were removed: the verifier
+# always checks the 8 pinned NS-3 identities.
 ```
 
 The verifier derives everything from the pinned NS-3 identities and
@@ -289,7 +316,13 @@ reports five sections, each item PASS / FAIL / UNVERIFIED:
   owned by the BPF upgradeable loader, and their REAL ProgramData
   account — decoded from the program account's embedded pointer, not
   inferred from any config — exists, is loader-owned, and names the
-  deployer as upgrade authority.
+  deployer as upgrade authority. The embedded pointer must ALSO equal
+  the independently derived ProgramData address
+  (`PDA([program_id], BPFLoaderUpgradeable)` — the
+  `get_program_data_address` convention); a foreign pointer is a FAIL.
+  Loader-account layout (u32 tags 2/3) verified against the
+  anza-xyz/solana-sdk loader-v3-interface sources and live on-chain
+  bytes.
 - **B — ProtocolConfig**: the `['protocol_config']` PDA is derived
   independently and must equal the pinned derivation (bump 255); the
   account exists, is owned by its program, carries a valid

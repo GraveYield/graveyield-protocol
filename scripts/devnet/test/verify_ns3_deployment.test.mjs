@@ -25,11 +25,12 @@ import {
   decodeScannerConfig,
   decodeVaultConfig,
   accountDiscriminator,
+  strictBool,
   BPF_LOADER_UPGRADEABLE,
 } from "../verify_ns3_deployment.mjs";
 import { decodeProtocolConfig } from "../protocol_admin.mjs";
 import { NS3_LEGACY_IDS } from "../ns3_verify_elf.mjs";
-import { NS3, NS3_PDAS } from "../ns3_identities.mjs";
+import { NS3, NS3_PDAS, programDataPda } from "../ns3_identities.mjs";
 import {
   encodeProgramAccount,
   encodeProgramDataAccount,
@@ -42,8 +43,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VERIFIER = path.join(HERE, "..", "verify_ns3_deployment.mjs");
 
 const LOADER = new PublicKey(BPF_LOADER_UPGRADEABLE);
-const PD_SCANNER = new PublicKey(Buffer.alloc(32, 1)).toBase58();
-const PD_VAULT = new PublicKey(Buffer.alloc(32, 2)).toBase58();
+// The ProgramData addresses are the INDEPENDENTLY derived loader PDAs
+// (get_program_data_address convention) — a fixture that pointed anywhere
+// else would now fail section A, and rightly so.
+const PD_SCANNER = programDataPda(new PublicKey(NS3.scannerProgramId)).toBase58();
+const PD_VAULT = programDataPda(new PublicKey(NS3.vaultProgramId)).toBase58();
 const SLOT = 514_928_999;
 
 function fullState() {
@@ -106,7 +110,7 @@ function handleRpc(req, state) {
 }
 
 /** Start a mock RPC for the duration of fn(url). */
-async function withRpc(state, fn, { failAll = false } = {}) {
+async function withRpc(state, fn, { failAll = false, captured = null } = {}) {
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -115,6 +119,7 @@ async function withRpc(state, fn, { failAll = false } = {}) {
         res.destroy(); // transport failure → UNVERIFIED territory
         return;
       }
+      if (captured) captured.push(body);
       let payload;
       try {
         payload = JSON.parse(body || "{}");
@@ -435,13 +440,21 @@ describe("verify_ns3_deployment — mock RPC acceptance battery", () => {
     assert.match(r.stderr, /--url is REQUIRED/);
   });
 
-  test("26. guard: a flag value pointing at an existing FILE path is refused (never reads keypair files)", async () => {
-    await withRpc(fullState(), async (url) => {
-      const r = await runCli(url, ["--deployer", VERIFIER]);
-      assert.equal(r.code, 2);
-      assert.match(r.stderr, /must be a PUBLIC KEY/);
-      return null;
-    });
+  test("26. removed identity flags are REFUSED (fix C: acceptance identities are constants)", async () => {
+    for (const [flag, value] of [
+      ["--deployer", NS3.governanceAuthority],
+      ["--governance", NS3.deployer],
+      ["--activity-oracle", NS3.deployer],
+      ["--launch-price-oracle", NS3.deployer],
+    ]) {
+      await withRpc(fullState(), async (url) => {
+        const r = await runCli(url, [flag, value, "--json"]);
+        assert.equal(r.code, 2, `${flag}: expected usage error, got ${r.code}`);
+        assert.match(r.stderr, /no longer accepted/);
+        assert.match(r.stderr, /pinned NS-3/);
+        return null;
+      });
+    }
   });
 
   test("27. STATIC read-only guarantee: no signer/transaction API in the verifier source", () => {
@@ -526,3 +539,439 @@ async function runCliNoUrl() {
     };
   }
 }
+
+// ===========================================================================
+// Fix A — UpgradeableLoaderState discriminants (CRITICAL)
+//
+// The wire format is NOT defined by this repo: the tags are the bincode
+// enum ordinals of solana_loader_v3_interface::UpgradeableLoaderState
+// (0=Uninitialized, 1=Buffer, 2=Program, 3=ProgramData, u32 LE), verified
+// against the anza-xyz/solana-sdk sources AND live devnet bytes. The
+// vectors below are HARDCODED LITERALS — deliberately NOT built through
+// the fixture encoder — so the encoder and the decoder can never
+// "co-evolve" into agreement on a wrong layout.
+// ===========================================================================
+describe("fix A — loader discriminators are 2 (Program) / 3 (ProgramData)", () => {
+  /** Hardcoded ProgramData metadata: tag, slot, authority-set flag, authority. */
+  function literalProgramData(tag, { slot = 514_928_681n, flag = 1, authority = null } = {}) {
+    const b = Buffer.alloc(45);
+    b.writeUInt32LE(tag, 0);
+    b.writeBigUInt64LE(slot, 4);
+    b.writeUInt8(flag, 12);
+    if (authority) Buffer.from(new PublicKey(authority).toBytes()).copy(b, 13);
+    return b;
+  }
+
+  test("A1. literal wire format decodes byte-exactly (tag 3 + slot + flag + authority)", () => {
+    const auth = new PublicKey(NS3.deployer);
+    const raw = Buffer.alloc(45);
+    raw.writeUInt32LE(3, 0); // ProgramData discriminant, u32 LE
+    raw.writeBigUInt64LE(514_928_681n, 4);
+    raw.writeUInt8(1, 12);
+    auth.toBytes().forEach((byte, i) => {
+      raw[13 + i] = byte;
+    });
+    const d = parseProgramDataAccount(raw);
+    assert.equal(d.tag, 3);
+    assert.equal(d.slot, 514_928_681n);
+    assert.equal(d.authoritySet, true);
+    assert.equal(d.authority.toBase58(), NS3.deployer);
+    // and the Program account side: literal tag 2 + pointer at offset 4
+    const prog = Buffer.alloc(36);
+    prog.writeUInt32LE(2, 0);
+    Buffer.from(new PublicKey(PD_SCANNER).toBytes()).copy(prog, 4);
+    const p = parseProgramAccount(prog);
+    assert.equal(p.tag, 2);
+    assert.equal(p.programdata.toBase58(), PD_SCANNER);
+  });
+
+  test("A2. the fixture encoder emits the literal approved bytes (no drift)", () => {
+    const withAuth = encodeProgramDataAccount({ authority: NS3.deployer, slot: 7n });
+    assert.deepEqual(
+      [...withAuth.subarray(0, 4)],
+      [3, 0, 0, 0],
+      "ProgramData tag must be the literal bytes 03 00 00 00",
+    );
+    assert.deepEqual([...withAuth.subarray(12, 13)], [1]);
+    const noAuth = encodeProgramDataAccount({ authority: null });
+    assert.deepEqual([...noAuth.subarray(0, 4)], [3, 0, 0, 0]);
+    assert.deepEqual([...noAuth.subarray(12, 13)], [0]);
+    const prog = encodeProgramAccount(PD_SCANNER);
+    assert.deepEqual(
+      [...prog.subarray(0, 4)],
+      [2, 0, 0, 0],
+      "Program tag must be the literal bytes 02 00 00 00",
+    );
+    assert.equal(prog.length, 36);
+    assert.equal(withAuth.length, 45);
+  });
+
+  test("A3. ProgramData carrying the OLD WRONG tag 1 is refused (decoder + verifier)", async () => {
+    assert.throws(() => parseProgramDataAccount(literalProgramData(1)), /tag 1 != 3/);
+    const s = fullState();
+    s.accounts[PD_SCANNER] = { ...s.accounts[PD_SCANNER] };
+    const raw = literalProgramData(1, { authority: NS3.deployer });
+    s.accounts[PD_SCANNER].data = [raw.toString("base64"), "base64"];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    const a4 = checkOf(r, "A4 ")[0];
+    assert.equal(a4.status, "FAIL");
+    assert.match(a4.detail, /tag 1 != 3/);
+  });
+
+  test("A4. ProgramData tag 0 (Uninitialized) and tag 2 (Program) are refused", () => {
+    assert.throws(() => parseProgramDataAccount(literalProgramData(0)), /tag 0 != 3/);
+    assert.throws(() => parseProgramDataAccount(literalProgramData(2)), /tag 2 != 3/);
+  });
+
+  test("A5. ProgramData tag 4 (out of enum range) is refused", () => {
+    assert.throws(() => parseProgramDataAccount(literalProgramData(4)), /tag 4 != 3/);
+    assert.throws(
+      () => parseProgramDataAccount(literalProgramData(0xffffffff)),
+      /tag 4294967295 != 3/,
+    );
+  });
+
+  test("A6. a Program account with tag 1 (Buffer/Initialized) is refused", () => {
+    const b = Buffer.alloc(36);
+    b.writeUInt32LE(1, 0);
+    assert.throws(() => parseProgramAccount(b), /tag 1 != 2/);
+  });
+
+  test("A7. a Program account with tag 3 (ProgramData discriminant) is refused", () => {
+    const b = Buffer.alloc(36);
+    b.writeUInt32LE(3, 0);
+    assert.throws(() => parseProgramAccount(b), /tag 3 != 2/);
+  });
+
+  test("A8. refusal messages name the expected discriminant and layout", () => {
+    try {
+      parseProgramDataAccount(Buffer.alloc(13));
+      assert.fail("expected throw");
+    } catch (err) {
+      assert.match(err.message, /ProgramData/);
+      assert.match(err.message, /!= 3/);
+      assert.match(err.message, /discriminant is 3/);
+    }
+    try {
+      parseProgramDataAccount(Buffer.alloc(5));
+      assert.fail("expected throw");
+    } catch (err) {
+      assert.match(err.message, /too small \(5 B; header alone is 13 B\)/);
+    }
+  });
+});
+
+// ===========================================================================
+// Fix C — identity overrides removed; the 8 pinned NS-3 identities only
+// ===========================================================================
+describe("fix C — no identity overrides, pinned NS-3 identities only", () => {
+  test("C1. runVerification rejects an identity override at the API boundary", async () => {
+    await withRpc(fullState(), async (url) => {
+      await assert.rejects(
+        () => runVerification({ url, deployer: NS3.governanceAuthority }),
+        /no longer accepts 'deployer'/,
+      );
+      await assert.rejects(
+        () => runVerification({ url, governance: NS3.deployer }),
+        /no longer accepts 'governance'/,
+      );
+      await assert.rejects(
+        () => runVerification({ url, activityOracle: NS3.deployer }),
+        /no longer accepts 'activityOracle'/,
+      );
+      await assert.rejects(
+        () => runVerification({ url, launchPriceOracle: NS3.deployer }),
+        /no longer accepts 'launchPriceOracle'/,
+      );
+      return null;
+    });
+  });
+
+  test("C2. the reported identities are ALWAYS the pinned NS-3 constants", async () => {
+    const r = await withRpc(fullState(), (url) => runVerification({ url }));
+    for (const [k, pinned] of [
+      ["deployer", NS3.deployer],
+      ["governance", NS3.governanceAuthority],
+      ["activityOracle", NS3.activityOracle],
+      ["launchPriceOracle", NS3.launchPriceOracle],
+    ]) {
+      assert.equal(r.identities[k].value, pinned);
+      assert.equal(r.identities[k].source, "pinned");
+    }
+    // the two derived PDAs complete the 8 pinned identities
+    assert.equal(NS3_PDAS.scannerConfigPda.length, 44);
+    assert.equal(NS3_PDAS.vaultConfigPda.length, 44);
+  });
+
+  test("C3. the acceptance verdict is computed against pinned identities even when the chain holds a DIFFERENT arrangement", async () => {
+    // deployer key lost: a rogue arrangement holds the upgrade authority
+    const s = fullState();
+    s.accounts[PD_SCANNER] = rpcAccount(
+      encodeProgramDataAccount({ authority: NS3.activityOracle }),
+      { owner: LOADER },
+    );
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    assert.match(checkOf(r, "A5 ")[0].detail, new RegExp(NS3.deployer));
+  });
+
+  test("C4. --deployer=<PK> (equals form) is refused too", async () => {
+    await withRpc(fullState(), async (url) => {
+      const r = await runCli(url, [`--deployer=${NS3.governanceAuthority}`]);
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /--deployer is no longer accepted/);
+      return null;
+    });
+  });
+
+  test("C5. removed flags are rejected BEFORE any RPC is contacted", async () => {
+    // no server at all: a refused run must not need one
+    const r = await runCli("http://127.0.0.1:1", ["--governance", NS3.deployer]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /no longer accepted/);
+  });
+
+  test("C6. the usage text documents the removal (no silent acceptance)", async () => {
+    const r = await runCliNoUrl();
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /Identity flags .* were REMOVED/);
+    assert.match(r.stderr, /8 pinned NS-3 identities/);
+  });
+});
+
+// ===========================================================================
+// Fix E — strict boolean decoding (only 0/1 are legal)
+// ===========================================================================
+describe("fix E — strict boolean decode (paused / emergency_paused)", () => {
+  function scannerConfigWithPausedByte(byteVal) {
+    const buf = encodeScannerConfig({
+      authority: NS3.governanceAuthority,
+      activityOracle: NS3.activityOracle,
+      launchPriceOracle: NS3.launchPriceOracle,
+    });
+    buf.writeUInt8(byteVal, 122);
+    return buf;
+  }
+  function vaultConfigWithPausedByte(byteVal) {
+    const buf = encodeVaultConfig({ authority: NS3.governanceAuthority });
+    buf.writeUInt8(byteVal, 112);
+    return buf;
+  }
+
+  // --- scanner paused (5 tests) ---
+  test("E1. scanner paused=0 decodes false and acceptance PASSes", async () => {
+    assert.equal(decodeScannerConfig(scannerConfigWithPausedByte(0)).paused, false);
+    const s = fullState();
+    s.accounts[NS3_PDAS.scannerConfigPda].data = [
+      scannerConfigWithPausedByte(0).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "PASS");
+    assert.equal(checkOf(r, "D1 ")[0].status, "PASS");
+  });
+
+  test("E2. scanner paused=1 decodes true and is reported verbatim (D1 FAIL)", async () => {
+    assert.equal(decodeScannerConfig(scannerConfigWithPausedByte(1)).paused, true);
+    const s = fullState();
+    s.accounts[NS3_PDAS.scannerConfigPda].data = [
+      scannerConfigWithPausedByte(1).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    assert.match(checkOf(r, "D1 ")[0].detail, /paused=true/);
+  });
+
+  test("E3. scanner paused=2 is a decode FAILURE, never a silent false", async () => {
+    assert.throws(
+      () => decodeScannerConfig(scannerConfigWithPausedByte(2)),
+      /scanner paused byte is 2 \(boolean fields encode ONLY 0\/1/,
+    );
+    const s = fullState();
+    s.accounts[NS3_PDAS.scannerConfigPda].data = [
+      scannerConfigWithPausedByte(2).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    const b5 = checkOf(r, "B5 ")[0];
+    assert.equal(b5.status, "FAIL");
+    assert.match(b5.detail, /paused byte is 2/);
+  });
+
+  test("E4. scanner paused=255 is a decode FAILURE", async () => {
+    assert.throws(() => decodeScannerConfig(scannerConfigWithPausedByte(255)), /byte is 255/);
+    const s = fullState();
+    s.accounts[NS3_PDAS.scannerConfigPda].data = [
+      scannerConfigWithPausedByte(255).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    assert.equal(checkOf(r, "B5 ")[0].status, "FAIL");
+    assert.match(checkOf(r, "B5 ")[0].detail, /byte is 255/);
+  });
+
+  test("E5. strictBool rejects every byte except 0/1 (unit)", () => {
+    assert.equal(strictBool(0, "x"), false);
+    assert.equal(strictBool(1, "x"), true);
+    for (const v of [2, 3, 7, 127, 128, 200, 254, 255]) {
+      assert.throws(() => strictBool(v, "x"), new RegExp(`x byte is ${v}`));
+    }
+  });
+
+  // --- vault emergency_paused (5 tests) ---
+  test("E6. vault emergency_paused=0 decodes false and acceptance PASSes", async () => {
+    assert.equal(decodeVaultConfig(vaultConfigWithPausedByte(0)).emergencyPaused, false);
+    const s = fullState();
+    s.accounts[NS3_PDAS.vaultConfigPda].data = [
+      vaultConfigWithPausedByte(0).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "PASS");
+  });
+
+  test("E7. vault emergency_paused=1 decodes true and is reported verbatim (D2 FAIL)", async () => {
+    assert.equal(decodeVaultConfig(vaultConfigWithPausedByte(1)).emergencyPaused, true);
+    const s = fullState();
+    s.accounts[NS3_PDAS.vaultConfigPda].data = [
+      vaultConfigWithPausedByte(1).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(checkOf(r, "D2 ")[0].status, "FAIL");
+    assert.match(checkOf(r, "D2 ")[0].detail, /emergency_paused=true/);
+  });
+
+  test("E8. vault emergency_paused=2 is a decode FAILURE", async () => {
+    assert.throws(
+      () => decodeVaultConfig(vaultConfigWithPausedByte(2)),
+      /vault emergency_paused byte is 2/,
+    );
+    const s = fullState();
+    s.accounts[NS3_PDAS.vaultConfigPda].data = [
+      vaultConfigWithPausedByte(2).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    assert.match(checkOf(r, "B12 ")[0].detail, /emergency_paused byte is 2/);
+  });
+
+  test("E9. vault emergency_paused=255 is a decode FAILURE", async () => {
+    assert.throws(() => decodeVaultConfig(vaultConfigWithPausedByte(255)), /byte is 255/);
+    const s = fullState();
+    s.accounts[NS3_PDAS.vaultConfigPda].data = [
+      vaultConfigWithPausedByte(255).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    assert.equal(checkOf(r, "B12 ")[0].status, "FAIL");
+  });
+
+  test("E10. a tampered bool byte cannot sneak past the defaults check (B7/B14 still verdict)", async () => {
+    // paused=7 coerced to false would PASS the defaults check — the strict
+    // decode must fail the schema check instead.
+    const s = fullState();
+    s.accounts[NS3_PDAS.scannerConfigPda].data = [
+      scannerConfigWithPausedByte(7).toString("base64"),
+      "base64",
+    ];
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    const b5 = checkOf(r, "B5 ")[0];
+    assert.equal(b5.status, "FAIL");
+    assert.match(b5.detail, /paused byte is 7/);
+    // and the downstream checks for the same account do NOT pass either
+    assert.equal(checkOf(r, "B6 ")[0].status, "FAIL");
+    assert.equal(checkOf(r, "B7 ")[0].status, "FAIL");
+  });
+});
+
+// ===========================================================================
+// Fix F — default commitment finalized; confirmed = explicit diagnostic
+// ===========================================================================
+describe("fix F — finalized is the default commitment", () => {
+  test("F1. runVerification defaults to finalized", async () => {
+    const r = await withRpc(fullState(), (url) => runVerification({ url }));
+    assert.equal(r.context.commitment, "finalized");
+  });
+
+  test("F2. explicit --commitment finalized is accepted and reported", async () => {
+    await withRpc(fullState(), async (url) => {
+      const out = await runCli(url, ["--json", "--commitment", "finalized"]);
+      assert.equal(out.code, 0, out.stdout + out.stderr);
+      assert.equal(JSON.parse(out.stdout).context.commitment, "finalized");
+      return null;
+    });
+  });
+
+  test("F3. explicit --commitment confirmed is accepted as a DIAGNOSTIC option", async () => {
+    await withRpc(fullState(), async (url) => {
+      const out = await runCli(url, ["--json", "--commitment", "confirmed"]);
+      assert.equal(out.code, 0, out.stdout + out.stderr);
+      assert.equal(JSON.parse(out.stdout).context.commitment, "confirmed");
+      return null;
+    });
+  });
+
+  test("F4. any other commitment value is a usage error (exit 2)", async () => {
+    await withRpc(fullState(), async (url) => {
+      const r = await runCli(url, ["--json", "--commitment", "processed"]);
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /must be 'finalized' \(default\) or 'confirmed' \(diagnostic\)/);
+      return null;
+    });
+  });
+
+  test("F5. WIRE-LEVEL: the default run never asks for 'confirmed'", async () => {
+    const captured = [];
+    await withRpc(fullState(), (url) => runVerification({ url }), { captured });
+    // every request must either omit the commitment param (server default
+    // = finalized) or explicitly ask for finalized — never confirmed.
+    const askConfirmed = captured.filter((b) => b.includes('"confirmed"'));
+    assert.equal(askConfirmed.length, 0, `default run asked for confirmed: ${askConfirmed[0]}`);
+    // and the diagnostic run DOES ask for confirmed on the wire
+    const captured2 = [];
+    await withRpc(fullState(), (url) => runVerification({ url, commitment: "confirmed" }), {
+      captured: captured2,
+    });
+    assert.ok(
+      captured2.some((b) => b.includes('"commitment":"confirmed"')),
+      "explicit diagnostic confirmed must reach the wire",
+    );
+  });
+});
+
+// ===========================================================================
+// Additional hardening — ProgramData address is independently derived
+// ===========================================================================
+describe("hardening — ProgramData pointer must be the loader-derived PDA", () => {
+  test("H1. a non-derived ProgramData pointer FAILS section A even when every byte decodes", async () => {
+    const s = fullState();
+    const foreign = new PublicKey(Buffer.alloc(32, 9)).toBase58();
+    s.accounts[NS3.scannerProgramId] = rpcAccount(encodeProgramAccount(foreign), {
+      owner: LOADER,
+      executable: true,
+    });
+    s.accounts[foreign] = rpcAccount(encodeProgramDataAccount({ authority: NS3.deployer }), {
+      owner: LOADER,
+    });
+    const r = await withRpc(s, (url) => runVerification({ url }));
+    assert.equal(r.overall, "FAIL");
+    const a4 = checkOf(r, "A4 ")[0];
+    assert.equal(a4.status, "FAIL");
+    assert.match(a4.detail, /NOT the loader-derived ProgramData address/);
+    assert.match(a4.detail, /get_program_data_address/);
+    // the upgrade authority behind a foreign pointer is not trusted either
+    assert.equal(checkOf(r, "A5 ")[0].status, "FAIL");
+  });
+
+  test("H2. the derived-PDA fixture arrangement PASSes (positives still work)", async () => {
+    const r = await withRpc(fullState(), (url) => runVerification({ url }));
+    assert.match(checkOf(r, "A4 ")[0].detail, /independently derived loader PDA/);
+  });
+});

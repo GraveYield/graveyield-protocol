@@ -91,9 +91,21 @@ export const NS3_PDAS = (() => {
 })();
 
 /**
- * ProgramData addresses are NOT derivable offline — they are the PDA of the
- * deployed program account under the BPF Upgradeable loader and become
- * readable only from the on-chain program account after deployment.
- * They stay PENDING here; see docs/DEVNET.md NS-3 record.
+ * ProgramData ADDRESSES ARE derivable offline (corrected 2026-11-05): the
+ * BPF upgradeable loader convention — implemented by the deployment CLI
+ * via `solana_loader_v3_interface::get_program_data_address` — is
+ * PDA([program_id], BPFLoaderUpgradeable). Verified against the
+ * anza-xyz/solana-sdk loader-v3-interface sources AND live on-chain:
+ * both NS-2 ProgramData accounts equal this derivation at bump 255.
+ * The acceptance verifier re-derives the address instead of trusting
+ * any recorded value.
  */
-export const PROGRAM_DATA_PENDING = true;
+export const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = "BPFLoaderUpgradeab1e11111111111111111111111";
+
+/** The loader-derived ProgramData address of an upgradeable program. */
+export function programDataPda(programId) {
+  return findProgramAddressSync(
+    [programId.toBytes()],
+    new PublicKey(BPF_LOADER_UPGRADEABLE_PROGRAM_ID),
+  )[0];
+}

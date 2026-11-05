@@ -112,12 +112,20 @@ export function encodeProgramAccount(programdataBase58) {
 }
 
 /**
- * BPF-upgradeable PROGRAMDATA account: u32 tag=1 + u64 slot + 1-byte
+ * BPF-upgradeable PROGRAMDATA account: u32 tag=3 + u64 slot + 1-byte
  * authority-set flag + optional 32-byte upgrade authority (offset 13).
+ *
+ * Tag values are the UpgradeableLoaderState bincode enum ordinals (u32
+ * LE) — 0=Uninitialized, 1=Buffer, 2=Program, 3=ProgramData — verified
+ * independently against the anza-xyz/solana-sdk loader-v3-interface
+ * sources (size_of_program()=36, size_of_programdata_metadata()=45) and
+ * live on-chain bytes (see verify_ns3_deployment.mjs header). Tests
+ * additionally pin the literal bytes so an encoder/decoder drift cannot
+ * self-certify.
  */
 export function encodeProgramDataAccount({ slot = 1_000n, authority = null }) {
   const body = Buffer.alloc(45);
-  body.writeUInt32LE(1, 0);
+  body.writeUInt32LE(3, 0);
   body.writeBigUInt64LE(slot, 4);
   if (authority) {
     body.writeUInt8(1, 12);
