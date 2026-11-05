@@ -22,156 +22,211 @@
 > PDA `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` (both
 > `['protocol_config']`, bump 255; reproduce with
 > `node scripts/devnet/ns3_derive_pdas.mjs`). ProgramData addresses stay
-> PENDING until they are read from the deployed program accounts.
+> PENDING until they are read from the deployed program accounts — they
+> are NOT derivable offline; the acceptance verifier reads them from the
+> deployed program accounts at acceptance time.
 >
-> Authority arrangement: the deployer pays fees and is the initial
-> upgrade authority; the governance authority is the initial and
-> permanent ProtocolConfig authority; `initialize` starts both oracle
-> signer fields at the governance authority and `register-oracle`
-> (`update_protocol_config`) re-points them to the dedicated keys — the
-> pending-authority/timelock fields are reserved write-only state, not
-> enforced mechanisms. The full keypair-free rehearsal path is
-> `scripts/devnet/local_rehearsal_ns3.sh` (test identities, local ELFs);
-> the build-only path is `scripts/devnet/deploy_devnet.sh --build-only`.
-> Cross-repo NS-3 sync is asserted by
-> `scripts/devnet/test/ns3_sync.test.mjs` + `scripts/devnet/ns3_verify_sync.mjs`.
+> **Authority arrangement (NS-3, honest form).** The deployer pays fees
+> and is the initial upgrade authority of both programs (decoded from
+> each ProgramData account at acceptance). The governance authority is
+> the initial and permanent ProtocolConfig authority of both programs,
+> and `register-oracle` re-points the two scanner oracle signer fields
+> from the initialization authority to the dedicated keys above. The
+> `pending_authority` / `pending_authority_eta` / `timelock_seconds`
+> fields are **reserved write-only state — not an enforced authority
+> transfer and not an enforced timelock**: no on-chain instruction
+> reads them, no upgrade is delayed by them, and the upgrade authority
+> remains the single deployer key until the owner separately rotates
+> it. Anything this document says about a "72h timelock" refers to the
+> Squads governance flow around protocol-config changes, never to
+> on-chain enforcement by these programs.
+>
+> **History.** NS-1 (2026-10-09) and NS-2 (2026-10-25) are retired
+> deployments preserved as historical records — including their lost
+> authority keys and their (superseded) single-key arrangement — in
+> [`docs/LEGACY_DEPLOYMENTS.md`](LEGACY_DEPLOYMENTS.md). That file is
+> the ONLY home of NS-1/NS-2 execution records; everything below is the
+> NS-3 runbook. Decision records: [`docs/DECISIONS.md`](DECISIONS.md)
+> (DR-001, DR-002).
 
-> **Notice (DR-002, 2026-11-03).** The NS-2 (DR-001 refresh) deployment
-> documented below is **superseded**: its shared authority key
-> (`AsB5uPtT…EWXa`) was permanently lost (forensics 2026-11-03), so
-> NS-2 is retained as a historical record and is not the active
-> deployment target. **NS-3 is the next supported devnet deployment** —
-> fresh program IDs, keys generated and held by the owner, executed
-> manually by the owner and documented here once deployed. Full record:
-> [`docs/LEGACY_DEPLOYMENTS.md`](LEGACY_DEPLOYMENTS.md). The runbook
-> below preserves the NS-2 execution record and serves as a procedural
-> reference for NS-3 deployment and local rehearsals. All NS-2-specific
-> IDs, addresses, and configuration values must be replaced and
-> independently verified before NS-3 execution.
+## The three execution modes
 
-> **Status: EXECUTED (refresh).** The current devnet deployment is the
-> DR-001 refresh executed on **2026-10-25** (epoch 1191): both programs
-> live under the new program IDs below, both ProtocolConfigs initialized
-> at spec defaults, and the emergency-control drill passed on both
-> programs (authority pause, intruder rejection — GraveScanner 6000 /
-> GraveVault 7000 — authority unpause, readback-verified at every step),
-> and the SDK's read-only devnet smoke suite passes against the new
-> deployment. The sequence was first rehearsed end-to-end on
-> `solana-test-validator` via the exact production scripts
-> (`scripts/devnet/local_rehearsal.sh`), then executed on devnet:
->
-> | Step | Program | Transaction (finalized) |
-> |---|---|---|
-> | Deploy | GraveScanner `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` | `46kHBf1CNaTnNQUCXGuAyJetzDn5GgKrkK745MtUSdBhuEeqiK3DuB1GnN34GizCkYvQQMYnxByJSWRL6JD3hYPM` (slot 514 928 681) |
-> | Deploy | GraveVault `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` | `5F7RYuP9aXsFjH2fv78ATDG86bPtMUGL6ua2S8aMP6DzrqhnT4DKx73GiHX24K4258QMPv2RspsMBVYYqw8Ly9YS` (slot 514 928 725) |
-> | Initialize | scanner ProtocolConfig `Fb6uvYyRAKFRCuab44imZ6YAVAEfGLoAPDxFpwVXQdiD` | `64nYNYuud68irZpi5jgKL5CQNWRMH8jcXGRYiACoVhBRtvsqLCHCCitXeuKMjUTvzdSu6Syab2XKnEbaNMDT7wki` (slot 514 928 823) |
-> | Initialize | vault ProtocolConfig `hyKk983fguE2CGA5Dx5TLKfBft1AJrm7CHoe1PTUipS` | `2venFHC3K7JWKWT61H735uK7Yi38fHvz8EnDTpKmAgSj3P8z5tRuaxQ9g1DBSHTxD4BNiuzXf3auv5M3mrNgbLKf` (slot 514 928 827) |
->
-> Deployed bytes: the CI-built ELFs from run 40178764437 (commit `d4661b4`,
-> the program-ID sync commit) via `deploy_devnet.sh --skip-build`;
-> sha256 `2e367ea0…cf232` (scanner, 367 864 B) and `cbbe3b0f…98518`
-> (vault, 407 184 B). Both config PDAs landed at bump 255 — byte-exact
-> matches of the pre-deployment derivation (`scripts/pda_derive.py`).
->
-> **Frozen static reference (DR-001):** the original 2026-10-09
-> deployment — GraveScanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF`,
-> GraveVault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6`, configs
-> `GcdZJhCpg7sjgEEHTsoSkT2Pi83d8kP3NrTqdvMm2Bhu` /
-> `2SCqqpEwKMuWnJWe7UQJTzFeDPif4jUPUspWKZdZ5vaU`, deploy txs
-> `PUXKJWGY…36N12ww` / `5gEVQfsd…vrq55HgN6`, init txs
-> `5boq7igX…TTh` / `2psMkdru…Tty9H` — is retained on-chain but its
-> upgrade-authority key is dead (DR-001: `recoverable = no`). It is a
-> historical artifact: not upgraded, not maintained, and no consumer
-> points at it.
->
-> Upgrade authority for both CURRENT programs: the refresh deployer
-> keypair (single key — see the custody note below). The drill's
-> pause/unpause transactions are reproducible via `protocol_admin.mjs
-> drill`; the intruder key is a throwaway holding fee dust only.
-> Roadmap Phase 11 "Infrastructure" and "Observability" sections
-> (indexer, SDK publication, first Salvor, Merkle service, event
-> indexing, alerting) are deliberately NOT in this phase — they depend
-> on Phases 8–10 and remain sequenced per the shipping roadmap.
+Every NS-3 deployment activity falls into exactly one of these modes.
+Cross-mode drift (an agent "helpfully" executing an owner step, or the
+owner rehearsing with custody keys) is the failure pattern DR-002 exists
+to prevent.
 
-## Network facts
+| Mode | Who executes | Keys touched | Cluster | Entry point |
+|---|---|---|---|---|
+| **1. Agent-assisted local rehearsal** | agent, with owner review | throwaway keys minted into a `mktemp` dir and discarded | `solana-test-validator` on 127.0.0.1 only | `scripts/devnet/local_rehearsal_ns3.sh` |
+| **2. Owner-executed devnet deployment** | the owner, manually, step by step | owner custody keypairs only (never agents, never git) | devnet via explicit `--url` | `scripts/devnet/deploy_devnet.sh` |
+| **3. Agent-assisted read-only verification** | agent, read-only | none — public keys only | any explicitly named RPC endpoint | `scripts/devnet/verify_ns3_deployment.mjs` |
+
+Hard rules that hold in ALL modes:
+
+- No agent ever requests, receives, stores, or handles a private key or
+  keypair file. Mode 1 mints its own throwaways; mode 2 is the owner's
+  hands only; mode 3 accepts public keys and **refuses a flag value that
+  resolves to an existing file path** (so nobody points the verifier at
+  a keypair file by accident).
+- No transaction is ever submitted to a public cluster from any path
+  other than mode 2. Mode 1 targets `http://127.0.0.1:8899` only; mode
+  3 performs read-only RPC (`getAccountInfo` / `getEpochInfo`) and
+  cannot sign or send anything by construction.
+- Agents may prepare, build, verify, and report — the deployment
+  transactions themselves are the owner's.
+
+## Network facts (NS-3 targets)
 
 | Item | Value |
 |------|-------|
-| Cluster | Solana devnet — `https://api.devnet.solana.com` |
-| GraveScanner program ID (current) | `CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54` |
-| GraveVault program ID (current) | `Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg` |
-| Frozen static reference (DR-001) | scanner `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF`, vault `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` — authority key dead, historical only |
-| ProtocolConfig PDA (both) | `["protocol_config"]` under each program's ID |
-| Upgrade authority (devnet) | the refresh deployer keypair (single key — see custody note) |
-| Config authority at initialize | the deployer keypair; `activity_oracle` and `launch_price_oracle` both start at the same key and rotate independently via `update_protocol_config` |
+| Cluster | Solana devnet — `https://api.devnet.solana.com` (always passed explicitly) |
+| GraveScanner program ID | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
+| GraveVault program ID | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
+| ProtocolConfig PDA seeds | `["protocol_config"]` under each program's ID, bump 255 |
+| Initial upgrade authority | the deployer keypair (owner custody; see the honest-form note above) |
+| Config authority at initialize | the GOVERNANCE public key — not the deployer (NS-3 arrangement; the NS-2 single-key arrangement is retired) |
+| Legacy (NS-1/NS-2) programs | preserved on-chain as historical records — see `docs/LEGACY_DEPLOYMENTS.md` §3; never deployment targets |
 
-The current program IDs above are real keypairs. They are mirrored in both
-`declare_id!` calls, every `Anchor.toml` section, and the six fork suites
-that derive scanner PDAs.
-
-**Key custody (devnet):** the devnet keypairs are throwaways. They live
-OUTSIDE the repository (custody handoff directory in the operator
-workspace, never in git; `target/deploy/` copies are gitignored). The
-DR-001 refresh minted a fresh key generation (program, vault, deployer,
-intruder throwaway) after the original deployer key proved unrecoverable.
-The intruder keypair intentionally holds only fee dust (0.01 SOL) — it
-must be able to pay its own probe fee for the drill's rejection step to
-reach the program check (see §3). NEVER reuse any of them for mainnet —
-KEYS-003 requires fresh custody-generated keypairs for mainnet.
+The NS-3 program IDs are mirrored in both `declare_id!` calls, every
+`Anchor.toml` section, and the fork suites that derive scanner PDAs;
+consistency is asserted by `scripts/devnet/test/ns3_sync.test.mjs`.
 
 ## Prerequisites
 
 - Solana CLI 3.0.10 (`solana`, `solana-keygen`, `cargo-build-sbf`,
-  `solana-test-validator`) — matches `Anchor.toml` and CI.
+  `solana-test-validator`) — matches `Anchor.toml`, the provenance
+  manifest, and CI.
 - Node ≥ 24 and pnpm 9 (workspace package `@graveyield/devnet-tools`).
-- Three keypairs: scanner program, vault program, deployer/authority.
-- Deployer funded with ≥ 6 SOL on devnet. Cost drivers: rent-exempt storage
-  of the two ELF binaries (~366 KB and ~405 KB → ≈ 2.7 SOL each), two
-  ProtocolConfig accounts, and transaction fees. The deploy script refuses
-  to run below 6 SOL and prints the shortfall.
+- For mode 2 only: the three owner-custody keypairs (scanner program,
+  vault program, deployer) and a funded deployer (≥ 6 SOL on devnet;
+  cost drivers: rent-exempt storage of the two ELF binaries at ≈ 2.7
+  SOL each, two ProtocolConfig accounts, transaction fees). The deploy
+  script refuses to run below 6 SOL and prints the shortfall.
+- Key custody: keypairs live OUTSIDE the repository (owner custody
+  directory, never in git; `target/deploy/` copies are gitignored).
 
-## 1. Build + deploy
+## 1. Deployment provenance (fail-closed, all modes)
+
+The bytes that reach the chain are pinned by
+[`scripts/devnet/provenance.manifest.json`](../scripts/devnet/provenance.manifest.json)
+— the SINGLE source of the approved digests, shared by the deployment
+script and CI (PR #82 provenance, values recorded verbatim):
+
+| Artifact | SHA-256 |
+|---|---|
+| `target/deploy/grave_scanner.so` | `e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98` |
+| `target/deploy/grave_vault.so` | `8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83` |
+| platform-tools v1.54 tarball (linux-x86_64) | `fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e` |
+
+`scripts/devnet/ns3_check_provenance.mjs` enforces, fail-closed:
+
+1. **Digest match** — each ELF's SHA-256 equals the manifest pin.
+2. **SBPF v0 architecture** — ELF header `e_machine 263 / e_flags 0`.
+   An ELF built for any other sbpf version (e.g. anchor 1.2.2's default
+   v3, `e_machine 247`) is refused even if its digest and embedded ID
+   match. This invariant is hardcoded in the checker and cross-checked
+   against the manifest — the manifest cannot relax it.
+3. **Structural identity** — the expected program ID occurs inside an
+   allocated ELF section and no NS-1/NS-2 legacy ID bytes appear
+   anywhere (`ns3_verify_elf.mjs`, reused, not duplicated).
+4. **Toolchain integrity** — when building, the platform-tools v1.54
+   tarball is hash-verified against the manifest and pinned (with a
+   provenance stamp) into every `cargo-build-sbf` cache directory the
+   flow may resolve; a pre-existing cache WITHOUT the stamp is refused.
+
+`deploy_devnet.sh` runs this gate on EVERY path — the normal build+deploy
+flow, `--build-only`, `--skip-build`, custom/pre-placed artifacts in
+`target/deploy/`, and every retry/re-run — before any deployment
+transaction is submitted. Node is mandatory on every path (a missing
+node is a refusal, not a skipped check). CI runs the same checker over
+the same manifest in the `anchor build` job. There is no flag, path, or
+environment that bypasses the gate.
+
+**Digest re-pin procedure (deliberate, reviewed).** If a legitimate
+source, dependency, or toolchain change shifts the ELF bytes, the gate
+stays closed and `--build-only` refuses to mark the new bytes ready.
+To re-pin: rebuild via the deploy flow (`--build-only`) with the pinned
+toolchain, record the new digests in the manifest, and land that change
+in a reviewed PR — with the review covering WHY the bytes changed. Never
+update a digest merely to make a red build green.
+
+## 2. Mode 1 — agent-assisted local rehearsal
+
+```bash
+bash scripts/check-toolchain.sh                # (informational) toolchain pins
+scripts/devnet/deploy_devnet.sh --build-only   # build + provenance gate, no keypairs
+scripts/devnet/local_rehearsal_ns3.sh          # local validator lifecycle drill
+```
+
+`--build-only` builds both ELFs (pinned platform-tools, no keypairs, no
+RPC) and runs the full provenance gate. `local_rehearsal_ns3.sh` then
+exercises the production initialization SHAPE on a local validator with
+throwaway identities: deploy-at-`declare_id!` (upgrades disabled),
+initialize with a TEMPORARY governance authority (deployer pays fees),
+emergency-control drills, register-oracle with separate signer and fee
+payer. The temporary governance key is the ONE authority for the whole
+rehearsal; the permanent NS-3 keys never enter local validator state.
+
+> **Constrained containers (memlock):** agave 3.0.x probes io_uring and
+> may fail fatally on `RLIMIT_MEMLOCK` in restricted containers
+> ("unable to set memory lock limit"). Denying the `io_uring_setup`
+> syscall (a seccomp filter inherited by the validator process) routes
+> agave onto its plain sync file-creator path, which needs no memlock.
+
+## 3. Mode 2 — owner-executed devnet deployment
+
+The owner runs, one verified step at a time:
 
 ```bash
 scripts/devnet/deploy_devnet.sh \
   --url https://api.devnet.solana.com \
-  --scanner-keypair /path/to/grave_scanner-devnet.json \
-  --vault-keypair   /path/to/grave_vault-devnet.json \
-  --deployer        /path/to/deployer-authority-devnet.json
+  --scanner-keypair /path/to/scanner-keypair.json \
+  --vault-keypair   /path/to/vault-keypair.json \
+  --deployer        /path/to/deployer-keypair.json
 ```
 
 Stages, each with a hard refusal on mismatch:
 
 1. **Identity check** — each keypair's pubkey must equal the compiled
-   `declare_id!` value. An ELF deployed under an address different from its
-   declared ID would fail every Anchor owner check at runtime; the script
-   refuses instead of shipping a broken program.
+   `declare_id!` value. An ELF deployed under an address different from
+   its declared ID would fail every Anchor owner check at runtime; the
+   script refuses instead of shipping a broken program.
 2. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
    against 6 000 000 000 (never by digit-stripping the human SOL display,
    which mis-reads decimals).
 3. **Artifact seeding** — copies the keypairs into the gitignored
-   `target/deploy/` for `cargo build-sbf`; refuses if that directory already
-   holds a DIFFERENT keypair (stale artifacts would silently deploy under
-   the wrong address).
+   `target/deploy/` for `cargo build-sbf`; refuses if that directory
+   already holds a DIFFERENT keypair (stale artifacts would silently
+   deploy under the wrong address).
 4. **Build** — per package directory: `cargo build-sbf` in
    `programs/grave-scanner` then `programs/grave-vault` (agave 3.0.10's
-   `cargo-build-sbf` rejects workspace `-p` selection). Skipped entirely
-   with `--skip-build`, which deploys pre-built (e.g. CI-produced) ELFs
-   and does not require the SBF toolchain.
-5. **Deploy** — `solana program deploy` with the matching
+   `cargo-build-sbf` rejects workspace `-p` selection), with
+   platform-tools v1.54 pinned and hash-verified. Skipped entirely with
+   `--skip-build` (CI-produced artifacts), which does not require the
+   SBF toolchain — the provenance gate still applies IN FULL, so
+   `--skip-build` cannot smuggle in bytes the manifest does not pin.
+5. **Provenance gate** — digests + SBPF v0 + structural identity, from
+   the shared manifest. No deploy command runs unless it passes.
+6. **Deploy** — `solana program deploy` with the matching
    `--program-id` keypair; the deployer becomes the upgrade authority.
 
 Redeploys after the first deployment are UPGRADES (same address, same
-authority) and follow the normal `solana program deploy` re-run; the
-identity and artifact-refusal checks still apply.
+upgrade authority) and follow the normal `solana program deploy` re-run;
+the identity, artifact-refusal, and provenance checks all still apply —
+there is no upgrade path that skips the gate.
 
-## 2. Initialize both ProtocolConfigs
+## 4. Initialize, drill, register oracles (owner, governance authority)
 
 ```bash
-node scripts/devnet/protocol_admin.mjs init-all \
+node scripts/devnet/protocol_admin.mjs init-scanner \
   --url https://api.devnet.solana.com \
-  --deployer /path/to/deployer-authority-devnet.json
-# add --authority <PUBKEY> to set a different config authority than the payer
+  --deployer /path/to/deployer-keypair.json \
+  --authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+node scripts/devnet/protocol_admin.mjs init-vault \
+  --url https://api.devnet.solana.com \
+  --deployer /path/to/deployer-keypair.json \
+  --authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
 ```
 
 With all-zero params the on-chain defaults land (mirroring
@@ -187,77 +242,91 @@ With all-zero params the on-chain defaults land (mirroring
 | `cert_ttl_seconds` | 3 600 | `jupiter_dust_threshold_lamports` | 666 666 |
 | | | `timelock_seconds` | 259 200 (72 h) |
 
-`init-all` reads back both configs and verifies the authority landed. A
-second `init-*` on an initialized config fails at the Anchor `init`
-constraint — ProtocolConfig is init-once by design.
-
-## 3. Emergency-control drill (Phase 11: "emergency controls tested")
-
-```bash
-node scripts/devnet/protocol_admin.mjs drill \
-  --url https://api.devnet.solana.com \
-  --program scanner \
-  --authority /path/to/deployer-authority-devnet.json \
-  --intruder  /path/to/any-other-keypair.json
-
-node scripts/devnet/protocol_admin.mjs drill \
-  --url https://api.devnet.solana.com \
-  --program vault \
-  --authority /path/to/deployer-authority-devnet.json \
-  --intruder  /path/to/any-other-keypair.json
-```
-
-Per program, the drill asserts the full spec behavior:
-
-1. Freshly initialized config readback — authority, all defaults, unpaused
-   (account discriminator verified, not just fields).
-2. Authority pauses (`paused` on scanner / `emergency_paused` on vault).
-3. Readback asserts the flag flipped.
-4. An intruder keypair attempts pause — the transaction MUST revert with
-   the program's `Unauthorized` (GraveScanner 6000 / GraveVault 7000). Any
-   other outcome (including a silent land) fails the drill.
-5. Authority unpauses; readback asserts restoration.
-
-The intruder keypair must hold fee dust (0.01 SOL is plenty): the probe
-transaction is signed by the intruder alone, so the intruder pays its own
-fee. An unfunded intruder fails at the system level ("Attempt to debit an
-account but found no record of a prior credit") before the program's
-authority check runs — the drill treats that as a failure, as well it
-should, because the assertion is specifically that the PROGRAM reverts
-with `Unauthorized`.
-
-Stand-alone primitives: `pause --state true|false`, `check` (full config
-dump). Custom program errors are decoded against the compact table in
-`protocol_admin.mjs`, mirroring `docs/error_codes.md`.
-
-## 4. Full rehearsal (no devnet needed)
+A second `init-*` on an initialized config fails at the Anchor `init`
+constraint — ProtocolConfig is init-once by design. Both `authority`
+fields land on the GOVERNANCE key (the deployer keypair only pays the
+fee), and both oracle signer fields START at that same governance key —
+which is exactly why the acceptance verifier refuses to PASS until they
+have been rotated to the dedicated keys:
 
 ```bash
-scripts/devnet/local_rehearsal.sh
+node scripts/devnet/protocol_admin.mjs drill --url https://api.devnet.solana.com \
+  --program scanner --authority /path/to/governance-keypair.json \
+  --intruder /path/to/throwaway-keypair.json
+node scripts/devnet/protocol_admin.mjs drill --url https://api.devnet.solana.com \
+  --program vault --authority /path/to/governance-keypair.json \
+  --intruder /path/to/throwaway-keypair.json
+
+node scripts/devnet/protocol_admin.mjs register-oracle --url https://api.devnet.solana.com \
+  --authority /path/to/governance-keypair.json --fee-payer /path/to/deployer-keypair.json \
+  --activity-oracle 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o \
+  --launch-price-oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee
 ```
 
-Starts a bare `solana-test-validator`, then drives the EXACT production
-scripts: `deploy_devnet.sh` (build + identity-gated deploy), `init-all`,
-and both drills. Deployer and intruder keys are minted into a `mktemp` dir
-and discarded; the program keypairs must be the canonical devnet ones so the
-ELF `declare_id!` matches (the script refuses otherwise). Success line:
+Per program, the drill asserts: fresh-config readback (authority,
+defaults, unpaused) → authority pauses → readback asserts the flip → an
+intruder keypair attempts pause and the transaction MUST revert with the
+program's `Unauthorized` (GraveScanner 6000 / GraveVault 7000) →
+authority unpauses → readback asserts restoration. The intruder keypair
+needs fee dust (0.01 SOL) so its probe reaches the program check rather
+than dying at the system layer.
 
+## 5. Mode 3 — agent-assisted read-only acceptance verification
+
+After deploy + initialize + drill + register-oracle, acceptance is
+verified INDEPENDENTLY (no keypairs, no transactions — read-only RPC
+only):
+
+```bash
+node scripts/devnet/verify_ns3_deployment.mjs --url https://api.devnet.solana.com
+# machine-readable: add --json; stricter context: --commitment finalized
 ```
-REHEARSAL COMPLETE — deploy, initialize, pause, intruder-reject, and unpause all behaved per spec on both programs.
-```
 
-> **Constrained containers (memlock):** agave 3.0.x probes io_uring and,
-> when the kernel supports it, writes all genesis/ledger files through an
-> io_uring file creator that must raise `RLIMIT_MEMLOCK` to 2 GB — in
-> containers where the hard limit is 64 KB and `setrlimit` is not
-> permitted this fails fatally ("unable to set memory lock limit") before
-> the ledger exists. Denying the `io_uring_setup` syscall (a seccomp
-> filter inherited by the validator process) makes the probe fail and
-> routes agave onto its plain sync file-creator path, which needs no
-> memlock. The rehearsal behind this runbook was produced exactly that
-> way; on an unconstrained host no wrapper is needed.
+The verifier derives everything from the pinned NS-3 identities and
+reports five sections, each item PASS / FAIL / UNVERIFIED:
 
-## 5. Deliberately out of scope here
+- **A — program accounts**: both programs exist, are executable, are
+  owned by the BPF upgradeable loader, and their REAL ProgramData
+  account — decoded from the program account's embedded pointer, not
+  inferred from any config — exists, is loader-owned, and names the
+  deployer as upgrade authority.
+- **B — ProtocolConfig**: the `['protocol_config']` PDA is derived
+  independently and must equal the pinned derivation (bump 255); the
+  account exists, is owned by its program, carries a valid
+  `account:ProtocolConfig` discriminator, decodes per the current
+  schema, has authority = governance, and matches the approved defaults
+  above (plus the stored bump).
+- **C — dedicated oracles**: the scanner's activity and launch-price
+  oracle fields are the DEDICATED NS-3 keys — if either still equals the
+  initialization authority, that is a FAIL ("register-oracle not yet
+  run").
+- **D — emergency state**: the actual `paused` / `emergency_paused`
+  flags are reported verbatim; acceptance requires both unpaused.
+- **E — legacy residuals**: the four NS-1/NS-2 program IDs are probed
+  and REPORTED (present/absent, owner, ProgramData upgrade authority
+  status). Report-only: historical residue never flips the NS-3 verdict.
+
+Overall result:
+
+- `PASS` (exit 0) — every check ran and the chain matches the approved
+  arrangement.
+- `FAIL` (exit 1) — at least one check ran and mismatched. The
+  deployment is not acceptable as-is; investigate every FAIL.
+- `INCOMPLETE` (exit 3) — at least one check could not run (RPC
+  transport failure or unreadable response). An RPC failure is NOT
+  evidence that the deployment is invalid — but it blocks acceptance:
+  re-run against a healthy RPC. The gate never passes on partial
+  evidence.
+
+A PASS proves: the pinned program bytes are live at the NS-3 addresses
+under the pinned authority arrangement, with governance-controlled
+spec-default configs and dedicated oracle signers. A PASS does NOT
+prove: that the pending-authority/timelock fields enforce anything (they
+do not — see the honest-form note), that future upgrades are safe (the
+upgrade authority remains the deployer key), or anything about programs
+other than the two NS-3 addresses.
+
+## 6. Deliberately out of scope here
 
 - **Indexer / SDK publication / first Salvor / Merkle service** — roadmap
   Phases 8–10; the Phase 11 Infrastructure rows light up after those ship.
@@ -265,7 +334,9 @@ REHEARSAL COMPLETE — deploy, initialize, pause, intruder-reject, and unpause a
   genuinely derelict devnet pool and the SDK's instruction builders; the
   fork harness already proves the settlement mechanics against mainnet
   bytecode (`tests/` suites).
-- **Multisig authority** — devnet runs a single-key authority for
-  operability. Mainnet launches multisig-only (Squads v4 3-of-5) per the
-  Charter and `initialize` documentation; KEYS-003 and GOV-001 track the
-  mainnet custody and timelock wiring.
+- **Multisig authority / on-chain timelock** — devnet NS-3 runs the
+  single deployer key as upgrade authority and governance as config
+  authority, with the timelock fields as reserved state. Mainnet ships
+  multisig-only (Squads v4 3-of-5) per the Charter and `initialize`
+  documentation; KEYS-003 and GOV-001 track the mainnet custody and
+  timelock wiring.

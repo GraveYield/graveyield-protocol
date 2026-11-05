@@ -316,10 +316,20 @@ jobs:
             --vault-so target/deploy/grave_vault.so \
             --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
             --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
-          printf '%s\n' \
-            "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98  target/deploy/grave_scanner.so" \
-            "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83  target/deploy/grave_vault.so" \
-            | sha256sum -c -
+          # Shared fail-closed provenance gate (single source of the digests:
+          # scripts/devnet/provenance.manifest.json, the same manifest the
+          # deployment flow enforces in deploy_devnet.sh). Verifies the ELF
+          # digests, the SBPF v0 target architecture (e_machine 263 /
+          # e_flags 0), and — using the tarball this job downloaded and
+          # pre-seeded above — the platform-tools toolchain integrity.
+          # ANY digest/arch/toolchain drift fails the job; digests are
+          # re-pinned only after an independently reviewed rebuild.
+          node scripts/devnet/ns3_check_provenance.mjs \
+            --scanner-so target/deploy/grave_scanner.so \
+            --vault-so target/deploy/grave_vault.so \
+            --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
+            --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya \
+            --platform-tools-tarball /tmp/platform-tools.tar.bz2
           sha256sum target/deploy/*.so
       - name: Upload program ELFs (deployment-provenance artifacts)
         # DR-001/NS-2: the fresh devnet deployment consumes the ELFs built by
