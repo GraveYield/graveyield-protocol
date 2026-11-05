@@ -9,7 +9,7 @@
 //   node ns3_derive_pdas.mjs                 # human-readable table
 //   node ns3_derive_pdas.mjs --json          # machine-readable manifest fragment
 import { PublicKey } from "@solana/web3.js";
-import { NS3, NS3_PDAS, configPdaWithBump, PROGRAM_DATA_PENDING } from "./ns3_identities.mjs";
+import { NS3, NS3_PDAS, configPdaWithBump, programDataPda } from "./ns3_identities.mjs";
 
 const asJson = process.argv.includes("--json");
 
@@ -37,6 +37,15 @@ if (
       `!= live ${liveVaultPda.toBase58()} (bump ${liveVaultBump})`,
   );
 }
+
+// ProgramData addresses ARE derivable offline (loader-v3 convention:
+// PDA([program_id], BPFLoaderUpgradeable) — verified against the
+// anza-xyz/solana-sdk sources and the live NS-2 ProgramData accounts).
+// They are printed here as DERIVED expectations; the on-chain program
+// account's embedded pointer must equal them after deployment (asserted
+// by verify_ns3_deployment.mjs section A).
+const scannerProgramData = programDataPda(new PublicKey(NS3.scannerProgramId)).toBase58();
+const vaultProgramData = programDataPda(new PublicKey(NS3.vaultProgramId)).toBase58();
 
 const rows = [
   [
@@ -81,13 +90,13 @@ const rows = [
   ],
   [
     "Scanner ProgramData",
-    "PENDING",
-    "derivable only from the deployed program account (BPF Upgradeable loader) after deployment",
+    scannerProgramData,
+    "derived offline: PDA([scanner program ID], BPFLoaderUpgradeable); post-deploy the program account's embedded pointer must equal this",
   ],
   [
     "Vault ProgramData",
-    "PENDING",
-    "derivable only from the deployed program account (BPF Upgradeable loader) after deployment",
+    vaultProgramData,
+    "derived offline: PDA([vault program ID], BPFLoaderUpgradeable); post-deploy the program account's embedded pointer must equal this",
   ],
 ];
 
@@ -99,11 +108,11 @@ if (asJson) {
           ...NS3,
           ...NS3_PDAS,
           programData: {
-            scanner: "PENDING",
-            vault: "PENDING",
-            reason: "derivable only from deployed program accounts",
+            scanner: scannerProgramData,
+            vault: vaultProgramData,
+            note: "derived offline (loader-v3 get_program_data_address convention); on-chain pointer must match",
           },
-          derivedOffline: ["scannerConfigPda", "vaultConfigPda"],
+          derivedOffline: ["scannerConfigPda", "vaultConfigPda", "programData"],
           requiresOnChainVerification: [
             "scannerProgramId",
             "vaultProgramId",
@@ -125,5 +134,4 @@ if (asJson) {
   for (const [k, v, src] of rows) {
     console.log(`${k}\n  ${v}\n  provenance: ${src}`);
   }
-  void PROGRAM_DATA_PENDING;
 }

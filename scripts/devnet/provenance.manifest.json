@@ -1,0 +1,38 @@
+{
+  "schema": "graveyield.provenance/1",
+  "note": [
+    "Single source of truth for the NS-3 deployment-provenance pins (DR-001/NS-2,",
+    "PR #82): the SHA-256 digests of the two program ELFs whose bytes were",
+    "recorded from a deploy_devnet.sh-flow build of the approved tree, plus the",
+    "toolchain pins that produce byte-identical bytes.",
+    "Consumed by BOTH scripts/devnet/deploy_devnet.sh and the CI",
+    "'Verify ELF deployment provenance' step via scripts/devnet/ns3_check_provenance.mjs.",
+    "If a legitimate source/dependency/toolchain change shifts the ELF bytes, the",
+    "deployment gate STAYS CLOSED until the new build has been independently",
+    "reviewed and the new digests deliberately re-pinned here in a reviewed PR.",
+    "Never update a digest merely to make a build green."
+  ],
+  "programs": {
+    "grave_scanner": {
+      "artifact": "target/deploy/grave_scanner.so",
+      "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98"
+    },
+    "grave_vault": {
+      "artifact": "target/deploy/grave_vault.so",
+      "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83"
+    }
+  },
+  "toolchain": {
+    "sbpf_arch": "v0",
+    "elf": {
+      "e_machine": 263,
+      "e_flags": 0
+    },
+    "solana_cli": "3.0.10",
+    "platform_tools": {
+      "version": "1.54",
+      "sha256": "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e",
+      "url": "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2"
+    }
+  }
+}

@@ -21,9 +21,9 @@
 
 ## 2. NS-2 deployment record (legacy)
 
-Executed 2026-10-25 (epoch 1191); full runbook narrative in
-[`docs/DEVNET.md`](DEVNET.md) (status line there is superseded — see its
-banner).
+Executed 2026-10-25 (epoch 1191). The complete execution record lives in
+THIS file (§2–§4); `docs/DEVNET.md` is now the NS-3-only runbook and
+preserves no NS-2 narrative — its supersession banner points here.
 
 | Item | GraveScanner | GraveVault |
 |---|---|---|
@@ -133,10 +133,11 @@ no upgrade, authority rotation, or close was ever attempted.
 The NS-1/NS-2 IDs remain valid for historical documentation and on-chain
 verification. They appear in:
 
-- `docs/LEGACY_DEPLOYMENTS.md` (this file),
+- `docs/LEGACY_DEPLOYMENTS.md` (this file — the sole home of the NS-1/NS-2
+  execution records),
 - `docs/DECISIONS.md` (decision records),
-- the historical sections of `docs/DEVNET.md` (the preserved NS-2
-  execution record below its supersession notice),
+- the supersession banner of `docs/DEVNET.md` (which points here; the
+  NS-3-only runbook body preserves no NS-2 narrative),
 - historical evidence artifacts (forensic reports, worklog entries,
   assessment records, bundles/patches of frozen commits),
 - the inert ID constants in the tree pending the NS-3 ID sync (§8).
