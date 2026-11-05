@@ -210,7 +210,12 @@ function gitMeta() {
 function toolchainMeta() {
   const v = (cmd, args) => {
     try {
-      return (spawnSync(cmd, args, { encoding: "utf8" }).stdout ?? "").trim() || null;
+      // Collapse embedded newlines (--version strings like cargo-build-sbf's
+      // carry a second line) so report/summary tables stay single-line.
+      return ((spawnSync(cmd, args, { encoding: "utf8" }).stdout ?? "").trim() || null)?.replace(
+        /\s+/g,
+        " ",
+      );
     } catch {
       return null;
     }

@@ -117,7 +117,7 @@ export const PROVES = [
 export const DOES_NOT_PROVE = [
   "real Jupiter v6 route execution (conversion leg is config-skipped; the route shim is never executed on-chain)",
   "public-cluster behavior: devnet/mainnet state, fees, congestion, production oracle attestation delivery (the NS-3 deployment acceptance is an owner-executed read-only step)",
-  "the fleet-core market vault-signer derivation against a REAL OpenBook market (local fixture is adapted — F3); faithful CPI evidence lives in the fork suite with the unmodified mainnet market",
+  "fleet-core discovery against a LIVE public-cluster market (the local market IS the real mainnet fixture, unmodified, and the real OpenBook rule is validated locally — but live-cluster markets can present account states a static fixture cannot)",
   "production custody-key operations (throwaway identities only, by design — PR #81)",
 ];
 
