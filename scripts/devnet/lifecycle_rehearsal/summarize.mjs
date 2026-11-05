@@ -121,8 +121,18 @@ export const DOES_NOT_PROVE = [
   "production custody-key operations (throwaway identities only, by design — PR #81)",
 ];
 
-function esc(s) {
-  return String(s ?? "").replace(/\|/g, "\\|");
+// Markdown table-cell escaping. Backslashes MUST be escaped BEFORE the
+// pipe: a cell value containing `\|` (or a lone trailing `\`) would
+// otherwise survive as an unescaped backslash and either absorb the
+// escaped pipe (a `\\` renders as a literal `\`, leaving the pipe live as
+// a cell separator and silently adding a column) or escape the cell's
+// trailing character. Doubling `\` first keeps every output pipe
+// odd-backslash-escaped and the column layout unambiguous.
+// (CodeQL js/incomplete-string-escaping-or-encoding — alert #1.)
+export function esc(s) {
+  return String(s ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|");
 }
 
 export function renderSummary(doc) {
