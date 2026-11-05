@@ -43,7 +43,11 @@ const DEVNET_RPC = "https://api.devnet.solana.com";
 // resolves to empty directories and cannot shadow the stubs. Stub commands
 // are created in an exec-safe directory under the repo's target/.
 function makeEnv(tag) {
-  const root = mkdtempSync(join(REPO_ROOT, "target", `rpc-guard-${tag}-`));
+  // target/ is gitignored and absent on a fresh CI checkout — create the base
+  // (exec-safe under the workspace) before mkdtemp.
+  const base = join(REPO_ROOT, "target");
+  mkdirSync(base, { recursive: true });
+  const root = mkdtempSync(join(base, `rpc-guard-${tag}-`));
   const stubDir = join(root, "stubs");
   const log = join(root, "stub-commands.log");
   mkdirSync(stubDir, { recursive: true });
@@ -104,7 +108,12 @@ describe("lifecycle_rehearsal.sh local-RPC execution boundary (P1)", () => {
           `expected refusal exit 3, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
         );
         assert.match(r.stderr, /REFUSING/);
-        assert.match(r.stderr, new RegExp(badUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        // Plain substring check: the rejected URL must be named verbatim
+        // (no regex construction from a URL — CodeQL hostname-regexp rule).
+        assert.ok(
+          r.stderr.includes(badUrl),
+          `stderr must name the rejected URL\nstderr: ${r.stderr}`,
+        );
         assert.match(r.stderr, /local validator endpoint/);
         // ORDERING PROOF: zero external commands executed — the stub log was
         // never even created (no keygen, no solana CLI, no validator, no node).
