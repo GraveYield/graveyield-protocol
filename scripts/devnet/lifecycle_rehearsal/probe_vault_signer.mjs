@@ -3,8 +3,7 @@
 //
 // Establishes, against the REAL fixture bytes, which vault-signer
 // derivation rule the OpenBook v1 market program actually uses — and
-// documents the exact fixture adaptation the W1 harness makes for
-// fleet-core compatibility.
+// records the (retired) W1 fixture-adaptation history.
 //
 // VERIFIED FACTS (re-proven on every run of this probe):
 //   * The OpenBook v1 (Serum v3) rule is
@@ -14,23 +13,18 @@
 //     (and cross-checked against both market vault token accounts' owner
 //     fields). The real SOL/USDC market stores nonce = 1 (u64 LE @45) and
 //     that nonce IS canonical under the program's own rule.
-//   * fleet-core's account-discovery pipeline derives the vault signer as
-//       findProgramAddress([\"vault-signer\", market], market_program)
-//     (salvor-bots fleet-core/src/raydiumAccounts.ts) — a string-seed PDA
-//     scheme that matches NO real OpenBook market (the real market's vault
-//     token account owners fail its fail-closed owner check).
-//   * The W1 local fixture is therefore ADAPTED to fleet-core's scheme:
-//     prepare_local_accounts.mjs re-pins the market's stored nonce to the
-//     string-seed PDA's bump and re-points both market vault token
-//     accounts' owner to that PDA. This is a fleet-core-compatibility
-//     adaptation — NOT a canonicalization — and it makes the local market
-//     deviate from what the real OpenBook program would validate. The
-//     modified market relationship is never exercised on-chain by the W1
-//     salvage (the vault's Raydium withdraw CPI marks the market vault
-//     signer ignored — programs/grave-vault/src/cpi/raydium_v4.rs — and no
-//     Serum CPI runs in the W1 path); the faithful CPI evidence lives in
-//     the fork suite (programs/grave-vault/tests/raydium_v4_fork.rs),
-//     which uses the UNMODIFIED mainnet fixture.
+//   * fleet-core's account-discovery pipeline (salvor-bots
+//     fleet-core/src/raydiumAccounts.ts) derives the vault signer with that
+//     SAME real rule since the salvor-side Finding E remediation
+//     (ns3/devnet-preparation): the fail-closed discovery validates the
+//     stored nonce, the derived signer, and the vault owners. The historical
+//     string-seed PDA scheme (findProgramAddress(["vault-signer", market]))
+//     is recorded here for contrast only — it matches NO real OpenBook
+//     market and is no longer used by fleet-core.
+//   * CONSEQUENCE FOR THE W1 FIXTURE: the local market loads UNMODIFIED —
+//     the October-era re-pin adaptation (stored nonce → string-seed bump +
+//     re-pointed market vault owners) is RETIRED. prepare_local_accounts.mjs
+//     hard-asserts the real-rule derivation on every run.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { initWeb3, getWeb3 } from "./lib.mjs";
@@ -64,7 +58,8 @@ const realSchemeSigner = W3.PublicKey.createProgramAddressSync(
   [marketPk.toBytes(), nonceToLe(nonce)],
   marketProgram,
 );
-// Scheme B — fleet-core's string-seed PDA: ["vault-signer", market].
+// Scheme B — HISTORICAL (retired) fleet-core string-seed PDA: ["vault-signer", market].
+// Recorded for contrast only — fleet-core no longer derives with it.
 const [fleetCoreSigner, fleetCoreBump] = W3.PublicKey.findProgramAddressSync(
   [Buffer.from("vault-signer", "utf8"), marketPk.toBytes()],
   marketProgram,
@@ -89,7 +84,7 @@ const verdict = {
       manifest.accounts.vault_signer.pubkey === fleetCoreSigner.toBase58(),
   },
   finding: realSignerMatchesManifest
-    ? "the real market's stored nonce IS canonical under the real OpenBook rule; fleet-core's string-seed derivation is the mismatch — the W1 fixture re-pin is a fleet-core-compatibility adaptation (documented deviation), not a canonicalization"
+    ? "the real market's stored nonce IS canonical under the real OpenBook rule, and fleet-core (since the salvor-side Finding E remediation) derives with that same rule — the W1 local market loads UNMODIFIED; the October-era string-seed re-pin adaptation is retired"
     : "UNEXPECTED: the real-program derivation did not reproduce the manifest vault signer — investigate before trusting the fixture",
 };
 

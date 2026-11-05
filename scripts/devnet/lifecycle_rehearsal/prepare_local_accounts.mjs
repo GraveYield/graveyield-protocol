@@ -5,21 +5,16 @@
 //    (C6 re-pin — economic grounding comes from manifest parsed.amm_lp_amount,
 //    NOT from the re-pinned supply).
 //  - Holder LP ATAs: built from scratch (165B SPL token layout).
-//  - Market (F3, Finding E remediation): fleet-core's account-discovery
-//    pipeline derives the market vault signer as the string-seed PDA
-//    ["vault-signer", market] under the market program, which matches NO
-//    real OpenBook market (the program's actual rule is
-//    create_program_address([market, nonce_le]); the real SOL/USDC market's
-//    stored nonce 1 IS canonical under that rule). To let the fail-closed
-//    discovery accept the fixture, the LOCAL market's stored nonce is
-//    re-pinned to the string-seed PDA's bump and both market vault token
-//    accounts' owner is re-pointed to that PDA. This is a DOCUMENTED
-//    fleet-core-compatibility adaptation — the local market therefore
-//    DEVIATES from mainnet semantics; the modified relationship is never
-//    validated on-chain by the W1 salvage path (the vault's Raydium withdraw
-//    CPI ignores the market vault signer — programs/grave-vault/src/cpi/
-//    raydium_v4.rs), and the faithful CPI evidence remains the fork suite,
-//    which uses the UNMODIFIED mainnet market. See probe_vault_signer.mjs
+//  - Market (F3, Finding E RETIRED): the fleet-core vault-signer mismatch is
+//    FIXED on the salvor side — fleet-core (salvor-bots ns3/devnet-preparation)
+//    now derives the market vault signer with the REAL OpenBook v1 rule
+//    create_program_address([market, stored_nonce_le], market_program), which
+//    reproduces the real mainnet signer for stored nonce 1. The W1 local
+//    market is therefore loaded UNMODIFIED (real mainnet bytes): no nonce
+//    re-pin, no market-vault owner re-point. The real-rule derivation is
+//    still HARD-ASSERTED here on every run (fixture provenance gate) and
+//    both derivations are recorded in local_plan.market. The October-era
+//    string-seed re-pin adaptation is retired; see probe_vault_signer.mjs
 //    and local_plan.market.
 //  - loader_account_flags.txt is written ONCE, AFTER the holder section
 //    (fix 9: writing it before the holder dumps appended left 0 LP holders
@@ -126,25 +121,27 @@ writeFileSync(
   ) + "\n",
 );
 
-// --- 3. F3 market re-pin ----------------------------------------------------------------
+// --- 3. market identity (F3/Finding E — real OpenBook rule, NO re-pin) -----------------
+// The market, market_coin_vault and market_pc_vault are loaded EXACTLY as
+// fetched (real mainnet bytes). The only market logic here is the hard
+// fixture-provenance assertion: the REAL OpenBook v1 rule with the STORED
+// nonce must reproduce the manifest's vault signer (which the fetcher
+// cross-proved against the Raydium pool bytes AND both market vault token
+// accounts' owner fields). The historical string-seed PDA derivation is
+// recorded for contrast only — fleet-core no longer uses it.
 const MARKET_NONCE_OFFSET = 45; // u64 LE vault_signer_nonce (probe_vault_signer.mjs finding)
 const marketProgram = new PublicKey(manifest.market_program);
 const marketPk = new PublicKey(metaOf("market").pubkey);
 const marketBytes = loadBin("market");
-const oldNonce = marketBytes.readBigUInt64LE(MARKET_NONCE_OFFSET);
-const [canonicalSigner, bump] = PublicKey.findProgramAddressSync(
-  [Buffer.from("vault-signer", "utf8"), marketPk.toBytes()],
-  marketProgram,
-);
-// Finding E remediation: also derive the REAL OpenBook rule
-// ([market, stored_nonce_le]) for the evidence record — it must reproduce
-// the manifest's vault signer (the real mainnet relationship).
+const storedNonce = marketBytes.readBigUInt64LE(MARKET_NONCE_OFFSET);
+// REAL OpenBook v1 rule ([market, stored_nonce_le]) — the canonical
+// relationship the real mainnet market actually satisfies.
 const realSchemeSigner = PublicKey.createProgramAddressSync(
   [
     marketPk.toBytes(),
     (() => {
       const b = Buffer.alloc(8);
-      b.writeBigUInt64LE(oldNonce);
+      b.writeBigUInt64LE(storedNonce);
       return b;
     })(),
   ],
@@ -156,31 +153,20 @@ if (realSchemeSigner.toBase58() !== metaOf("vault_signer").pubkey) {
       `(${realSchemeSigner.toBase58()} vs ${metaOf("vault_signer").pubkey}) — fixture provenance broken`,
   );
 }
-marketBytes.writeBigUInt64LE(BigInt(bump), MARKET_NONCE_OFFSET);
-writeFileSync(
-  join(outDir, "market.json"),
-  JSON.stringify(
-    accountJson({
-      pubkey: marketPk.toBase58(),
-      owner: metaOf("market").owner,
-      lamports: metaOf("market").lamports,
-      data: marketBytes,
-    }),
-  ) + "\n",
+// Historical fleet-core string-seed scheme — recorded for contrast; since
+// salvor-bots' Finding E remediation fleet-core derives the REAL rule, so
+// the former re-pin adaptation is RETIRED (the unmodified fixture is the
+// compatible one).
+const [stringSeedSigner, stringSeedBump] = PublicKey.findProgramAddressSync(
+  [Buffer.from("vault-signer", "utf8"), marketPk.toBytes()],
+  marketProgram,
 );
-
-const VAULT_OWNER_OFFSET = 32;
-for (const [acct, file] of [
-  ["market_coin_vault", "market_coin_vault"],
-  ["market_pc_vault", "market_pc_vault"],
-]) {
+for (const acct of ["market", "market_coin_vault", "market_pc_vault"]) {
   const m = metaOf(acct);
-  const bytes = loadBin(file);
-  bytes.subarray(VAULT_OWNER_OFFSET, VAULT_OWNER_OFFSET + 32).set(canonicalSigner.toBytes());
   writeFileSync(
-    join(outDir, `${file}.json`),
+    join(outDir, `${acct}.json`),
     JSON.stringify(
-      accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: bytes }),
+      accountJson({ pubkey: m.pubkey, owner: m.owner, lamports: m.lamports, data: loadBin(acct) }),
     ) + "\n",
   );
 }
@@ -249,16 +235,14 @@ const plan = {
   burn_amount: burnAmount.toString(),
   salvage_lp_amount: burnAmount.toString(),
   market: {
-    old_nonce: oldNonce.toString(),
-    pinned_nonce: String(bump),
-    canonical_vault_signer: canonicalSigner.toBase58(),
-    // Finding E remediation: record BOTH derivations. The real OpenBook rule
-    // ([market, stored_nonce]) reproduces the manifest vault signer; the
-    // string-seed PDA above is what fleet-core's discovery requires.
+    stored_nonce: storedNonce.toString(),
+    loaded_unmodified: true,
     real_scheme_signer_from_stored_nonce: realSchemeSigner.toBase58(),
     real_scheme_matches_manifest_vault_signer:
       realSchemeSigner.toBase58() === metaOf("vault_signer").pubkey,
-    note: "F3 (Finding E): fleet-core's discovery requires the string-seed vault-signer PDA, so the LOCAL market's stored nonce is re-pinned to that PDA's bump and both market vault token accounts are re-pointed to it — a documented fleet-core-compatibility adaptation. The real OpenBook rule ([market, nonce_le]) with the original nonce 1 reproduces the REAL mainnet vault signer; the local market therefore deviates from mainnet semantics and the modified relationship is never validated on-chain by the W1 salvage path (the withdraw CPI ignores the market vault signer). Faithful CPI evidence: programs/grave-vault/tests/raydium_v4_fork.rs with the UNMODIFIED fixture.",
+    fleet_core_string_seed_signer: stringSeedSigner.toBase58(),
+    fleet_core_string_seed_bump: String(stringSeedBump),
+    note: "F3 (Finding E, RETIRED adaptation): fleet-core now derives the market vault signer with the REAL OpenBook v1 rule create_program_address([market, stored_nonce_le]) — the unmodified mainnet market (stored nonce 1) IS canonical under it, so the W1 local market loads UNMODIFIED. The October-era string-seed nonce re-pin is retired; the string-seed PDA is recorded for contrast only.",
   },
   holders: Object.fromEntries(
     holders.map((h) => [
@@ -315,7 +299,7 @@ console.log(
   `prepare_local_accounts: supply=${supply} burn=${burnAmount} claimA=${claimA} claimB=${claimB}`,
 );
 console.log(
-  `prepare_local_accounts: market nonce ${oldNonce} → canonical bump ${bump} (signer ${canonicalSigner.toBase58()})`,
+  `prepare_local_accounts: market loaded UNMODIFIED (stored nonce ${storedNonce}; real OpenBook rule reproduces the manifest vault signer; string-seed PDA ${stringSeedSigner.toBase58()} recorded for contrast only)`,
 );
 console.log(
   `prepare_local_accounts: ${flagLines.length} loader flags → ${join(artifacts, "loader_account_flags.txt")}`,
