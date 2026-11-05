@@ -30,16 +30,26 @@
 #     re-run/retry: there is no flag, path, or environment that skips it.
 #     If the digests differ, the gate stays closed — re-pin only after an
 #     independently reviewed rebuild (docs/DEVNET.md), never to go green.
-#   * DEPLOYMENT-CLI IDENTITY (fix D): `solana --version` and
-#     `solana-keygen --version` are verified against the manifest pin on
-#     EVERY deploy path (normal, --skip-build, retries) BEFORE any owner
-#     keypair path is touched (existence checks included) — the CLI that
-#     reads owner keys and submits transactions is a separate trust
-#     surface from the build toolchain, and its identity is proven first.
-#   * BUILD-TOOLCHAIN IDENTITY (fix D, build paths only): cargo-build-sbf
-#     and the platform-tools cache are verified BEFORE the owner keypairs
-#     are seeded into target/ (a toolchain refusal must never leave owner
-#     key material copied into the build tree).
+#   * DEPLOYMENT-CLI VERSION COMPATIBILITY (fix D): `solana --version`
+#     and `solana-keygen --version` are checked against the manifest pin
+#     on EVERY deploy path (normal, --skip-build, retries) BEFORE any
+#     owner keypair path is touched (existence checks included). The CLI
+#     that reads owner keys and submits transactions is pinned first so
+#     that a wrong-version CLI never touches owner keys. SCOPE: this is
+#     a version-compatibility check ONLY — `--version` output is an
+#     unauthenticated string, and matching it does NOT authenticate the
+#     executables' contents. No binary-attestation mechanism is added;
+#     the assurance the version string cannot provide comes from the
+#     deployment environment, which must be trusted (owner-controlled
+#     host and PATH).
+#   * BUILD-TOOLCHAIN VERSION COMPATIBILITY (fix D, build paths only):
+#     cargo-build-sbf's --version string (same limits as above) and the
+#     platform-tools cache are verified BEFORE the owner keypairs are
+#     seeded into target/ (a toolchain refusal must never leave owner
+#     key material copied into the build tree). Unlike the version
+#     strings, the platform-tools ARCHIVE itself is content-checked:
+#     SHA-256 against the manifest pin, re-extracted on every build
+#     (fix B).
 #   * ANCHOR IS NOT ON THE DEPLOY PATH (fix D finding, verified): this
 #     script builds with cargo-build-sbf (pinned agave 3.0.10 toolchain)
 #     and deploys with `solana program deploy`; anchor 1.2.2 is used only
@@ -221,29 +231,34 @@ check_build_toolchain_version() {
   echo "cargo-build-sbf version OK: $got"
 }
 
-# Deployment-CLI identity (fix D) — a trust surface DISTINCT from the
-# build toolchain: this is the binary that reads the owner keypair files
-# and submits the deploy transactions, so its identity is verified
-# against the shared manifest pin BEFORE any owner keypair path is
-# touched (existence checks included), on EVERY deploy path (normal,
+# Deployment-CLI version compatibility (fix D) — a component DISTINCT
+# from the build toolchain: this is the binary that reads the owner
+# keypair files and submits the deploy transactions, so its version is
+# checked against the shared manifest pin BEFORE any owner keypair path
+# is touched (existence checks included), on EVERY deploy path (normal,
 # --skip-build, and every retry/re-run — nothing caches this verdict).
+# HONEST LIMITS: `--version` output is an unauthenticated string. These
+# checks establish version COMPATIBILITY with the pinned CLI; they do
+# NOT authenticate the executables' contents, and no binary attestation
+# is attempted. What covers that gap is the deployment environment
+# itself: the owner runs this script on a host and PATH they control.
 check_deploy_cli() {
   require_node
   local want got
   want="$(manifest_field toolchain.solana_cli)"
   command -v solana >/dev/null || {
-    echo "REFUSING: solana CLI not on PATH - the deployment CLI identity cannot be verified." >&2
+    echo "REFUSING: solana CLI not on PATH - the deployment CLI version check cannot run." >&2
     exit 2
   }
   command -v solana-keygen >/dev/null || {
-    echo "REFUSING: solana-keygen not on PATH - the deployment CLI identity cannot be verified." >&2
+    echo "REFUSING: solana-keygen not on PATH - the deployment CLI version check cannot run." >&2
     exit 2
   }
   got="$(solana --version 2>/dev/null || true)"
   if [[ "$got" != *"$want"* ]]; then
     echo "REFUSING: solana --version '$got' does not match the pinned deployment CLI $want." >&2
     echo "The deployment CLI reads the owner keypairs and submits the deploy transactions;" >&2
-    echo "its identity is verified first, before any keypair path is touched (docs/DEVNET.md)." >&2
+    echo "its version is checked first, before any keypair path is touched (docs/DEVNET.md)." >&2
     exit 1
   fi
   got="$(solana-keygen --version 2>/dev/null || true)"
@@ -251,12 +266,12 @@ check_deploy_cli() {
     echo "REFUSING: solana-keygen --version '$got' does not match the pinned deployment CLI $want." >&2
     exit 1
   fi
-  echo "deployment CLI identity OK: solana + solana-keygen $want"
+  echo "deployment CLI version OK: solana + solana-keygen $want"
 }
 
 if (( BUILD_ONLY == 1 )); then
   # Build-only preparation path: no keypairs, no RPC, no transactions.
-  # No deployment-CLI identity check here by design: this path never
+  # No deployment-CLI version check here by design: this path never
   # touches a keypair and never submits a transaction (fix D scopes the
   # CLI check to deploy paths).
   require_node
@@ -279,10 +294,10 @@ fi
 
 # ------------------------------------------------------------------
 # DEPLOY PATH — order is security-mandated (fixes B + D):
-#   [0] deployment-CLI identity   (BEFORE any owner keypair path is touched)
+#   [0] deployment-CLI version check (BEFORE any owner keypair path is touched)
 #   [1] keypair existence + identity (the verified CLI reads the pubkeys)
 #   [2] deployer funding
-#   [3] build-toolchain identity + platform-tools archive (BEFORE seeding)
+#   [3] build-toolchain version check + platform-tools archive (BEFORE seeding)
 #   [4] seed owner keypairs into target/deploy
 #   [5] cargo build / --skip-build
 #   [6] fail-closed provenance gate
@@ -296,7 +311,7 @@ for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
   fi
 done
 
-echo "== [0/7] deployment-CLI identity (before any keypair path is touched) =="
+echo "== [0/7] deployment-CLI version check (before any keypair path is touched) =="
 check_deploy_cli
 
 for kp in "$SCANNER_KP" "$VAULT_KP" "$DEPLOYER_KP"; do
@@ -332,7 +347,7 @@ if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
   exit 1
 fi
 
-echo "== [3/7] build-toolchain identity + platform-tools archive (before owner keypairs are seeded) =="
+echo "== [3/7] build-toolchain version check + platform-tools archive (before owner keypairs are seeded) =="
 if (( SKIP_BUILD == 0 )); then
   # The SBF toolchain is only required when this script builds; --skip-build
   # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
@@ -345,7 +360,7 @@ if (( SKIP_BUILD == 0 )); then
   pin_platform_tools
   check_build_toolchain_version
 else
-  echo "--skip-build set: no build toolchain resolution (the deployment-CLI identity above still applies in full)"
+  echo "--skip-build set: no build toolchain resolution (the deployment-CLI version check above still applies in full)"
 fi
 
 echo "== [4/7] seed build keypairs (target/deploy, gitignored) =="

@@ -193,14 +193,19 @@ scripts/devnet/deploy_devnet.sh \
 
 Stages, each with a hard refusal on mismatch:
 
-0. **Deployment-CLI identity** — `solana --version` and
+0. **Deployment-CLI version compatibility** — `solana --version` and
    `solana-keygen --version` must match the manifest pin
-   (`toolchain.solana_cli`) — verified on EVERY deploy path (normal,
+   (`toolchain.solana_cli`) — checked on EVERY deploy path (normal,
    `--skip-build`, retries) BEFORE any owner keypair path is touched
    (existence checks included). The deployment CLI is the binary that
-   reads the owner keys and submits the transactions; its identity is
-   proven first, and it is a separate trust surface from the build
-   toolchain.
+   reads the owner keys and submits the transactions, so its version is
+   pinned first: a wrong-version CLI never touches owner keys. SCOPE —
+   this is a version-COMPATIBILITY check, not binary authentication:
+   `--version` output is an unauthenticated string, and matching it does
+   not prove what the executables contain. No binary-attestation
+   mechanism is introduced for this; the assurance the version string
+   cannot provide comes from the deployment environment, which must be
+   trusted (owner-controlled host and PATH).
 1. **Identity check** — each keypair's pubkey must equal the compiled
    `declare_id!` value. An ELF deployed under an address different from
    its declared ID would fail every Anchor owner check at runtime; the
@@ -208,8 +213,9 @@ Stages, each with a hard refusal on mismatch:
 2. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
    against 6 000 000 000 (never by digit-stripping the human SOL display,
    which mis-reads decimals).
-3. **Build-toolchain identity** (build paths only) — `cargo-build-sbf --version`
-   must match the manifest pin and the platform-tools archive is
+3. **Build-toolchain version compatibility** (build paths only) — `cargo-build-sbf --version`
+   must match the manifest pin (same version-string limits as stage 0)
+   and the platform-tools archive is
    re-verified and re-seeded (see §1 check 4). This runs BEFORE the
    owner keypairs are seeded into `target/`: a toolchain refusal must
    never leave owner key material copied into the build tree.

@@ -88,8 +88,9 @@ function stubShims(sbx) {
   mkdirSync(path.join(sbx, "log"), { recursive: true });
   // solana-keygen: prints the pinned PUBLIC keys for the recognized fixture
   // keypair basenames (public-key simulation only — no key material).
-  // --version is handled FIRST (the deploy script verifies the deployment
-  // CLI identity before it may touch any keypair path — fix D).
+  // --version is handled FIRST (the deploy script checks the deployment
+  // CLI version compatibility before it may touch any keypair path —
+  // fix D; a version-string check, not executable authentication).
   writeFileSync(
     path.join(stub, "solana-keygen"),
     `#!/usr/bin/env bash
@@ -789,7 +790,8 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
   });
 
   // ========================================================================
-  // Fix D — deployment-CLI identity on EVERY deploy path, before keypairs
+  // Fix D — deployment-CLI version-compatibility check on EVERY deploy
+  // path, before keypairs (version strings only, no content attestation)
   // ========================================================================
 
   test("D1. wrong `solana --version` refuses BEFORE any keypair path is touched", () => {
