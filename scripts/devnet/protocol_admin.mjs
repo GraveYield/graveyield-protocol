@@ -336,7 +336,7 @@ function findProgramAddressSync(seeds, programId) {
 // Borsh field offsets inside the 8-byte-discriminated ProtocolConfig
 // accounts, hand-derived from the state structs. asserted by the drill.
 
-const SCANNER_DEFAULTS = {
+export const SCANNER_DEFAULTS = {
   inactivitySeconds: 90n * 24n * 60n * 60n, // 7_776_000
   priceCollapseBps: 9_900,
   minTvlLamports: 500_000_000n,
@@ -345,7 +345,7 @@ const SCANNER_DEFAULTS = {
   certTtlSeconds: 3_600n,
 };
 
-const VAULT_DEFAULTS = {
+export const VAULT_DEFAULTS = {
   lpHolderShareBps: 4_000,
   salvorShareBps: 4_000,
   protocolShareBps: 2_000,

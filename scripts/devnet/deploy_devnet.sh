@@ -20,6 +20,27 @@
 #   * The compiled ELF's embedded declare_id! is byte-checked against the
 #     EXPECTED_* constants before any deploy (closes the partial-sync window
 #     where keypair == constant but the ELF was built from a stale tree).
+#   * FAIL-CLOSED PROVENANCE GATE (PR #82 parity at deploy time): EVERY path
+#     that can reach `solana program deploy` — normal build, --skip-build
+#     (CI-artifact / resume / retry), and re-runs after a failed deploy —
+#     first passes scripts/devnet/ns3_verify_provenance.mjs against the
+#     shared manifest (scripts/devnet/provenance.manifest.json): the ELFs
+#     must be byte-identical (SHA-256) to the approved NS-3 deployment
+#     provenance, structurally embed the NS-3 program IDs in allocated
+#     sections, carry NO legacy NS-1/NS-2 ID bytes, and match the SBPF v0
+#     architecture record (e_machine 263 / e_flags 0 — anchor 1.2.2's
+#     default v3 output is refused). A missing, malformed, or mismatched
+#     ELF aborts BEFORE any deployment transaction can be submitted. There
+#     is no flag that skips this gate. A digest is never bumped to make a
+#     failing check pass — new bytes need independent review and deliberate
+#     re-approval in a reviewed PR.
+#   * Build paths verify the platform-tools provenance too: the pinned
+#     v1.54 cache directory (the toolchain that produced the approved
+#     bytes) must exist before cargo-build-sbf runs, and — when the tarball
+#     is available (GRAVEYIELD_PLATFORM_TOOLS_TARBALL) — the tarball is
+#     SHA-256-verified against the manifest. The byte-identity of the BUILD
+#     RESULT is then still enforced by the digest gate above (a build with
+#     any other toolchain shifts the digests and refuses).
 #   * Keypairs never enter git: they live outside the repo (or in an
 #     ignored path) and are seeded into target/ (gitignored) for the build.
 #   * The deployer must be funded; deploy cost ≈ rent-exempt storage of the
@@ -28,6 +49,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEVNET_DIR="$REPO_ROOT/scripts/devnet"
+MANIFEST="$DEVNET_DIR/provenance.manifest.json"
+PROV_CHECKER="$DEVNET_DIR/ns3_verify_provenance.mjs"
 cd "$REPO_ROOT"
 
 EXPECTED_SCANNER="EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"
@@ -52,22 +75,78 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Fail-closed provenance gate — shared by EVERY path below. Refuses unless
+# node can run the checker and the manifest + both ELFs verify completely.
+# No flag reaches this function's refusal: it is the last word before any
+# deploy transaction.
+verify_provenance() {
+  if ! command -v node >/dev/null; then
+    echo "REFUSING: node is not on PATH — the deployment-provenance gate cannot run." >&2
+    echo "Install Node >= 24 (the initialization step needs it anyway) and re-run." >&2
+    exit 2
+  fi
+  local extra=()
+  if [[ -n "${GRAVEYIELD_PLATFORM_TOOLS_TARBALL:-}" ]]; then
+    extra+=(--platform-tools-tarball "$GRAVEYIELD_PLATFORM_TOOLS_TARBALL")
+  fi
+  echo "== provenance gate: ns3_verify_provenance.mjs (manifest: $MANIFEST) =="
+  node "$PROV_CHECKER" --manifest "$MANIFEST" \
+    --scanner-so target/deploy/grave_scanner.so \
+    --vault-so target/deploy/grave_vault.so \
+    "${extra[@]+"${extra[@]}"}"
+}
+
+# Build-path platform-tools provenance: cargo-build-sbf must use the pinned
+# v1.54 toolchain (the one that produced the approved bytes). On a bare host
+# its 3.0.10 default is v1.51, which builds DIFFERENT bytes — refused here
+# before any compile, and the digest gate still catches the result either
+# way. GRAVEYIELD_PLATFORM_TOOLS_DIR may relocate the directory probe
+# (nonstandard HOME / CI layout); it does NOT relax the digest gate.
+require_platform_tools() {
+  local pt_version pt_dir
+  pt_version="$(node -e "const m=require('$MANIFEST'); if(m.platformTools?.version!=='v1.54')process.exit(1); process.stdout.write(m.platformTools.version)")" || {
+    echo "REFUSING: manifest platformTools.version is not the pinned v1.54 record." >&2
+    exit 1
+  }
+  pt_dir="${GRAVEYIELD_PLATFORM_TOOLS_DIR:-$HOME/.cache/solana/$pt_version/platform-tools}"
+  if [[ ! -d "$pt_dir" ]]; then
+    echo "REFUSING: platform-tools $pt_version not found at $pt_dir." >&2
+    echo "The approved ELFs are built with the pinned v1.54 toolchain; a default" >&2
+    echo "cargo-build-sbf install resolves v1.51 and produces DIFFERENT bytes." >&2
+    echo "Seed the cache from the hash-verified tarball (see docs/DEVNET.md §provenance):" >&2
+    echo "  curl -sSL -o platform-tools.tar.bz2 \\" >&2
+    echo "    https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2" >&2
+    echo "  echo fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e  platform-tools.tar.bz2 | sha256sum -c -" >&2
+    echo "  mkdir -p $pt_dir && tar xjf platform-tools.tar.bz2 -C $pt_dir" >&2
+    exit 1
+  fi
+  if [[ -x "$pt_dir/rust/bin/rustc" ]]; then
+    echo "platform-tools $pt_version present at $pt_dir ($( "$pt_dir/rust/bin/rustc" --version 2>/dev/null || echo 'rustc version unreadable' ))"
+  else
+    echo "platform-tools $pt_version present at $pt_dir"
+  fi
+}
+
 if (( BUILD_ONLY == 1 )); then
   # Build-only preparation path: no keypairs, no RPC, no transactions.
   command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
+  if ! command -v node >/dev/null; then
+    # Fail-closed (was a soft warning before the provenance gate existed):
+    # the artifacts this path produces are the CI/deployment inputs, so the
+    # provenance gate MUST be able to run over them.
+    echo "REFUSING: node is not on PATH — the deployment-provenance gate cannot run." >&2
+    echo "Install Node >= 24 and re-run (the gate verifies what CI publishes and" >&2
+    echo "what --skip-build deploys; an unverifiable build output is refused)." >&2
+    exit 2
+  fi
+  require_platform_tools
   mkdir -p target/deploy
   echo "== build-only: cargo build-sbf (scanner, vault) — no keypairs needed =="
   (cd programs/grave-scanner && cargo build-sbf --sbf-out-dir "$REPO_ROOT/target/deploy")
   (cd programs/grave-vault  && cargo build-sbf --sbf-out-dir "$REPO_ROOT/target/deploy")
-  if command -v node >/dev/null; then
-    node "$DEVNET_DIR/ns3_verify_elf.mjs" --scanner-so target/deploy/grave_scanner.so \
-      --vault-so target/deploy/grave_vault.so \
-      --scanner-id "$EXPECTED_SCANNER" --vault-id "$EXPECTED_VAULT"
-  else
-    echo "WARNING: node not on PATH — ELF embedded-ID check skipped; run" >&2
-    echo "scripts/devnet/ns3_verify_elf.mjs manually before deploying (R-1)." >&2
-  fi
-  echo "== build-only complete — ELFs in target/deploy/ (gitignored). Nothing was deployed. =="
+  verify_provenance
+  echo "== build-only complete — ELFs verified against the approved NS-3 deployment"
+  echo "   provenance in target/deploy/ (gitignored). Nothing was deployed. =="
   exit 0
 fi
 
@@ -84,7 +163,7 @@ done
 
 command -v solana >/dev/null || { echo "solana CLI not on PATH" >&2; exit 2; }
 
-echo "== [0/4] identity checks =="
+echo "== [0/5] identity checks =="
 SCANNER_ID="$(solana-keygen pubkey "$SCANNER_KP")"
 VAULT_ID="$(solana-keygen pubkey "$VAULT_KP")"
 DEPLOYER="$(solana-keygen pubkey "$DEPLOYER_KP")"
@@ -101,7 +180,7 @@ echo "scanner: $SCANNER_ID"
 echo "vault:   $VAULT_ID"
 echo "deployer: $DEPLOYER"
 
-echo "== [1/4] deployer funding =="
+echo "== [1/5] deployer funding =="
 # Lamport-exact check: digit-stripping the human SOL display mis-reads
 # decimals ("0.5" -> "05"; "5.9" -> "59" would PASS a >= 6 test).
 BAL_LAMPORTS="$(solana --url "$URL" balance --lamports "$DEPLOYER_KP" | tr -dc '0-9')"
@@ -113,7 +192,7 @@ if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
   exit 1
 fi
 
-echo "== [2/4] seed build keypairs (target/deploy, gitignored) =="
+echo "== [2/5] seed build keypairs (target/deploy, gitignored) =="
 mkdir -p target/deploy
 for pair in "grave_scanner:$SCANNER_KP:$EXPECTED_SCANNER" "grave_vault:$VAULT_KP:$EXPECTED_VAULT"; do
   name="${pair%%:*}"; rest="${pair#*:}"; kp="${rest%%:*}"; want="${rest##*:}"
@@ -131,11 +210,12 @@ for pair in "grave_scanner:$SCANNER_KP:$EXPECTED_SCANNER" "grave_vault:$VAULT_KP
   echo "seeded $dest"
 done
 
-echo "== [3/4] cargo build-sbf (scanner, vault) =="
+echo "== [3/5] cargo build-sbf (scanner, vault) =="
 if (( SKIP_BUILD == 0 )); then
   # The SBF toolchain is only required when this script builds; --skip-build
   # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
   command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
+  require_platform_tools
   # Build per package directory (the repo's canonical SBF build pattern,
   # mirroring scripts/build_fork_harness.sh): agave 3.0.10's
   # cargo-build-sbf rejects `-p` in its own parser, and cargo passthrough
@@ -144,26 +224,25 @@ if (( SKIP_BUILD == 0 )); then
   (cd programs/grave-scanner && cargo build-sbf --sbf-out-dir "$REPO_ROOT/target/deploy")
   (cd programs/grave-vault  && cargo build-sbf --sbf-out-dir "$REPO_ROOT/target/deploy")
 else
-  echo "--skip-build set: reusing existing ELFs"
+  echo "--skip-build set: reusing existing ELFs (the provenance gate below still"
+  echo "verifies their full SHA-256 against the shared manifest — reuse is NOT a bypass)"
 fi
 ls -la target/deploy/grave_scanner.so target/deploy/grave_vault.so
 
-echo "== [3b/4] ELF embedded-identity check (R-1) =="
-# The keypair gate above proves the KEYPAIR matches EXPECTED_*; this check
-# proves the ELF was BUILT from the synchronized tree (embedded declare_id!).
-# Both must hold before a deploy: a partially-synced tree otherwise deploys
-# an ELF whose runtime owner checks can never pass at its deployed address.
-if command -v node >/dev/null; then
-  node "$DEVNET_DIR/ns3_verify_elf.mjs" --scanner-so target/deploy/grave_scanner.so \
-    --vault-so target/deploy/grave_vault.so \
-    --scanner-id "$EXPECTED_SCANNER" --vault-id "$EXPECTED_VAULT"
-else
-  echo "REFUSING: node is not on PATH — the ELF embedded-ID check cannot run." >&2
-  echo "Install Node >= 24 (the initialization step needs it anyway) and re-run." >&2
-  exit 2
-fi
+echo "== [3b/5] ELF deployment-provenance gate (digest + identity + legacy + arch) =="
+# Fail-closed, on EVERY path that reaches [4/5]: normal build, --skip-build,
+# and any resume/retry re-run. Verifies SHA-256 against the shared manifest
+# (the same approved digests CI's anchor-build job publishes), structural
+# embedding of the NS-3 IDs in allocated sections, absence of legacy
+# NS-1/NS-2 ID bytes, and the SBPF v0 (e_machine 263 / e_flags 0) record.
+# The previous keypair gate proves the KEYPAIR matches EXPECTED_*; this gate
+# proves the BYTES are the approved deployment provenance. Both must hold
+# before a deploy. (The manifest consumed here is the same one CI consumes;
+# the standalone ns3_verify_elf.mjs structural check remains available and
+# is subsumed by this gate.)
+verify_provenance
 
-echo "== [4/4] solana program deploy =="
+echo "== [4/5] solana program deploy =="
 solana --url "$URL" program deploy target/deploy/grave_scanner.so \
   --program-id "$SCANNER_KP" --keypair "$DEPLOYER_KP" --output json
 solana --url "$URL" program deploy target/deploy/grave_vault.so \
@@ -188,4 +267,8 @@ node scripts/devnet/protocol_admin.mjs drill --url "$URL" --program vault \\
 node scripts/devnet/protocol_admin.mjs register-oracle --url "$URL" \\
   --authority <GOVERNANCE_KEYPAIR> --fee-payer "$DEPLOYER_KP" \\
   --activity-oracle <ACTIVITY_ORACLE_PUBKEY> --launch-price-oracle <LAUNCH_PRICE_ORACLE_PUBKEY>
+
+# Read-only acceptance verification (no keys, no transactions — safe to run
+# from any machine; RPC failures block PASS rather than faking it):
+node scripts/devnet/verify_ns3_deployment.mjs --url "$URL"
 EOF

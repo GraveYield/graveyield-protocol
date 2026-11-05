@@ -21,9 +21,9 @@
 
 ## 2. NS-2 deployment record (legacy)
 
-Executed 2026-10-25 (epoch 1191); full runbook narrative in
-[`docs/DEVNET.md`](DEVNET.md) (status line there is superseded — see its
-banner).
+Executed 2026-10-25 (epoch 1191); the full runbook narrative is preserved
+as **Appendix A (historical)** of [`docs/DEVNET.md`](DEVNET.md) — the
+DEVNET.md body itself is now the NS-3 runbook.
 
 | Item | GraveScanner | GraveVault |
 |---|---|---|
@@ -135,8 +135,8 @@ verification. They appear in:
 
 - `docs/LEGACY_DEPLOYMENTS.md` (this file),
 - `docs/DECISIONS.md` (decision records),
-- the historical sections of `docs/DEVNET.md` (the preserved NS-2
-  execution record below its supersession notice),
+- **Appendix A** of `docs/DEVNET.md` (the preserved NS-2 execution
+  record, explicitly marked historical below the NS-3 runbook body),
 - historical evidence artifacts (forensic reports, worklog entries,
   assessment records, bundles/patches of frozen commits),
 - the inert ID constants in the tree pending the NS-3 ID sync (§8).
@@ -154,7 +154,8 @@ exposed in agent output.
   `docs/DEVNET.md` with a deployment date after 2026-11-03, using
   program IDs different from every ID in this file. Until the NS-3
   entry exists, build and test against localnet
-  (`scripts/devnet/local_rehearsal.sh` / `solana-test-validator`).
+  (`scripts/devnet/local_rehearsal_ns3.sh` — the keypair-free NS-3
+  rehearsal — or `solana-test-validator`).
 - Any constant in the tree still naming `CuQZes…` / `Bd5smh…` refers to
   the LEGACY deployment. Those constants are inert placeholders pending
   the NS-3 ID sync (catalogue: `docs/DECISIONS.md` DR-001 consequence 4

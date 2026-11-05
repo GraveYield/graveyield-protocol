@@ -1,0 +1,35 @@
+{
+  "schema": "graveyield.devnet.provenance/1",
+  "policy": "FAIL-CLOSED PROVENANCE MANIFEST — the single shared copy of the approved NS-3 deployment digests. Consumed by BOTH .github/workflows/ci.yml (anchor-build provenance gate) and scripts/devnet/deploy_devnet.sh (pre-deploy gate) via scripts/devnet/ns3_verify_provenance.mjs. NEVER bump a digest to make a failing check pass: a digest change means the deployed bytes change, and it is only legitimate after the new build has been independently reviewed and deliberately re-approved in a reviewed PR (any source, dependency, toolchain, or arch change shifts the digests).",
+  "chain": "devnet",
+  "generation": "NS-3",
+  "source": "PR #82 CI provenance gate (merge a71158edba7be42a2a0195bf95c24c863090bd44); digests recorded from the deploy-flow build of the NS-3 tree (NS-3 rehearsal correction report §8)",
+  "sbpf": {
+    "arch": "v0",
+    "eMachine": 263,
+    "eFlags": 0,
+    "note": "The deployment flow (plain cargo-build-sbf, ANCHOR_BUILD_SBF_ARCH=v0) builds the default v0 target: triple sbpf-solana-solana, e_machine 263 / e_flags 0. anchor 1.2.2's own default (v3: e_machine 247 / e_flags 3) is REFUSED — the arch must match the deploy flow, not anchor's default (DR-001/NS-2)."
+  },
+  "platformTools": {
+    "version": "v1.54",
+    "tarballSha256": "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e",
+    "tarballUrl": "https://github.com/anza-xyz/platform-tools/releases/download/v1.54/platform-tools-linux-x86_64.tar.bz2",
+    "note": "Solana CLI 3.0.10's bundled platform-tools v1.51 (cargo 1.84) cannot parse edition2024 manifests, and anchor 1.2.2 passes --tools-version v1.57; CI pre-seeds every cache directory cargo-build-sbf may resolve with the hash-verified v1.54 contents. The toolchain that produced the approved ELFs is v1.54 (rustc 1.89.0-dev)."
+  },
+  "toolchain": {
+    "solanaCli": "3.0.10",
+    "anchorCli": "1.2.2"
+  },
+  "elfs": {
+    "scanner": {
+      "artifact": "grave_scanner.so",
+      "programId": "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL",
+      "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98"
+    },
+    "vault": {
+      "artifact": "grave_vault.so",
+      "programId": "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya",
+      "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83"
+    }
+  }
+}

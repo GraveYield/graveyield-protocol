@@ -294,32 +294,31 @@ jobs:
           anchor build --no-idl 2>&1 | tee /tmp/anchor-build.log
       # DR-001/NS-2 fail-closed provenance gate: the uploaded artifact IS the
       # deployment input, so CI verifies the exact bytes before publishing
-      # them. (1) The NS-3 program IDs must be structurally embedded in
-      # allocated sections and no NS-1/NS-2 legacy ID bytes may be present
-      # (the repo's structural ELF identity verifier). (2) The bytes must be
-      # BYTE-IDENTICAL to the deployment-flow build of the same tree (plain
-      # `cargo build-sbf`, arch v0, pinned v1.54 toolchain) — those digests
-      # are the recorded deployment provenance (NS-3 rehearsal correction
-      # report §8). They are byte-reproducible for a given tree:
-      # cargo-build-sbf remaps the workspace cwd prefix and the only other
-      # embedded paths are baked into the prebuilt platform-tools rlibs. ANY
-      # source, dependency, toolchain or arch change shifts the digests — the
-      # job then fails, and the new digests must be deliberately re-pinned
-      # from a deploy_devnet.sh-flow rebuild before the artifact is trusted
-      # for deployment.
+      # them. The gate now consumes the SHARED provenance manifest
+      # (scripts/devnet/provenance.manifest.json — the same single copy the
+      # deploy script's pre-deploy gate consumes, so the approved digests
+      # exist in exactly one place and CI/deploy can never drift):
+      # (1) the NS-3 program IDs must be structurally embedded in allocated
+      # sections and no NS-1/NS-2 legacy ID bytes may be present (the repo's
+      # structural ELF identity verifier, invoked by the gate), (2) the bytes
+      # must be BYTE-IDENTICAL to the deployment-flow build of the same tree
+      # (plain `cargo build-sbf`, arch v0, pinned v1.54 toolchain) — those
+      # SHA-256 digests are the recorded deployment provenance (NS-3
+      # rehearsal correction report §8), and (3) the header must match the
+      # SBPF v0 record (e_machine 263 / e_flags 0). ANY source, dependency,
+      # toolchain or arch change shifts the digests — the job then fails,
+      # and the new digests must be deliberately re-pinned in the manifest
+      # from a deploy_devnet.sh-flow rebuild after independent review before
+      # the artifact is trusted for deployment (never to make a failing
+      # check pass).
       - name: Verify ELF deployment provenance
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile --filter @graveyield/devnet-tools
-          node scripts/devnet/ns3_verify_elf.mjs \
+          node scripts/devnet/ns3_verify_provenance.mjs \
+            --manifest scripts/devnet/provenance.manifest.json \
             --scanner-so target/deploy/grave_scanner.so \
-            --vault-so target/deploy/grave_vault.so \
-            --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
-            --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
-          printf '%s\n' \
-            "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98  target/deploy/grave_scanner.so" \
-            "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83  target/deploy/grave_vault.so" \
-            | sha256sum -c -
+            --vault-so target/deploy/grave_vault.so
           sha256sum target/deploy/*.so
       - name: Upload program ELFs (deployment-provenance artifacts)
         # DR-001/NS-2: the fresh devnet deployment consumes the ELFs built by
