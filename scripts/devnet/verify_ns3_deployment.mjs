@@ -317,7 +317,9 @@ export async function runVerification(options = {}) {
   const connection = new Connection(url, commitment);
 
   // ---- context (read-only; a context failure demotes nothing by itself)
-  let context = { slot: null, epoch: null, commitment };
+  // No initial value: both the try and the catch path below assign context
+  // unconditionally, so an initializer would be a dead store.
+  let context;
   try {
     const epochInfo = await connection.getEpochInfo();
     context = {
@@ -441,7 +443,10 @@ export async function runVerification(options = {}) {
     // trust the recorded/pointed arrangement on its own).
     let pd = null;
     let derivedPd = null;
-    let pointerIsDerived = true;
+    // No initial value: the try block assigns pointerIsDerived, and the catch
+    // path continues before its first read below (an initializer would be a
+    // dead store).
+    let pointerIsDerived;
     try {
       pd = parseProgramAccount(info.data);
       derivedPd = programDataPda(p.programId);
