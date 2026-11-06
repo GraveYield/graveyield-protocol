@@ -21,10 +21,24 @@
 > `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe`, vault ProtocolConfig
 > PDA `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` (both
 > `['protocol_config']`, bump 255; reproduce with
-> `node scripts/devnet/ns3_derive_pdas.mjs`). ProgramData addresses stay
-> PENDING until they are read from the deployed program accounts — they
-> are NOT derivable offline; the acceptance verifier reads them from the
-> deployed program accounts at acceptance time.
+> `node scripts/devnet/ns3_derive_pdas.mjs`). ProgramData addresses ARE
+> derivable offline from each program ID via the upgradeable BPF loader
+> convention (`PDA([program_id], BPFLoaderUpgradeable)` — the
+> `get_program_data_address` convention; implemented as `programDataPda()`
+> in `scripts/devnet/ns3_identities.mjs` and printed as derived
+> expectations by that same script), but deriving the expected address
+> does NOT establish that the account exists. At acceptance time the
+> actual program account must still be read from the approved cluster,
+> its embedded ProgramData pointer must match the independently derived
+> address, and the ProgramData account itself must exist with the
+> expected loader ownership and valid structure and name the expected
+> upgrade authority. The deployed ELF must also be retrieved (read-only)
+> and checked against the approved SHA-256 digest pinned in
+> `scripts/devnet/provenance.manifest.json`. If a ProgramData account is
+> absent, the dependent acceptance checks FAIL. If RPC retrieval fails,
+> the dependent checks are recorded as UNVERIFIED; the overall verifier
+> result is INCOMPLETE only when no other FAIL exists. Absence is never
+> initialized around and never recorded as a pass.
 >
 > **Authority arrangement (NS-3, honest form).** The deployer pays fees
 > and is the initial upgrade authority of both programs (decoded from
