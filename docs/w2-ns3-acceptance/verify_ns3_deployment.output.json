@@ -1,0 +1,269 @@
+{
+  "tool": "verify_ns3_deployment",
+  "read_only": true,
+  "url": "https://api.devnet.solana.com",
+  "checks": [
+    {
+      "section": "G",
+      "id": "G1 devnet",
+      "title": "RPC endpoint reports the pinned Solana Devnet genesis hash",
+      "status": "PASS",
+      "detail": "genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG matches the pinned Devnet identity"
+    },
+    {
+      "section": "A",
+      "id": "A1 scanner",
+      "title": "program account exists",
+      "status": "FAIL",
+      "detail": "no account exists at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL — the NS-3 scanner program is NOT deployed on this cluster"
+    },
+    {
+      "section": "A",
+      "id": "A2 scanner",
+      "title": "program account owner is the BPF upgradeable loader",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"
+    },
+    {
+      "section": "A",
+      "id": "A3 scanner",
+      "title": "program account is executable",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"
+    },
+    {
+      "section": "A",
+      "id": "A4 scanner",
+      "title": "ProgramData account decodes from the program account pointer",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"
+    },
+    {
+      "section": "A",
+      "id": "A5 scanner",
+      "title": "upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL"
+    },
+    {
+      "section": "A",
+      "id": "A6 vault",
+      "title": "program account exists",
+      "status": "FAIL",
+      "detail": "no account exists at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya — the NS-3 vault program is NOT deployed on this cluster"
+    },
+    {
+      "section": "A",
+      "id": "A7 vault",
+      "title": "program account owner is the BPF upgradeable loader",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
+    },
+    {
+      "section": "A",
+      "id": "A8 vault",
+      "title": "program account is executable",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
+    },
+    {
+      "section": "A",
+      "id": "A9 vault",
+      "title": "ProgramData account decodes from the program account pointer",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
+    },
+    {
+      "section": "A",
+      "id": "A10 vault",
+      "title": "upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831",
+      "status": "FAIL",
+      "detail": "cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
+    },
+    {
+      "section": "B",
+      "id": "B1 scanner",
+      "title": "['protocol_config'] PDA derived independently and matches the pinned derivation",
+      "status": "PASS",
+      "detail": "derived 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe (bump 255) == pinned 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B2 scanner",
+      "title": "config account exists",
+      "status": "FAIL",
+      "detail": "scanner ProtocolConfig 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe does NOT exist — initialize has not run (or ran on a different cluster)"
+    },
+    {
+      "section": "B",
+      "id": "B3 scanner",
+      "title": "config account owner is its own program",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B4 scanner",
+      "title": "config carries the Anchor account:ProtocolConfig discriminator",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B5 scanner",
+      "title": "config decodes per the current on-chain schema",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B6 scanner",
+      "title": "config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B7 scanner",
+      "title": "config values match the approved spec defaults",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe"
+    },
+    {
+      "section": "B",
+      "id": "B8 vault",
+      "title": "['protocol_config'] PDA derived independently and matches the pinned derivation",
+      "status": "PASS",
+      "detail": "derived 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda (bump 255) == pinned 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "B",
+      "id": "B9 vault",
+      "title": "config account exists",
+      "status": "FAIL",
+      "detail": "vault ProtocolConfig 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda does NOT exist — initialize has not run (or ran on a different cluster)"
+    },
+    {
+      "section": "B",
+      "id": "B10 vault",
+      "title": "config account owner is its own program",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "B",
+      "id": "B11 vault",
+      "title": "config carries the Anchor account:ProtocolConfig discriminator",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "B",
+      "id": "B12 vault",
+      "title": "config decodes per the current on-chain schema",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "B",
+      "id": "B13 vault",
+      "title": "config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "B",
+      "id": "B14 vault",
+      "title": "config values match the approved spec defaults",
+      "status": "FAIL",
+      "detail": "cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda"
+    },
+    {
+      "section": "C",
+      "id": "C1",
+      "title": "activity oracle is the dedicated NS-3 key 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o",
+      "status": "FAIL",
+      "detail": "cannot verify — scanner ProtocolConfig did not decode"
+    },
+    {
+      "section": "C",
+      "id": "C2",
+      "title": "launch-price oracle is the dedicated NS-3 key 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee",
+      "status": "FAIL",
+      "detail": "cannot verify — scanner ProtocolConfig did not decode"
+    },
+    {
+      "section": "D",
+      "id": "D1 scanner",
+      "title": "scanner emergency state reported and unpaused",
+      "status": "FAIL",
+      "detail": "cannot verify — scanner ProtocolConfig did not decode"
+    },
+    {
+      "section": "D",
+      "id": "D2 vault",
+      "title": "vault emergency state reported and unpaused",
+      "status": "FAIL",
+      "detail": "cannot verify — vault ProtocolConfig did not decode"
+    },
+    {
+      "section": "E",
+      "id": "E NS-1 scanner",
+      "title": "legacy NS-1 scanner (5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF) residual status",
+      "status": "INFO",
+      "detail": "PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict"
+    },
+    {
+      "section": "E",
+      "id": "E NS-1 vault",
+      "title": "legacy NS-1 vault (HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6) residual status",
+      "status": "INFO",
+      "detail": "PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict"
+    },
+    {
+      "section": "E",
+      "id": "E NS-2 scanner",
+      "title": "legacy NS-2 scanner (CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54) residual status",
+      "status": "INFO",
+      "detail": "PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict"
+    },
+    {
+      "section": "E",
+      "id": "E NS-2 vault",
+      "title": "legacy NS-2 vault (Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg) residual status",
+      "status": "INFO",
+      "detail": "PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict"
+    }
+  ],
+  "overall": "FAIL",
+  "counts": {
+    "pass": 3,
+    "fail": 26,
+    "unverified": 0,
+    "info": 4
+  },
+  "context": {
+    "slot": "519266030",
+    "epoch": "1202",
+    "commitment": "finalized",
+    "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
+  },
+  "identities": {
+    "deployer": {
+      "value": "cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831",
+      "source": "pinned"
+    },
+    "governance": {
+      "value": "BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5",
+      "source": "pinned"
+    },
+    "activityOracle": {
+      "value": "2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o",
+      "source": "pinned"
+    },
+    "launchPriceOracle": {
+      "value": "97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee",
+      "source": "pinned"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "procedure": "on-chain deployed-ELF digest check (established W1 loaded-byte provenance procedure; repo helper modules; read-only getAccountInfo)",
+  "rpc_url": "https://api.devnet.solana.com",
+  "commitment": "finalized",
+  "approved_digests": {
+    "grave_scanner": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+    "grave_vault": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83"
+  },
+  "programs": {
+    "scanner": {
+      "program_id": "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL",
+      "derived_programdata_address": "FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG",
+      "program_account": "ABSENT (getAccountInfo returned null at finalized commitment)",
+      "programdata_account": "ABSENT (getAccountInfo returned null at finalized commitment)",
+      "elf_digest_check": {
+        "verdict": "UNVERIFIABLE — no deployed bytes on cluster",
+        "detail": "No ProgramData account exists at the loader-derived address, so there are no deployed ELF bytes to hash. Digest comparison against the approved pin is not possible; this category is INCOMPLETE for this program (and the parent acceptance is FAIL: program not deployed)."
+      }
+    },
+    "vault": {
+      "program_id": "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya",
+      "derived_programdata_address": "9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4",
+      "program_account": "ABSENT (getAccountInfo returned null at finalized commitment)",
+      "programdata_account": "ABSENT (getAccountInfo returned null at finalized commitment)",
+      "elf_digest_check": {
+        "verdict": "UNVERIFIABLE — no deployed bytes on cluster",
+        "detail": "No ProgramData account exists at the loader-derived address, so there are no deployed ELF bytes to hash. Digest comparison against the approved pin is not possible; this category is INCOMPLETE for this program (and the parent acceptance is FAIL: program not deployed)."
+      }
+    }
+  },
+  "timestamp_utc": "2026-11-06T10:17:37.960Z"
+}
