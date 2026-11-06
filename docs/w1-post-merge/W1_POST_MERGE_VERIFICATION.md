@@ -34,10 +34,16 @@ protocol, economics, security-boundary, or test change was made on this branch).
 
 ## 3. Toolchain and artifact provenance (Section B) — reconciliation
 
-Approved pins (from `scripts/devnet/provenance.manifest.json`, unchanged on this branch):
-Solana CLI `3.0.10`, Anchor CLI `1.2.2`, SBPF v0, platform-tools `v1.54`
-(archive sha256 `fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e`),
-embedded SBF rustc `1.89.0-dev`.
+Approved pins recorded in `scripts/devnet/provenance.manifest.json` (unchanged on this
+branch): Solana CLI `3.0.10`, SBPF v0, platform-tools `v1.54`
+(archive sha256 `fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e`) and
+the approved Scanner/Vault ELF digests. The manifest does not carry the Anchor CLI
+version or the embedded rustc version as standalone fields; those two values are
+attributed from their direct evidence sources:
+
+- Anchor CLI `1.2.2` — from the `scripts/check-toolchain.sh` output recorded in §3.1.
+- embedded SBF rustc `1.89.0-dev` — from the toolchain information embedded in the
+  SHA-256-pinned platform-tools v1.54 archive (inspection recorded in §3.2).
 
 ### 3.1 What was measured in this W1.1 run
 
@@ -144,7 +150,12 @@ rounding remainder); legs sum exactly to the total; stage-13 monitor verdict thi
 None. Every one of the 14 adversarial cases carries a `zero_movement` object with
 `proved: true` plus per-check fields (`accounts_unchanged`, `sol_unchanged`,
 `tokens_unchanged`, `pdas_absent`, `fee_ok`, fee deltas) and the rejected transaction id +
-slot + logs tail in the JSON artifact.
+slot in the JSON artifact. Logs tails are recorded when available: 13 of the 14 cases
+carry a populated `logs_tail`, and A2's is empty — valid evidence, not missing evidence,
+because the A2 failure occurs at instruction 0 (the signature-verification precompile
+errors before the program is ever invoked, so no program logs are emitted). An empty
+logs tail therefore does not indicate missing transaction evidence or a failed
+adversarial test; the transaction id and slot are present for every case.
 
 ### Deviations from the original W1 run
 
