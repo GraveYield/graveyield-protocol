@@ -83,14 +83,24 @@ export function validateSbfElfHeader(buf) {
  * ELF spec). Returns [{ name, type, flags, offset, size }] and THROWS on
  * any structural problem (no section table, bad entry size, out-of-range
  * offsets/indices) — the caller fails closed on parse errors.
+ *
+ * EXTENDED SECTION NUMBERING (ELF spec §1.7 / System V ABI): when the
+ * file declares e_shnum = 0 (with e_shoff != 0), the real section count
+ * lives in sh_size of section header 0; when e_shstrndx = SHN_XINDEX
+ * (0xffff), the real string-table index lives in sh_link of section
+ * header 0. Both are resolved here — the SAME rule every other reader in
+ * this repository applies — so a section table is either fully supported
+ * across the full verification path (span derivation, structural
+ * identity, provenance) or explicitly refused; there is no partial
+ * support.
  */
 export function parseElf64Sections(buf) {
   validateSbfElfHeader(buf);
   const eShoff = Number(buf.readBigUInt64LE(40));
   const eShentsize = buf.readUInt16LE(58);
-  const eShnum = buf.readUInt16LE(60);
-  const eShstrndx = buf.readUInt16LE(62);
-  if (eShoff === 0 || eShnum === 0) {
+  const eShnumRaw = buf.readUInt16LE(60);
+  const eShstrndxRaw = buf.readUInt16LE(62);
+  if (eShoff === 0) {
     throw new Error("no section header table (stripped) — structural identity check impossible");
   }
   if (eShentsize !== 64) {
@@ -98,16 +108,40 @@ export function parseElf64Sections(buf) {
       `unexpected section header entry size ${eShentsize} (ELF64 fixed layout is 64)`,
     );
   }
-  const need = eShoff + eShnum * eShentsize;
+  // Extended numbering: e_shnum = 0 ⇒ real count in sh_size of SH0;
+  // e_shstrndx = SHN_XINDEX ⇒ real index in sh_link of SH0. Both reads
+  // require section header 0 itself to be in range.
+  const readSh0Field = (byteOffset, reader, what) => {
+    if (buf.length < eShoff + 64) {
+      throw new Error(
+        `section header table out of range (e_shoff=${eShoff}, extended ${what} unreadable, file=${buf.length} B)`,
+      );
+    }
+    return reader.call(buf, eShoff + byteOffset);
+  };
+  let shnum = eShnumRaw;
+  let shstrndx = eShstrndxRaw;
+  if (shnum === 0) {
+    shnum = readSh0Field(32, buf.readBigUInt64LE, "section count");
+    if (shnum === 0n) {
+      throw new Error("e_shnum = 0 with a zero extended section count — malformed section table");
+    }
+    if (shnum > 0xffffn) {
+      throw new Error(`extended section count ${shnum} exceeds the ELF64 u16 section-index space`);
+    }
+    shnum = Number(shnum);
+  }
+  if (shstrndx === 0xffff) {
+    shstrndx = readSh0Field(40, buf.readBigUInt32LE, "string table index");
+  }
+  const need = eShoff + shnum * eShentsize;
   if (buf.length < need) {
     throw new Error(
-      `section header table out of range (e_shoff=${eShoff}, e_shnum=${eShnum}, file=${buf.length} B)`,
+      `section header table out of range (e_shoff=${eShoff}, e_shnum=${shnum}, file=${buf.length} B)`,
     );
   }
-  if (eShstrndx >= eShnum) {
-    throw new Error(
-      `section name string table index ${eShstrndx} out of range (e_shnum=${eShnum})`,
-    );
+  if (shstrndx >= shnum) {
+    throw new Error(`section name string table index ${shstrndx} out of range (e_shnum=${shnum})`);
   }
   const readSh = (i) => {
     const base = eShoff + i * eShentsize;
@@ -120,9 +154,9 @@ export function parseElf64Sections(buf) {
     };
   };
   const raw = [];
-  for (let i = 0; i < eShnum; i++) raw.push(readSh(i));
+  for (let i = 0; i < shnum; i++) raw.push(readSh(i));
   // Names come from the linked string table.
-  const strtab = raw[eShstrndx];
+  const strtab = raw[shstrndx];
   if (strtab.offset + strtab.size > buf.length) {
     throw new Error("section name string table out of range");
   }

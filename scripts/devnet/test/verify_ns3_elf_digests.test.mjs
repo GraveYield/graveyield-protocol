@@ -15,6 +15,20 @@
 // What the suite pins (mapped to the required coverage list):
 //   ✔ correct Scanner / Vault program + ProgramData accounts → overall PASS
 //   ✔ metadata parsing, payload extraction, 45/13 B structural boundary
+//   ✔ ELF byte span = MAX structure-implied extent (SHT end ∪ section
+//     extents ∪ program-header extents) — adversarial ELFs with section
+//     content or segments beyond the section header table are hashed IN
+//     FULL (never truncated by a table-position assumption); undeclared
+//     tails must be all-zero loader padding; every undeterminable or
+//     out-of-range structure fails closed before anything is hashed
+//   ✔ extended section numbering (e_shnum=0 / SHN_XINDEX / PN_XNUM) is
+//     supported on the FULL path (span + identity + digest) — one rule,
+//     JSON and human output agree
+//   ✔ structure_valid reflects the stages that ACTUALLY ran (no
+//     contradictory fields on any evidence path — regression battery)
+//   ✔ genesis gate order: failed genesis SHORT-CIRCUITS the run (the RPC
+//     call history — not just the classification — pins that not one
+//     getAccountInfo is issued); foreign genesis is a deterministic FAIL
 //   ✔ successful Scanner and Vault digest matches (observed == pin)
 //   ✖ digest mismatch → FAIL with observed vs expected
 //   ✖ missing program account / missing ProgramData → FAIL (never a
@@ -44,10 +58,11 @@ import { BPF_LOADER_UPGRADEABLE, DEVNET_GENESIS_HASH } from "../verify_ns3_deplo
 import {
   PROGRAMDATA_METADATA_LEN,
   TOOL_NAME,
-  elfDeclaredSize,
+  elfDeclaredSpan,
   extractElfPayload,
   runElfDigestVerification,
 } from "../verify_ns3_elf_digests.mjs";
+import { parseElf64Sections } from "../ns3_verify_elf.mjs";
 import { DEFAULT_MANIFEST_PATH, loadProvenanceManifest } from "../ns3_check_provenance.mjs";
 import { NS3, programDataPda } from "../ns3_identities.mjs";
 import {
@@ -104,6 +119,134 @@ function programDataWithoutAuthority(elf) {
     encodeProgramDataAccount({ slot: BigInt(SLOT), authority: null }).subarray(0, 13),
     elf,
   ]);
+}
+
+// ------------------------------------------------- adversarial ELF builders
+//
+// These builders exist to prove the hash-span methodology against layouts
+// a section-header-table-position assumption gets WRONG:
+//   * a section whose CONTENT lives AFTER the section header table (a
+//     valid ELF — linkers may append; an "SHT end = ELF end" rule would
+//     truncate or refuse it);
+//   * a program header whose extent covers bytes beyond the SHT end;
+//   * extended section numbering (e_shnum = 0, real count in SH0.sh_size)
+//     and the PN_XNUM program-count escape (real count in SH0.sh_info).
+// The whole-file SHA-256 is pinned in the injected manifest exactly the
+// way real build artifacts are pinned — the approved-digest comparison is
+// never weakened to let a synthetic layout pass.
+
+const SHT_PROGBITS = 1;
+const SHT_STRTAB = 3;
+const SHF_ALLOC = 0x2;
+const SHF_EXECINSTR = 0x4;
+const PT_LOAD = 1;
+const PHENTSIZE = 56;
+
+/**
+ * Build an ELF64 with full layout control. opts:
+ *   idBase58        — program ID bytes embedded in the allocated .text
+ *   eMachine/eFlags — ELF header identity (default SBPF v0: 263 / 0)
+ *   tailSection     — { type, flags, data }: a section whose CONTENT is
+ *                     written AFTER the section header table
+ *   programHeader   — { offset, filesz }: one PT_LOAD program header
+ *   extendedShnum   — e_shnum = 0; real count in SH0.sh_size
+ *   extendedPhnum   — e_phnum = PN_XNUM; real count in SH0.sh_info
+ *   extraZeroTail   — zero bytes appended beyond every declared structure
+ */
+function buildLayoutedElf({
+  idBase58,
+  eMachine = 263,
+  eFlags = 0,
+  tailSection = null,
+  programHeader = null,
+  extendedShnum = false,
+  extendedPhnum = false,
+  extraZeroTail = 0,
+}) {
+  const idBytes = Buffer.from(new PublicKey(idBase58).toBytes());
+  const textData = Buffer.concat([Buffer.alloc(64, 0), idBytes, Buffer.alloc(32, 0)]);
+  const strtab = Buffer.from("\0.text\0.shstrtab\0.tail\0", "utf8");
+
+  const hasPhdr = programHeader !== null || extendedPhnum;
+  const ehsz = 64;
+  const phoff = hasPhdr ? ehsz : 0;
+  const textOff = hasPhdr ? ehsz + PHENTSIZE : ehsz;
+  const shentsz = 64;
+  const shnum = 4; // NULL, .text, .shstrtab, .tail
+  const strtabOff = textOff + textData.length;
+  const shoff = strtabOff + strtab.length;
+  const tailOff = shoff + shnum * shentsz; // AFTER the section header table
+  const tailData = tailSection ? tailSection.data : null;
+  const total = tailOff + (tailData ? tailData.length : 0) + extraZeroTail;
+
+  const buf = Buffer.alloc(total);
+  // ---- ELF header
+  buf[0] = 0x7f;
+  buf[1] = 0x45;
+  buf[2] = 0x4c;
+  buf[3] = 0x46;
+  buf[4] = 2; // EI_CLASS ELFCLASS64
+  buf[5] = 1; // EI_DATA LSB
+  buf[6] = 1; // EI_VERSION
+  buf.writeUInt16LE(2, 16); // e_type EXEC
+  buf.writeUInt16LE(eMachine, 18);
+  buf.writeUInt32LE(1, 20); // e_version
+  buf.writeBigUInt64LE(0x1000n, 24); // e_entry
+  buf.writeBigUInt64LE(BigInt(phoff), 32); // e_phoff
+  buf.writeUInt32LE(eFlags, 36);
+  buf.writeBigUInt64LE(BigInt(shoff), 40); // e_shoff
+  buf.writeUInt16LE(ehsz, 52); // e_ehsize
+  buf.writeUInt16LE(hasPhdr ? PHENTSIZE : 0, 54); // e_phentsize
+  buf.writeUInt16LE(extendedPhnum ? 0xffff : hasPhdr ? 1 : 0, 56); // e_phnum
+  buf.writeUInt16LE(shentsz, 58);
+  buf.writeUInt16LE(extendedShnum ? 0 : shnum, 60); // e_shnum
+  buf.writeUInt16LE(2, 62); // e_shstrndx → .shstrtab
+
+  if (tailData) tailData.copy(buf, tailOff);
+  textData.copy(buf, textOff);
+  strtab.copy(buf, strtabOff);
+  if (hasPhdr) {
+    buf.writeUInt32LE(PT_LOAD, phoff); // p_type
+    buf.writeUInt32LE(5, phoff + 4); // p_flags R+X
+    buf.writeBigUInt64LE(BigInt(programHeader?.offset ?? textOff), phoff + 8); // p_offset
+    buf.writeBigUInt64LE(BigInt(programHeader?.filesz ?? total - textOff), phoff + 32); // p_filesz
+  }
+
+  // ---- section headers (SH0 doubles as the extended-numbering carrier)
+  const offs = { 1: textOff, 2: strtabOff, 3: tailOff };
+  const nameOffs = { 1: 1, 2: 7, 3: 17 }; // .text / .shstrtab / .tail
+  for (let i = 0; i < shnum; i++) {
+    const base = shoff + i * shentsz;
+    if (i === 0) {
+      if (extendedShnum) buf.writeBigUInt64LE(BigInt(shnum), base + 32); // sh_size
+      if (extendedPhnum) buf.writeUInt32LE(1, base + 44); // sh_info
+      continue;
+    }
+    buf.writeUInt32LE(nameOffs[i], base);
+    if (i === 1) {
+      buf.writeUInt32LE(SHT_PROGBITS, base + 4);
+      buf.writeBigUInt64LE(BigInt(SHF_ALLOC | SHF_EXECINSTR), base + 8);
+    } else if (i === 2) {
+      buf.writeUInt32LE(SHT_STRTAB, base + 4);
+    } else if (i === 3 && tailSection) {
+      buf.writeUInt32LE(tailSection.type, base + 4);
+      buf.writeBigUInt64LE(BigInt(tailSection.flags ?? 0), base + 8);
+    }
+    buf.writeBigUInt64LE(BigInt(offs[i] ?? 0), base + 24); // sh_offset
+    buf.writeBigUInt64LE(
+      BigInt(
+        i === 1
+          ? textData.length
+          : i === 2
+            ? strtab.length
+            : i === 3 && tailSection
+              ? tailData.length
+              : 0,
+      ),
+      base + 32,
+    ); // sh_size
+  }
+  return buf;
 }
 
 /** The legacy bincode layout (u32 authority tag → 48 B metadata) + ELF. */
@@ -212,6 +355,7 @@ function handleRpc(req, state) {
 
 /** Start the mock RPC, run fn(url), then clean up server + temp manifest. */
 async function withVerification(state, fn) {
+  state.rpcCalls = []; // every request that REACHES the endpoint, in order
   const { manifestPath, cleanup } = writeTempManifest({
     scannerSha: state.fixtureDigests.scanner,
     vaultSha: state.fixtureDigests.vault,
@@ -220,20 +364,6 @@ async function withVerification(state, fn) {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
-      if (state.failWhere) {
-        let payload;
-        try {
-          payload = JSON.parse(body || "{}");
-        } catch {
-          res.destroy();
-          return;
-        }
-        const batch = Array.isArray(payload) ? payload : [payload];
-        if (batch.some((r) => state.failWhere(r.method, r.params))) {
-          res.destroy(); // transport failure for the matching request ONLY
-          return;
-        }
-      }
       let payload;
       try {
         payload = JSON.parse(body || "{}");
@@ -242,6 +372,15 @@ async function withVerification(state, fn) {
         return;
       }
       const batch = Array.isArray(payload) ? payload : [payload];
+      // RPC CALL HISTORY: every arriving request is recorded (method +
+      // params) in arrival order — including requests the harness then
+      // destroys. The genesis-gate tests assert on this history (the
+      // actual call sequence), not just on the final classification.
+      for (const r of batch) state.rpcCalls.push({ method: r.method, params: r.params });
+      if (state.failWhere && batch.some((r) => state.failWhere(r.method, r.params))) {
+        res.destroy(); // transport failure for the matching request ONLY
+        return;
+      }
       const results = batch.map((r) => handleRpc(r, state));
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(Array.isArray(payload) ? results : results[0]));
@@ -286,6 +425,50 @@ async function runCli(url, args = []) {
 }
 
 const checkOf = (result, idPrefix) => result.checks.filter((c) => c.id.startsWith(idPrefix));
+
+/**
+ * Regression invariants (Finding: structure_valid must reflect the stages
+ * that ACTUALLY ran — the field may never contradict the evidence).
+ * Applied to every program report on every evidence path in test 21z.
+ */
+function assertNoFieldContradictions(p, scenario) {
+  const e = p.elf;
+  const ctx = `[${scenario}] ${p.label}`;
+  if (e.structure_valid === true) {
+    // Every structural stage ran and passed:
+    assert.equal(e.extraction, "OK", ctx);
+    assert.notEqual(e.declared_elf_size, null, ctx);
+    assert.notEqual(e.span_basis, null, ctx);
+    assert.equal(e.sbpf_valid, true, ctx);
+    assert.notEqual(e.observed_sha256, null, ctx); // digest computed over the established span
+    assert.notEqual(e.identity_verdict, null, ctx);
+    assert.notEqual(e.identity_verdict, "unparseable", ctx); // section table WAS validated
+  }
+  if (e.structure_valid === false) {
+    // The ELF bytes existed and were assessed; at least one structural
+    // stage failed — the architecture stage can not have passed.
+    assert.equal(e.extraction, "OK", ctx);
+    assert.notEqual(e.sbpf_valid, true, ctx);
+  }
+  if (e.observed_sha256 !== null) {
+    // Hashing implies an established span (never a guessed boundary):
+    assert.equal(e.extraction, "OK", ctx);
+    assert.notEqual(e.declared_elf_size, null, ctx);
+    assert.notEqual(e.span_basis, null, ctx);
+    assert.notEqual(e.structure_valid, null, ctx); // structure was judged true or false
+  }
+  if (e.digest_match !== null) {
+    assert.notEqual(e.observed_sha256, null, ctx);
+  }
+  if (e.digest_match === true) {
+    assert.equal(e.observed_sha256, e.expected_sha256, ctx);
+  }
+  if (e.extraction !== "OK") {
+    // No ELF bytes were ever assessed — structure must never be judged.
+    assert.equal(e.structure_valid, null, ctx);
+    assert.equal(e.observed_sha256, null, ctx);
+  }
+}
 
 // -------------------------------------------------------------- suites
 
@@ -344,28 +527,107 @@ describe("ELF payload extraction (structural boundary, never a blind offset)", (
   });
 });
 
-describe("ELF declared size (hash span from the ELF's own structure)", () => {
-  test("exact fit: declared size == payload length for a well-formed ELF", () => {
+describe("ELF byte span (max structure-implied extent — never a SHT-position assumption)", () => {
+  test("exact fit: span == payload length for a well-formed ELF; basis names the SHT end", () => {
     const elf = goodElf(NS3.scannerProgramId);
-    assert.equal(elfDeclaredSize(elf), elf.length);
+    const s = elfDeclaredSpan(elf);
+    assert.equal(s.span, elf.length);
+    assert.equal(s.shtEnd, elf.length);
+    assert.equal(s.basis, "section header table end");
+    assert.equal(s.extendedSectionNumbering, false);
   });
 
-  test("zero loader padding beyond the declared ELF end is tolerated (span excludes it)", () => {
+  test("zero loader padding beyond the span is tolerated (span excludes it)", () => {
     const elf = goodElf(NS3.vaultProgramId);
     const padded = Buffer.concat([elf, Buffer.alloc(512, 0)]);
-    assert.equal(elfDeclaredSize(padded), elf.length);
+    const s = elfDeclaredSpan(padded);
+    assert.equal(s.span, elf.length); // the padding stays OUTSIDE the span
+    assert.ok(s.sectionMax <= s.span);
   });
 
-  test("truncated payload (declared size beyond available bytes) → FAILS CLOSED", () => {
+  test("ADVERSARIAL: section content beyond the SHT end is INSIDE the span — never truncated by a table-position assumption", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      tailSection: {
+        type: SHT_PROGBITS,
+        flags: 0,
+        data: Buffer.from("section content placed AFTER the section header table", "utf8"),
+      },
+    });
+    const s = elfDeclaredSpan(elf);
+    assert.ok(s.sectionMax > s.shtEnd); // the tail section lives beyond the SHT
+    assert.equal(s.span, elf.length); // the span covers the WHOLE file
+    assert.match(s.basis, /section extents/);
+    // The identity gate parses the SAME layout (same parse, full-path
+    // agreement — Option A: no partial extended/odd-layout support).
+    assert.equal(parseElf64Sections(elf).length, 4);
+  });
+
+  test("ADVERSARIAL: a program header extent beyond the SHT end sets the span", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      extraZeroTail: 128,
+      programHeader: { offset: 64, filesz: Number.MAX_SAFE_INTEGER }, // fixed below to the full file
+    });
+    const ePhoff = Number(elf.readBigUInt64LE(32));
+    elf.writeBigUInt64LE(BigInt(elf.length - 64), ePhoff + 32); // p_filesz covers to EOF
+    const s = elfDeclaredSpan(elf);
+    assert.ok(s.segmentMax > s.shtEnd);
+    assert.equal(s.span, elf.length);
+    assert.match(s.basis, /program header extents/);
+  });
+
+  test("extended section numbering (e_shnum=0, real count in SH0.sh_size) — SAME rule as the identity gate", () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShnum: true });
+    assert.equal(parseElf64Sections(elf).length, 4); // identity path parses it
+    const s = elfDeclaredSpan(elf);
+    assert.equal(s.extendedSectionNumbering, true);
+    assert.equal(s.span, elf.length);
+    assert.equal(s.shtEnd, elf.length); // real count resolved → correct table end
+    assert.match(s.basis, /extended numbering/);
+  });
+
+  test("PN_XNUM (e_phnum=0xffff, real count in SH0.sh_info) — program-header extents resolved", () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedPhnum: true });
+    const s = elfDeclaredSpan(elf);
+    assert.equal(s.extendedProgramHeaderCount, true);
+    assert.equal(s.span, elf.length);
+    assert.match(s.basis, /program header extents/);
+  });
+
+  test("truncated payload (span beyond available bytes) → FAILS CLOSED", () => {
     const elf = goodElf(NS3.scannerProgramId);
     const cut = elf.subarray(0, elf.length - 40);
-    assert.throws(() => elfDeclaredSize(cut), /truncated payload/);
+    assert.throws(() => elfDeclaredSpan(cut), /truncated payload/);
   });
 
   test("stripped section table (e_shoff=0) → span undeterminable → FAILS CLOSED", () => {
     const elf = goodElf(NS3.scannerProgramId);
     elf.writeBigUInt64LE(0n, 40);
-    assert.throws(() => elfDeclaredSize(elf), /section header table/);
+    assert.throws(() => elfDeclaredSpan(elf), /section header table/);
+  });
+
+  test("header not a valid 64-bit LSB SBF ELF (e_machine 99) → FAILS CLOSED before any extent is read", () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, eMachine: 99 });
+    assert.throws(() => elfDeclaredSpan(elf), /e_machine 99 not in/);
+  });
+
+  test("section extent beyond the payload → FAILS CLOSED (truncated account)", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(64, 7) },
+    });
+    const shoff = Number(elf.readBigUInt64LE(40));
+    elf.writeBigUInt64LE(BigInt(elf.length + 4096), shoff + 3 * 64 + 32); // .tail size beyond EOF
+    assert.throws(() => elfDeclaredSpan(elf), /out of range|beyond the payload/);
+  });
+
+  test("program header extent beyond the payload → FAILS CLOSED", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      programHeader: { offset: 64, filesz: 10_000_000 },
+    });
+    assert.throws(() => elfDeclaredSpan(elf), /extends beyond the payload/);
   });
 });
 
@@ -417,9 +679,19 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(vault.elf.observed_sha256, state.fixtureDigests.vault);
     assert.equal(scanner.elf.expected_sha256, state.fixtureDigests.scanner);
     assert.equal(vault.elf.expected_sha256, state.fixtureDigests.vault);
+    assert.equal(scanner.elf.span_basis, "section header table end");
+    assert.equal(vault.elf.span_basis, "section header table end");
     // Every check ran and passed: 1 genesis + 13 per program.
     assert.equal(r.checks.length, 27);
     assert.equal(r.counts.pass, 27);
+    // RPC call history: the genesis gate ran BEFORE any account fetch, and
+    // exactly the four distinct accounts were fetched (cache dedupes).
+    const genesisIdx = state.rpcCalls.findIndex((c) => c.method === "getGenesisHash");
+    assert.ok(genesisIdx !== -1);
+    const firstAccount = state.rpcCalls.findIndex((c) => c.method === "getAccountInfo");
+    assert.ok(firstAccount === -1 || firstAccount > genesisIdx);
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getGenesisHash").length, 1);
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getAccountInfo").length, 4);
   });
 
   test("2. digest mismatch (on-chain bytes differ from the manifest pin) → FAIL with observed vs expected", async () => {
@@ -647,15 +919,26 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(r.programs[0].elf.sbpf_valid, false);
     // The digest itself matched the (test) pin — the ARCH gate is independent:
     assert.equal(r.programs[0].elf.digest_match, true);
+    // The arch stage is one of the structural stages: with the v0
+    // requirement failed, structure_valid=false even though the ELF was
+    // extracted, hashed, and its section table parsed fine.
+    assert.equal(r.programs[0].elf.structure_valid, false);
+    assert.equal(r.programs[0].elf.observed_sha256 !== null, true);
   });
 
-  test("15. RPC transport failure (all requests destroyed) → every check UNVERIFIED, overall INCOMPLETE", async () => {
-    const state = fullState({ failWhere: () => true });
+  test("15. RPC transport failure on EVERY account request (genesis intact) → every program check UNVERIFIED, overall INCOMPLETE", async () => {
+    // NOTE: a FULL transport failure (genesis included) short-circuits at
+    // the cluster-identity gate — that ordering is pinned by test 19.
+    // This scenario keeps the genesis gate alive and destroys every
+    // account fetch, so the UNVERIFIED cascade across all program checks
+    // is what is under test.
+    const state = fullState({ failWhere: (method) => method !== "getGenesisHash" });
     const r = await run(state);
     assert.equal(r.overall, "INCOMPLETE");
-    assert.equal(r.counts.unverified, 27);
+    assert.equal(r.counts.unverified, 26); // 13 per program — genesis PASSED
     assert.equal(r.counts.fail, 0);
     for (const c of r.checks) {
+      if (c.id === "G1 devnet") continue; // the genesis gate itself succeeded
       assert.equal(c.status, "UNVERIFIED", `${c.id} should be UNVERIFIED on transport failure`);
       assert.match(c.detail, /RPC failure|RPC transport/);
     }
@@ -696,7 +979,7 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(checkOf(r, "C3 scanner")[0].status, "UNVERIFIED");
   });
 
-  test("18. genesis mismatch → immediate FAIL; no deployed bytes are interpreted", async () => {
+  test("18. genesis mismatch → immediate FAIL; no deployed bytes are interpreted (RPC call history pinned)", async () => {
     const state = fullState({ genesisHash: "Testwa1v1qqeHqS1rSMHEquSQZ8hk4XCvL4xJLbBNo" });
     const r = await run(state);
     assert.equal(r.overall, "FAIL");
@@ -706,15 +989,37 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.match(r.checks[0].detail, /NOT the approved cluster/);
     assert.equal(r.programs[0].program_account.exists, null);
     assert.equal(r.programs[0].elf.digest_match, null);
+    // RPC CALL HISTORY: a foreign cluster is refused deterministically —
+    // the endpoint never received a single getAccountInfo call.
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getAccountInfo").length, 0);
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getGenesisHash").length, 1);
   });
 
-  test("19. genesis RPC failure → UNVERIFIED cluster identity → overall INCOMPLETE", async () => {
+  test("19. genesis RPC failure → UNVERIFIED cluster identity → SHORT-CIRCUIT: not one account is fetched, overall INCOMPLETE", async () => {
     const state = fullState({ failWhere: (method) => method === "getGenesisHash" });
     const r = await run(state);
     assert.equal(r.overall, "INCOMPLETE");
+    assert.equal(r.counts.fail, 0);
+    assert.equal(r.counts.unverified, 1);
+    assert.equal(r.checks.length, 1); // ONLY the cluster-identity check exists
     const g1 = checkOf(r, "G1 devnet");
     assert.equal(g1[0].status, "UNVERIFIED");
     assert.match(g1[0].detail, /cluster identity could NOT be established/);
+    // RPC CALL HISTORY (the actual call sequence, not just the final
+    // classification): the genesis request arrived and failed, and the
+    // endpoint received NO getAccountInfo call at all — deployed bytes
+    // are never fetched or interpreted on a cluster whose identity
+    // could not be established.
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getGenesisHash").length, 1);
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getAccountInfo").length, 0);
+    for (const p of r.programs) {
+      assert.equal(p.program_account.exists, null); // NOT false — nothing was fetched
+      assert.equal(p.programdata.exists, null);
+      assert.equal(p.elf.extraction, "UNVERIFIED");
+      assert.equal(p.elf.observed_sha256, null);
+      assert.equal(p.elf.digest_match, null);
+      assert.equal(p.elf.structure_valid, null); // no ELF bytes were ever assessed
+    }
   });
 
   test("20. zero loader padding beyond the declared ELF end is tolerated and excluded from the digest", async () => {
@@ -732,6 +1037,7 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(scanner.elf.declared_elf_size, elf.length);
     assert.equal(scanner.elf.payload_size, elf.length + 1024);
     assert.equal(scanner.elf.observed_sha256, sha256(elf)); // padding NOT hashed
+    assert.equal(scanner.elf.structure_valid, true); // all structural stages passed
     assert.match(checkOf(r, "C2 scanner")[0].detail, /padding excluded from the digest/);
   });
 
@@ -749,6 +1055,283 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(c2[0].status, "FAIL");
     assert.match(c2[0].detail, /NOT all zero/);
     assert.equal(r.programs[0].elf.digest_match, null);
+    // The tail adjudication is a structural stage: it failed → structure_valid=false.
+    assert.equal(r.programs[0].elf.structure_valid, false);
+  });
+
+  test("21a. ADVERSARIAL: section content beyond the section header table is hashed IN FULL — the whole-file pin matches (no truncation, no weakened comparison)", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      tailSection: {
+        type: SHT_PROGBITS,
+        flags: 0,
+        data: Buffer.from("NS3 tail section content placed AFTER the SHT end", "utf8"),
+      },
+    });
+    // Sanity: the SHT-end rule would truncate here; the max-extent rule covers the file.
+    const spanInfo = elfDeclaredSpan(elf);
+    assert.ok(spanInfo.shtEnd < elf.length);
+    assert.equal(spanInfo.span, elf.length);
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf); // pin = WHOLE-FILE digest, exactly how real artifacts are pinned
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.declared_elf_size, elf.length);
+    assert.equal(scanner.elf.trailing_padding_bytes, 0);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf)); // full file hashed
+    assert.equal(scanner.elf.digest_match, true);
+    assert.equal(scanner.elf.identity_verdict, "structural"); // the identity gate parsed the same layout
+    assert.equal(scanner.elf.structure_valid, true);
+  });
+
+  test("21b. ADVERSARIAL: all-zero section content beyond the SHT end is ELF-DECLARED content — INCLUDED in the digest (the old SHT-end rule silently truncated it)", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(512, 0) },
+    });
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf); // whole-file pin (zeros included)
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    // Contrast with test 20: those zeros are a DECLARED section, so the
+    // span INCLUDES them (trailing_padding_bytes=0) and the whole-file
+    // digest matches. Undeclared zero tails stay excluded (test 20).
+    assert.equal(scanner.elf.trailing_padding_bytes, 0);
+    assert.equal(scanner.elf.declared_elf_size, elf.length);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf));
+    assert.equal(scanner.elf.digest_match, true);
+    assert.match(scanner.elf.span_basis, /section extents/);
+  });
+
+  test("21c. ADVERSARIAL: a program header extent beyond the SHT end sets the span — hashed in full", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      extraZeroTail: 128, // payload extends beyond the SHT (undeclared by any section)
+      programHeader: { offset: 64, filesz: 0 },
+    });
+    const ePhoff = Number(elf.readBigUInt64LE(32));
+    // Extend the segment to cover the whole file (beyond the SHT end): the
+    // program header DECLARES those bytes as loaded content.
+    elf.writeBigUInt64LE(BigInt(elf.length - 64), ePhoff + 32);
+    const spanInfo = elfDeclaredSpan(elf);
+    assert.ok(spanInfo.segmentMax > spanInfo.shtEnd);
+    assert.equal(spanInfo.span, elf.length);
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf);
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    assert.equal(r.programs[0].elf.observed_sha256, sha256(elf));
+    assert.match(r.programs[0].elf.span_basis, /program header extents/);
+  });
+
+  test("21d. extended section numbering (e_shnum=0) verifies END-TO-END — span, identity and digest agree; JSON + human output report it identically", async () => {
+    const state = fullState({
+      scannerElf: buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShnum: true }),
+    });
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShnum: true });
+    // Full-path consistency (Finding: no partial extended-numbering support):
+    // the SAME parse serves the identity gate and the span derivation.
+    assert.equal(parseElf64Sections(elf).length, 4);
+    state.fixtureDigests.scanner = sha256(elf);
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.declared_elf_size, elf.length);
+    assert.match(scanner.elf.span_basis, /extended numbering/);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf));
+    assert.equal(scanner.elf.digest_match, true);
+    assert.equal(scanner.elf.identity_verdict, "structural");
+    assert.equal(scanner.elf.structure_valid, true);
+  });
+
+  test("21e. PN_XNUM program-count escape (e_phnum=0xffff, real count in SH0.sh_info) — end-to-end", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedPhnum: true });
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf);
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    assert.equal(r.programs[0].elf.observed_sha256, sha256(elf));
+    assert.equal(r.programs[0].elf.digest_match, true);
+    assert.match(r.programs[0].elf.span_basis, /program header extents/);
+  });
+
+  test("21f. section extent beyond the PAYLOAD → span FAILS CLOSED, nothing hashed, structure_valid=false", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(64, 7) },
+    });
+    const shoff = Number(elf.readBigUInt64LE(40));
+    elf.writeBigUInt64LE(BigInt(elf.length + 4096), shoff + 3 * 64 + 32); // .tail claims bytes the account does not hold
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf);
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const c2 = checkOf(r, "C2 scanner");
+    assert.equal(c2[0].status, "FAIL");
+    assert.match(c2[0].detail, /out of range|beyond the payload/);
+    assert.equal(r.programs[0].elf.observed_sha256, null); // refused to hash
+    assert.equal(r.programs[0].elf.digest_match, null);
+    assert.equal(r.programs[0].elf.structure_valid, false);
+  });
+
+  test("21g. ELF header invalid (e_machine 99) → header validation FAILS CLOSED before any extent is read", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, eMachine: 99 });
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf);
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const c2 = checkOf(r, "C2 scanner");
+    assert.equal(c2[0].status, "FAIL");
+    assert.match(c2[0].detail, /e_machine 99 not in/);
+    assert.equal(r.programs[0].elf.observed_sha256, null);
+    assert.equal(r.programs[0].elf.structure_valid, false);
+  });
+
+  test("21z. regression: structure_valid never contradicts the evidence — the invariants hold on EVERY evidence path", async () => {
+    const scenarios = [
+      ["all-good", fullState()],
+      [
+        "digest mismatch",
+        (() => {
+          const s = fullState();
+          const o = goodElf(NS3.scannerProgramId);
+          o.writeUInt32LE(0xdeadbeef, 96);
+          s.fixtureDigests.scanner = sha256(o);
+          return s;
+        })(),
+      ],
+      ["missing program", fullState({ delete: [NS3.scannerProgramId] })],
+      ["missing ProgramData", fullState({ delete: [PD_SCANNER] })],
+      ["RPC transport failure", fullState({ failWhere: () => true })],
+      ["genesis failure", fullState({ failWhere: (m) => m === "getGenesisHash" })],
+      ["foreign genesis", fullState({ genesisHash: "Testwa1v1qqeHqS1rSMHEquSQZ8hk4XCvL4xJLbBNo" })],
+      [
+        "truncated ELF",
+        (() => {
+          const s = fullState();
+          const elf = goodElf(NS3.scannerProgramId);
+          s.accounts[PD_SCANNER] = rpcAccount(
+            programDataWithAuthority(NS3.deployer, elf.subarray(0, elf.length - 64)),
+            { owner: LOADER },
+          );
+          return s;
+        })(),
+      ],
+      [
+        "v3 architecture",
+        (() => {
+          const s = fullState();
+          const v3 = buildSbfElf({ idBase58: NS3.scannerProgramId, eMachine: 247, eFlags: 3 });
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, v3), {
+            owner: LOADER,
+          });
+          s.fixtureDigests.scanner = sha256(v3);
+          return s;
+        })(),
+      ],
+      [
+        "non-zero tail",
+        (() => {
+          const s = fullState();
+          const elf = goodElf(NS3.scannerProgramId);
+          s.accounts[PD_SCANNER] = rpcAccount(
+            programDataWithAuthority(NS3.deployer, Buffer.concat([elf, Buffer.from([1, 2, 3, 4])])),
+            { owner: LOADER },
+          );
+          s.fixtureDigests.scanner = sha256(elf);
+          return s;
+        })(),
+      ],
+      [
+        "zero padding",
+        (() => {
+          const s = fullState();
+          const elf = goodElf(NS3.scannerProgramId);
+          s.accounts[PD_SCANNER] = rpcAccount(
+            programDataWithAuthority(NS3.deployer, Buffer.concat([elf, Buffer.alloc(256, 0)])),
+            { owner: LOADER },
+          );
+          s.fixtureDigests.scanner = sha256(elf);
+          return s;
+        })(),
+      ],
+      [
+        "section beyond payload",
+        (() => {
+          const s = fullState();
+          const elf = buildLayoutedElf({
+            idBase58: NS3.scannerProgramId,
+            tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(64, 7) },
+          });
+          const shoff = Number(elf.readBigUInt64LE(40));
+          elf.writeBigUInt64LE(BigInt(elf.length + 4096), shoff + 3 * 64 + 32);
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+            owner: LOADER,
+          });
+          return s;
+        })(),
+      ],
+      [
+        "invalid header",
+        (() => {
+          const s = fullState();
+          const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, eMachine: 99 });
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+            owner: LOADER,
+          });
+          return s;
+        })(),
+      ],
+      [
+        "extended numbering",
+        (() => {
+          const s = fullState({
+            scannerElf: buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShnum: true }),
+          });
+          return s;
+        })(),
+      ],
+      [
+        "adversarial tail section",
+        (() => {
+          const s = fullState();
+          const elf = buildLayoutedElf({
+            idBase58: NS3.scannerProgramId,
+            tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.from("tail-beyond-sht") },
+          });
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+            owner: LOADER,
+          });
+          s.fixtureDigests.scanner = sha256(elf);
+          return s;
+        })(),
+      ],
+    ];
+    for (const [name, state] of scenarios) {
+      const r = await run(state);
+      assert.ok(r.programs.length === 2, name);
+      for (const p of r.programs) assertNoFieldContradictions(p, name);
+    }
   });
 });
 
@@ -903,6 +1486,43 @@ describe("CLI behavior — output shape consistency, exit codes, refusal of over
     ]);
     assert.equal(r.code, 2);
     assert.match(r.stderr, /--commitment/);
+  });
+
+  test("27. extended section numbering: JSON and human output agree on the span (basis reported in both; digest still fails against the committed pins)", async () => {
+    const state = fullState({
+      scannerElf: buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShnum: true }),
+    });
+    let jsonOut, humanOut;
+    await withVerification(state, async ({ url }) => {
+      jsonOut = await runCli(url, ["--json"]);
+      humanOut = await runCli(url, []);
+    });
+    assert.equal(jsonOut.code, 1); // committed pins ≠ fixture digest (expected offline)
+    const j = JSON.parse(jsonOut.stdout);
+    const scanner = j.programs[0];
+    assert.match(scanner.elf.span_basis, /extended numbering/);
+    assert.equal(scanner.elf.structure_valid, true); // structure fine; the digest mismatch is separate
+    assert.equal(scanner.elf.digest_match, false);
+    // The human-readable report carries the SAME span basis — no output
+    // path claims something the other contradicts.
+    assert.match(humanOut.stdout, /span basis: section header table end \(extended numbering\)/);
+    assert.match(humanOut.stdout, /\[C2 scanner\]/);
+    assert.equal(humanOut.code, 1);
+  });
+
+  test("28. genesis RPC failure at the CLI → exit 3 with exactly one UNVERIFIED check and zero account fetches", async () => {
+    const state = fullState({ failWhere: (method) => method === "getGenesisHash" });
+    let out;
+    await withVerification(state, async ({ url }) => {
+      out = await runCli(url, []);
+    });
+    assert.equal(out.code, 3);
+    assert.match(out.stdout, /overall: INCOMPLETE \(pass 0 \/ fail 0 \/ unverified 1 \/ info 0\)/);
+    assert.match(out.stdout, /OVERALL RESULT: INCOMPLETE/);
+    assert.match(out.stdout, /cluster identity could NOT be established/);
+    // RPC CALL HISTORY: the short-circuit held at the CLI boundary too.
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getGenesisHash").length, 1);
+    assert.equal(state.rpcCalls.filter((c) => c.method === "getAccountInfo").length, 0);
   });
 });
 

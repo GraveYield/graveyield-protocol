@@ -51,10 +51,42 @@
 //     NOT what current agave writes; if ELF magic is absent at the
 //     structural boundary but present at the legacy offset, the tool
 //     REPORTS that observation and FAILS CLOSED — it never silently
-//     shifts the extraction boundary. The hashed span is the ELF's own
-//     declared size (end of the section header table), so loader padding
-//     can never enter the digest; nonzero bytes beyond the declared ELF
-//     end are refused. The full metadata is NEVER hashed.
+//     shifts the extraction boundary. The full metadata is NEVER hashed.
+//
+// ELF byte-span methodology (what exactly is hashed):
+//   Five different "ELF length" notions exist and only ONE is defensible
+//   as the hash boundary:
+//     1. the ProgramData PAYLOAD length (account bytes after the loader
+//        metadata) — what is on the wire;
+//     2. the section-header-table end (e_shoff + e_shnum·e_shentsize) —
+//        a common but NOT universal ELF end (valid ELFs may carry section
+//        contents beyond it);
+//     3. the MAX byte extent the ELF's own structures imply — the SHT
+//        end, every non-NOBITS section extent (sh_offset + sh_size), and
+//        every program-header extent (p_offset + p_filesz);
+//     4. the uploaded .so file length — the span the approved manifest
+//        digests were computed over (sha256File over the whole artifact);
+//     5. the loader-interpreted span — the whole payload; the loader
+//        neither trims nor re-bounds it.
+//   Evidence (W1 lifecycle rehearsal, elf_dump.mjs
+//   matchOnChainProgramData): the upgradeable loader stores the ELF so it
+//   "runs to the EXACT END of the account" — the default deploy writes
+//   the uploaded file verbatim after the metadata (verified byte-for-byte
+//   against devnet ProgramData accounts, 2026-10-29); zero bytes beyond
+//   the ELF can exist only when a larger --max-len was explicitly
+//   reserved. THIS TOOL therefore hashes the MAX STRUCTURE-IMPLIED
+//   EXTENT (concept 3): every byte the ELF itself declares is inside the
+//   digest, so a valid ELF with section contents beyond the section
+//   header table is NEVER truncated by a table-position assumption. If
+//   the payload is longer than that extent, the excess is beyond
+//   anything the ELF declares and must be all-zero loader padding
+//   (excluded from the digest); non-zero excess — or any ELF structure
+//   implying bytes beyond the payload (truncated account), or a header
+//   / section table that cannot be validated — FAILS CLOSED and nothing
+//   is hashed. For every well-formed build output the extent equals the
+//   file length, so the observed digest is computed over exactly the
+//   span the manifest pin was computed over; the approved-digest
+//   comparison is never weakened to accommodate synthetic layouts.
 //
 // VERDICT SEMANTICS — identical to the W2 acceptance verifier (PR #88
 // precision corrections):
@@ -70,6 +102,29 @@
 //   * Overall: FAIL takes precedence over INCOMPLETE; INCOMPLETE applies
 //     only when no definitive FAIL exists. Exit codes: 0 PASS, 1 FAIL,
 //     3 INCOMPLETE, 2 usage error.
+//
+// GENESIS GATE ORDERING (strict): the pinned Devnet genesis hash is
+// established BEFORE any account is fetched. A foreign genesis is a
+// deterministic FAIL with NO account checks at all; a FAILED genesis
+// request is UNVERIFIED and SHORT-CIRCUITS the whole run (INCOMPLETE,
+// exit 3) — on a cluster whose identity could not be established, no
+// deployed byte is fetched or interpreted at all (pinned by test via the
+// RPC call history, not just the final classification).
+//
+// structure_valid semantics (the field never contradicts the evidence):
+//   null  — no ELF payload was ever assessed (extraction failed or was
+//           never reached: absent accounts, malformed loader metadata,
+//           RPC-UNVERIFIED paths);
+//   false — ELF bytes existed and were assessed, and at least one
+//           structural stage FAILED (ELF64 header validation, byte-span
+//           establishment from the ELF's own metadata, in-range section
+//           table, zero-only tail adjudication, or the SBPF v0
+//           architecture requirement);
+//   true  — ALL of those structural stages actually ran and passed (the
+//           digest stages are content properties, not structure: a
+//           digest mismatch on a structurally valid ELF reports
+//           digest_match=false with structure_valid=true — "right shape,
+//           wrong bytes").
 //
 // CLI:
 //   node scripts/devnet/verify_ns3_elf_digests.mjs --url https://api.devnet.solana.com [--json]
@@ -92,6 +147,7 @@ import {
   checkElfProvenance,
   loadProvenanceManifest,
 } from "./ns3_check_provenance.mjs";
+import { parseElf64Sections, validateSbfElfHeader } from "./ns3_verify_elf.mjs";
 
 export const TOOL_NAME = "verify_ns3_elf_digests";
 
@@ -183,21 +239,56 @@ export function extractElfPayload(programDataBytes) {
 }
 
 /**
- * The ELF's own declared byte span: end of the section header table
- * (e_shoff + e_shnum * e_shentsize, ELF64 fixed layout). This is the exact
- * span a deploy writes (loader padding, if any, lives BEYOND it and must be
- * all zero). Throws on any structure that makes the span undeterminable or
- * impossible — the caller refuses to hash rather than guess.
+ * ELF64 program-header entry size (fixed layout): p_type u32 + p_flags u32
+ * + p_offset u64 + p_vaddr u64 + p_paddr u64 + p_filesz u64 + p_memsz u64
+ * + p_align u64 = 56 B.
  */
-export function elfDeclaredSize(payload) {
+export const ELF64_PHENTSIZE = 56;
+
+/** PN_XNUM: e_phnum escape value — the real count lives in sh_info of SH0. */
+const PN_XNUM = 0xffff;
+
+/** SHT_NOBITS — occupies no file bytes; excluded from extent math. */
+const SHT_NOBITS = 8;
+
+/**
+ * Establish the deployed ELF's byte span from the ELF's OWN structure —
+ * never from a section-header-table position assumption.
+ *
+ * The span is the MAX byte extent implied by every structure the ELF
+ * itself declares:
+ *   - the section header table end (e_shoff + e_shnum·64, extended
+ *     numbering resolved exactly as parseElf64Sections resolves it);
+ *   - every non-NOBITS section extent (sh_offset + sh_size);
+ *   - every program-header extent (p_offset + p_filesz; PN_XNUM
+ *     resolved from sh_info of section header 0).
+ *
+ * Hashing this span covers EVERY byte the ELF declares — a valid ELF
+ * whose section contents (or segments) sit beyond the section header
+ * table is hashed in full, never truncated by a table-end assumption.
+ * Fail-closed on every structure that makes the span undeterminable,
+ * impossible, or beyond the available payload (truncated account): the
+ * caller refuses to hash rather than guess.
+ *
+ * Returns { span, basis, shtEnd, sectionMax, segmentMax,
+ * extendedSectionNumbering, extendedProgramHeaderCount } — `basis`
+ * names which structure(s) set the maximum (reported verbatim in the
+ * JSON output and human-readable report).
+ */
+export function elfDeclaredSpan(payload) {
   if (!Buffer.isBuffer(payload) || payload.length < 64) {
     throw new Error(
       `ELF payload too small (${payload ? payload.length : 0} B; an ELF64 header alone is 64 B)`,
     );
   }
+  // Stage: ELF64 header validation (the repository's own SBF validator —
+  // magic + class + data encoding + e_machine in the loader-accepted set).
+  // A payload that is not a valid 64-bit LSB SBF ELF has no defensible
+  // byte span; refuse before reading any extent.
+  validateSbfElfHeader(payload);
+
   const eShoff = Number(payload.readBigUInt64LE(40));
   const eShentsize = payload.readUInt16LE(58);
-  const eShnum = payload.readUInt16LE(60);
   if (eShentsize !== 64) {
     throw new Error(
       `unexpected section header entry size ${eShentsize} (ELF64 fixed layout is 64)`,
@@ -208,29 +299,130 @@ export function elfDeclaredSize(payload) {
       "no section header table (e_shoff=0) — the ELF byte span cannot be determined; refusing to hash",
     );
   }
-  let shnum = eShnum;
+
+  // Section count: the SAME extended-numbering rule parseElf64Sections
+  // applies (real count in sh_size of section header 0 when e_shnum = 0).
+  let extendedSectionNumbering = false;
+  let shnum = payload.readUInt16LE(60);
   if (shnum === 0) {
-    // Extended section numbering (ELF spec): the real section count lives
-    // in sh_size of section header 0.
     if (payload.length < eShoff + 64) {
       throw new Error(
-        `section header table out of range (e_shoff=${eShoff}, extended count unreadable, file=${payload.length} B)`,
+        `section header table out of range (e_shoff=${eShoff}, extended section count unreadable, file=${payload.length} B)`,
       );
     }
     shnum = Number(payload.readBigUInt64LE(eShoff + 32));
+    if (shnum === 0) {
+      throw new Error(
+        "e_shnum = 0 with a zero extended section count — malformed section table; refusing to hash",
+      );
+    }
+    if (shnum > 0xffff) {
+      throw new Error(`extended section count ${shnum} exceeds the ELF64 u16 section-index space`);
+    }
+    extendedSectionNumbering = true;
   }
-  const declared = eShoff + shnum * eShentsize;
-  if (!Number.isSafeInteger(declared) || declared < 64) {
+  const shtEnd = eShoff + shnum * 64;
+  if (!Number.isSafeInteger(shtEnd)) {
     throw new Error(
-      `impossible ELF declared size ${declared} (e_shoff=${eShoff}, e_shnum=${shnum})`,
+      `impossible section header table end ${shtEnd} (e_shoff=${eShoff}, e_shnum=${shnum})`,
     );
   }
-  if (declared > payload.length) {
+  if (shtEnd > payload.length) {
     throw new Error(
-      `ELF declared size ${declared} B exceeds the available payload ${payload.length} B — truncated payload`,
+      `section header table out of range (ends at ${shtEnd}, payload=${payload.length} B) — truncated payload`,
     );
   }
-  return declared;
+
+  // Section extents — from the SAME parse the structural-identity gate
+  // uses (parseElf64Sections re-validates the header, the extended
+  // numbering, the table range, the string table, and every section's
+  // range against THIS payload; any throw fails closed here).
+  const sections = parseElf64Sections(payload);
+  let sectionMax = 0;
+  for (const s of sections) {
+    if (s.type === SHT_NOBITS) continue; // occupies no file bytes
+    const end = s.offset + s.size;
+    if (!Number.isSafeInteger(end) || end > payload.length) {
+      throw new Error(
+        `section "${s.name}" (offset ${s.offset} + size ${s.size}) extends beyond the payload ` +
+          `(${payload.length} B) — truncated payload`,
+      );
+    }
+    sectionMax = Math.max(sectionMax, end);
+  }
+
+  // Program-header extents (fixed ELF64 layout, 56 B entries).
+  let extendedProgramHeaderCount = false;
+  let ePhnum = payload.readUInt16LE(56);
+  if (ePhnum === PN_XNUM) {
+    if (payload.length < eShoff + 48) {
+      throw new Error(
+        `section header table out of range (e_shoff=${eShoff}, PN_XNUM program count unreadable, file=${payload.length} B)`,
+      );
+    }
+    ePhnum = payload.readUInt32LE(eShoff + 44); // sh_info of section header 0
+    extendedProgramHeaderCount = true;
+  }
+  let segmentMax = 0;
+  if (ePhnum > 0) {
+    const ePhoff = Number(payload.readBigUInt64LE(32));
+    const ePhentsize = payload.readUInt16LE(54);
+    if (ePhentsize !== ELF64_PHENTSIZE) {
+      throw new Error(
+        `unexpected program header entry size ${ePhentsize} (ELF64 fixed layout is ${ELF64_PHENTSIZE})`,
+      );
+    }
+    if (ePhoff === 0) {
+      throw new Error(
+        `e_phnum=${ePhnum} but e_phoff=0 — inconsistent program header table; refusing to hash`,
+      );
+    }
+    const phEnd = ePhoff + ePhnum * ELF64_PHENTSIZE;
+    if (!Number.isSafeInteger(phEnd) || phEnd > payload.length) {
+      throw new Error(
+        `program header table out of range (ends at ${phEnd}, payload=${payload.length} B) — truncated payload`,
+      );
+    }
+    for (let i = 0; i < ePhnum; i++) {
+      const base = ePhoff + i * ELF64_PHENTSIZE;
+      const pOffset = Number(payload.readBigUInt64LE(base + 8));
+      const pFilesz = Number(payload.readBigUInt64LE(base + 32));
+      const end = pOffset + pFilesz;
+      if (!Number.isSafeInteger(end) || end > payload.length) {
+        throw new Error(
+          `program header ${i} (p_offset ${pOffset} + p_filesz ${pFilesz}) extends beyond the payload ` +
+            `(${payload.length} B) — truncated payload`,
+        );
+      }
+      segmentMax = Math.max(segmentMax, end);
+    }
+  }
+
+  const span = Math.max(shtEnd, sectionMax, segmentMax, 64);
+  if (span > payload.length) {
+    throw new Error(
+      `ELF structure-implied span ${span} B exceeds the available payload ${payload.length} B — truncated payload`,
+    );
+  }
+  const parts = [];
+  if (span === shtEnd) {
+    parts.push(
+      extendedSectionNumbering
+        ? "section header table end (extended numbering)"
+        : "section header table end",
+    );
+  }
+  if (span === sectionMax && sectionMax > 0) parts.push("section extents");
+  if (span === segmentMax && segmentMax > 0) parts.push("program header extents");
+  return {
+    span,
+    basis: parts.length > 0 ? parts.join(" + ") : "ELF header only (64 B)",
+    shtEnd,
+    sectionMax,
+    segmentMax,
+    extendedSectionNumbering,
+    extendedProgramHeaderCount,
+  };
 }
 
 /** SHA-256 hex of exactly the bytes passed in — no more, no less. */
@@ -264,6 +456,7 @@ function initialProgramReport(spec, approvedDigest) {
       payload_offset: null,
       payload_size: null,
       declared_elf_size: null,
+      span_basis: null,
       trailing_padding_bytes: null,
       structure_valid: null,
       sbpf_arch: null,
@@ -396,6 +589,20 @@ export async function runElfDigestVerification(options = {}) {
         `(pinned Devnet genesis: ${DEVNET_GENESIS_HASH}); the digest verdict is blocked (INCOMPLETE) ` +
         "until the endpoint reports it",
     );
+    // SHORT-CIRCUIT: on a cluster whose identity could not be established,
+    // NO account is fetched and NO deployed byte is interpreted. The
+    // overall verdict is INCOMPLETE (UNVERIFIED with zero FAILs) and the
+    // exit code is 3. Tests pin this via the RPC call history — after a
+    // failed getGenesisHash the endpoint receives no getAccountInfo call.
+    return {
+      checks,
+      overall: "INCOMPLETE",
+      counts: countsNow(),
+      context,
+      identities,
+      manifest: manifestSummary(manifest, manifestDisplay),
+      programs: [...reports.values()].map((r) => r.report),
+    };
   } else if (genesisHash !== DEVNET_GENESIS_HASH) {
     add(
       "G",
@@ -509,7 +716,7 @@ async function verifyProgram({
   };
   const C = {
     extract: "ELF payload extracted at the structural metadata boundary",
-    span: "ELF declared size fits the payload (no truncation; tail is zero padding only)",
+    span: "ELF byte span established from the ELF's own structure (header, section table, sections, program headers); tail is zero padding only",
     digest: "observed SHA-256 equals the approved provenance manifest digest",
     arch: `SBPF v0 architecture (e_machine ${REQUIRED_SBPF.e_machine} / e_flags ${REQUIRED_SBPF.e_flags})`,
     identity: "structural NS-3 identity (embedded ID in allocated sections; no legacy IDs)",
@@ -819,45 +1026,57 @@ async function verifyProgram({
   );
   report.elf.extraction = "OK";
 
-  let declared = null;
+  let spanInfo = null;
+  let spanEstablished = false;
   try {
-    declared = elfDeclaredSize(extracted.payload);
+    spanInfo = elfDeclaredSpan(extracted.payload);
   } catch (err) {
+    // The ELF bytes existed and were structurally assessed — the header /
+    // section-table / span stage FAILED. structure_valid is FALSE (never
+    // null: the payload was assessable; never true: a structural stage
+    // failed). Nothing is hashed.
+    report.elf.structure_valid = false;
     add("C", cId(1), C.span, FAIL, err.message);
     markAll(
       triples(depIds.slice(10), depTitles.slice(10)),
       FAIL,
-      "cannot verify — the ELF byte span could not be determined; refusing to hash",
+      "cannot verify — the ELF byte span could not be established from the ELF's own structure; refusing to hash",
     );
     return;
   }
-  report.elf.declared_elf_size = declared;
-  if (declared === extracted.payload.length) {
+  report.elf.declared_elf_size = spanInfo.span;
+  report.elf.span_basis = spanInfo.basis;
+  if (spanInfo.span === extracted.payload.length) {
+    spanEstablished = true;
     report.elf.trailing_padding_bytes = 0;
     add(
       "C",
       cId(1),
       C.span,
       PASS,
-      `declared ELF size ${declared} B == payload ${extracted.payload.length} B (exact fit — the layout ` +
-        "current agave writes)",
+      `ELF byte span ${spanInfo.span} B == payload ${extracted.payload.length} B (exact fit — the layout ` +
+        `current agave writes; span basis: ${spanInfo.basis})`,
     );
   } else {
     let paddingOk = true;
-    for (let i = declared; i < extracted.payload.length; i++) {
+    for (let i = spanInfo.span; i < extracted.payload.length; i++) {
       if (extracted.payload[i] !== 0) {
         paddingOk = false;
         break;
       }
     }
-    report.elf.trailing_padding_bytes = extracted.payload.length - declared;
+    report.elf.trailing_padding_bytes = extracted.payload.length - spanInfo.span;
     if (!paddingOk) {
+      // Bytes beyond everything the ELF declares are NOT zero — they are
+      // neither ELF content nor loader padding. A structural stage failed:
+      // structure_valid=false, refuse to hash.
+      report.elf.structure_valid = false;
       add(
         "C",
         cId(1),
         C.span,
         FAIL,
-        `declared ELF size ${declared} B < payload ${extracted.payload.length} B and bytes beyond the ` +
+        `ELF byte span ${spanInfo.span} B < payload ${extracted.payload.length} B and bytes beyond the ` +
           "declared ELF end are NOT all zero — unexpected data after the ELF; refusing to hash",
       );
       markAll(
@@ -867,20 +1086,21 @@ async function verifyProgram({
       );
       return;
     }
+    spanEstablished = true;
     add(
       "C",
       cId(1),
       C.span,
       PASS,
-      `declared ELF size ${declared} B + ${extracted.payload.length - declared} B zero loader padding ` +
-        "(padding excluded from the digest)",
+      `ELF byte span ${spanInfo.span} B + ${extracted.payload.length - spanInfo.span} B zero loader padding ` +
+        `(padding excluded from the digest; span basis: ${spanInfo.basis})`,
     );
   }
 
-  // Hash EXACTLY the declared ELF span of the RPC-retrieved bytes and run
+  // Hash EXACTLY the established ELF span of the RPC-retrieved bytes and run
   // the repository's own provenance gate (digest pin + SBPF v0 arch +
   // structural NS-3 identity + legacy canary) over those same bytes.
-  const elfBytes = extracted.payload.subarray(0, declared);
+  const elfBytes = extracted.payload.subarray(0, spanInfo.span);
   const provenance = checkElfProvenance(elfBytes, {
     label,
     manifestPath: manifestDisplay,
@@ -891,7 +1111,23 @@ async function verifyProgram({
 
   report.elf.observed_sha256 = sha256Hex(elfBytes);
   report.elf.digest_match = digestCheck.ok === true;
-  report.elf.structure_valid = true;
+
+  report.elf.sbpf_arch = `${REQUIRED_SBPF.arch} (e_machine ${REQUIRED_SBPF.e_machine} / e_flags ${REQUIRED_SBPF.e_flags})`;
+  report.elf.sbpf_valid = archCheck.ok === true;
+  report.elf.identity_verdict = identityCheck.ok ? "structural" : identityCheck.detail;
+
+  // structure_valid — the structural stages that ACTUALLY ran and passed
+  // (see the file header): payload extraction, ELF64 header validation,
+  // byte-span establishment from the ELF's own metadata (which subsumes
+  // the in-range section-table validation — elfDeclaredSpan derives the
+  // span THROUGH parseElf64Sections), the zero-only tail adjudication,
+  // and the SBPF v0 architecture. Digest stages are content, not
+  // structure: digest_match=false with structure_valid=true is the
+  // meaningful "right shape, wrong bytes" outcome, not a contradiction.
+  // A regression test asserts these invariants on every evidence path.
+  report.elf.structure_valid =
+    report.elf.extraction === "OK" && spanEstablished && report.elf.sbpf_valid === true;
+
   add(
     "C",
     cId(2),
@@ -902,11 +1138,8 @@ async function verifyProgram({
       : digestCheck.detail,
   );
 
-  report.elf.sbpf_arch = `${REQUIRED_SBPF.arch} (e_machine ${REQUIRED_SBPF.e_machine} / e_flags ${REQUIRED_SBPF.e_flags})`;
-  report.elf.sbpf_valid = archCheck.ok === true;
   add("C", cId(3), C.arch, archCheck.ok ? PASS : FAIL, archCheck.detail);
 
-  report.elf.identity_verdict = identityCheck.ok ? "structural" : identityCheck.detail;
   add("C", cId(4), C.identity, identityCheck.ok ? PASS : FAIL, identityCheck.detail);
 }
 
