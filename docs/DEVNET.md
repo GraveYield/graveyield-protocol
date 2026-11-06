@@ -35,10 +35,10 @@
 > upgrade authority. The deployed ELF must also be retrieved (read-only)
 > and checked against the approved SHA-256 digest pinned in
 > `scripts/devnet/provenance.manifest.json`. If a ProgramData account is
-> absent or RPC evidence is unavailable, the corresponding acceptance
-> check FAILs — or stays INCOMPLETE on a transport failure — under the
-> existing verifier/runbook rules; absence is never initialized around
-> and never recorded as a pass.
+> absent, the dependent acceptance checks FAIL. If RPC retrieval fails,
+> the dependent checks are recorded as UNVERIFIED; the overall verifier
+> result is INCOMPLETE only when no other FAIL exists. Absence is never
+> initialized around and never recorded as a pass.
 >
 > **Authority arrangement (NS-3, honest form).** The deployer pays fees
 > and is the initial upgrade authority of both programs (decoded from
