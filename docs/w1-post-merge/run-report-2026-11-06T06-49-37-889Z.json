@@ -1,0 +1,1390 @@
+{
+  "meta": {
+    "authorization": "W1 Lifecycle Rehearsal Harness — owner authorization, Handoff Vol IV §8 (verbatim)",
+    "cluster": "solana-test-validator (local, --slots-per-epoch 32)",
+    "url": "http://127.0.0.1:8899",
+    "repository": "https://github.com/GraveYield/graveyield-protocol.git",
+    "base_branch": "main",
+    "base_commit": "3effaecba2a7e6556884b2e12a087f426dea02bb",
+    "feature_branch": "test/w1-post-merge-verification",
+    "feature_commit": "3effaecba2a7e6556884b2e12a087f426dea02bb",
+    "toolchain": {
+      "solana_cli": "solana-cli 3.0.10 (src:96c3a851; feat:3604001754, client:Agave)",
+      "cargo_build_sbf": "solana-cargo-build-sbf 3.0.10 platform-tools v1.51 rustc 1.89.0",
+      "platform_tools_pinned_sha256": "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e",
+      "platform_tools_version": "v1.54 (embedded rustc 1.89.0-dev; approved NS-3 build toolchain)",
+      "node": "v24.22.2"
+    },
+    "salvor_provenance": {
+      "path": "/home/z/my-project/work/graveyield-protocol/../salvor-bots",
+      "inspectable": true,
+      "repository": "https://github.com/GraveYield/salvor-bots.git",
+      "branch": "main",
+      "head": "8d8b6aa66303b04019fa4e094e3b41705685aace",
+      "dirty": false,
+      "note": null
+    },
+    "program_ids": {
+      "scanner": "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL",
+      "vault": "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya",
+      "raydium_v4": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+    },
+    "elf_pins": {
+      "scanner": {
+        "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/grave_scanner.so",
+        "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+        "bytes": 321056,
+        "source": "local build via deploy_devnet.sh --build-only (authenticated platform-tools v1.54); sha256 == approved NS-3 digests in scripts/devnet/provenance.manifest.json (fail-closed gate passed); NO devnet dump",
+        "programId": "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL",
+        "approved_match": true
+      },
+      "vault": {
+        "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/grave_vault.so",
+        "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83",
+        "bytes": 361528,
+        "source": "local build via deploy_devnet.sh --build-only (authenticated platform-tools v1.54); sha256 == approved NS-3 digests in scripts/devnet/provenance.manifest.json (fail-closed gate passed); NO devnet dump",
+        "programId": "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya",
+        "approved_match": true
+      },
+      "raydium_v4": {
+        "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/fixtures/raydium_v4.so",
+        "sha256": "3bcf0828cf38e5f703adbf31dc1bf81f0a1254dcb176ca950ae52231c20e6d14",
+        "source": "mainnet fixture fetch"
+      },
+      "serum_dex": {
+        "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/fixtures/serum_dex.so",
+        "sha256": "078ade55aea60c32e3084c3f56806e097b1bc066c9480d484e51cfd11db88333",
+        "source": "mainnet fixture fetch"
+      },
+      "pool_accounts": {
+        "pool": {
+          "sha256": "f8e1af29132dd7cf1c09810fb6fce1443315689d39d43dc03fc5548d07c7699c",
+          "bytes": 752
+        },
+        "coin_vault": {
+          "sha256": "c07559f531da0dce092c0b80167cfc5d47c67fe3d45884c630729a311d735274",
+          "bytes": 165
+        },
+        "pc_vault": {
+          "sha256": "e4959646316d4bb6c25a1a79cc6634f7ff0600f70f30cd2f32699136bbf6f141",
+          "bytes": 165
+        },
+        "coin_mint": {
+          "sha256": "b0f919425a529f4971ef8dabd535aec34947d5c8c4885df80dae91635b98c5f3",
+          "bytes": 82
+        },
+        "pc_mint": {
+          "sha256": "39d31bde7da89f0b25c2599a023c4853df3bf2f0e4a2d8cc842d4f1aa6ddc29c",
+          "bytes": 82
+        },
+        "lp_mint": {
+          "sha256": "e25d828f6d608eabff18a5d76a24e577d9456cbeb4cdc14c7a00a2e7c4c5ca82",
+          "bytes": 82
+        },
+        "wsol_mint": {
+          "sha256": "b0f919425a529f4971ef8dabd535aec34947d5c8c4885df80dae91635b98c5f3",
+          "bytes": 82
+        },
+        "open_orders": {
+          "sha256": "447c6ff75708b75f8545835279ec37783da7fbdbd8f69550cdbd36ec1fcdd967",
+          "bytes": 3228
+        },
+        "market": {
+          "sha256": "0fa15689fa1ace9c3626cac38825d4ea688492aca5f978fb23b6d9260726101d",
+          "bytes": 388
+        },
+        "target_orders": {
+          "sha256": "868373404db348d8ca77b95cbfcaa71c09275e98006ec2c1dd4cc96bb7e35ad5",
+          "bytes": 2208
+        },
+        "market_coin_vault": {
+          "sha256": "37c9d2894eab5b4c89fa681a482725326705d4f8c9fa179053a671ee736b5678",
+          "bytes": 165
+        },
+        "market_pc_vault": {
+          "sha256": "51e890b764dbe161b23948500210e2186936d8911f08844267885ebcb71bcc67",
+          "bytes": 165
+        },
+        "event_queue": {
+          "sha256": "f9c2f7c5cf5c1828f86aa88ab7589996b02e0a23ce9eee4ea79ec34e45c742c2",
+          "bytes": 1048588
+        },
+        "bids": {
+          "sha256": "c8e6c72db0c37e2a3a7d32169aba32617722364b03a9dfe7669a55af5482ccb7",
+          "bytes": 65548
+        },
+        "asks": {
+          "sha256": "42e2cd78705829d414f9983b3662fd0c44d767272c3b6df791df3330efc22f6b",
+          "bytes": 65548
+        },
+        "vault_signer": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    "local_plan": {
+      "pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+      "amm_program": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+      "market_program": "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX",
+      "base_is_coin_side": true,
+      "wsol_mint": "So11111111111111111111111111111111111111112",
+      "memecoin_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "lp_mint": "8HoQnePLqPj4M7PUDzfw8e3Ymdwgc7NLGnaTUapubyvu",
+      "lp_total_supply_repinned": "11829734518",
+      "amm_lp_amount": "77150442510137",
+      "burn_amount": "7715044251",
+      "salvage_lp_amount": "7715044251",
+      "market": {
+        "stored_nonce": "1",
+        "loaded_unmodified": true,
+        "real_scheme_signer_from_stored_nonce": "CTz5UMLQm2SRWHzQnU62Pi4yJqbNGjgRBHqqp6oDHfF7",
+        "real_scheme_matches_manifest_vault_signer": true,
+        "fleet_core_string_seed_signer": "HdbYFz2SANRZLn8zkdEcs67oMKi4SMcEFve7xeRceWRJ",
+        "fleet_core_string_seed_bump": "253",
+        "note": "F3 (Finding E, RETIRED adaptation): fleet-core now derives the market vault signer with the REAL OpenBook v1 rule create_program_address([market, stored_nonce_le]) — the unmodified mainnet market (stored nonce 1) IS canonical under it, so the W1 local market loads UNMODIFIED. The October-era string-seed nonce re-pin is retired; the string-seed PDA is recorded for contrast only."
+      },
+      "holders": {
+        "salvor": {
+          "pubkey": "2wEWQbD3QxCcPujc5yfrut4EUtTSRWQyLTv8dKhmvteg",
+          "lp_ata": "HLzdZtEAwoR45oheMxkFw2krmyHjcuEW1yXCe6fVE8aD",
+          "balance": "7715044251"
+        },
+        "claimant_a": {
+          "pubkey": "67Zymacmn2zHwgNxkrsxQcmyesBeZSCiu7ACuuZ49Mi2",
+          "lp_ata": "ATs3noVEFVJvZVywYtCBfG277g7ZrnGkCZ1DMSfokuoB",
+          "balance": "2571681417"
+        },
+        "claimant_b": {
+          "pubkey": "AHFxLC7ixcSWYUnZSCZWHUDpmwo7ifZRw8WLGamEu1qv",
+          "lp_ata": "4Chh6MN99nZq24fDUMFgqSDfMZyyVfo3gbm39amPZHDt",
+          "balance": "1543008850"
+        }
+      },
+      "uncx_marker": "4H1kxKbPRhPQTzqVAiwWbqg4zMf71aQfxjxwYDFftNyG"
+    },
+    "fixture_manifest": {
+      "pool": "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+      "base_is_coin_side": true,
+      "fetched_at": "2026-11-06T06:48:26.673Z",
+      "rpc": "https://api.mainnet-beta.solana.com"
+    },
+    "keys_root": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/keys",
+    "boundaries_note": "see 'boundaries' — every mocked/stubbed/compressed edge is labeled here"
+  },
+  "started_at": "2026-11-06T06:49:38.204Z",
+  "finished_at": "2026-11-06T06:50:10.825Z",
+  "all_pass": true,
+  "stages": [
+    {
+      "id": 1,
+      "name": "validator boot + ELF load at NS-3 IDs (approved-hash verified)",
+      "pass": true,
+      "detail": "all programs executable at the NS-3 IDs; loaded scanner/vault program data byte-contains the pinned ELF whose sha256 == approved NS-3 digests (provenance.manifest.json) == pin table; pool + re-pinned lp_mint loaded from real mainnet bytes",
+      "rpc_endpoint": "http://127.0.0.1:8899",
+      "genesis_hash": "2LAii5zpmgJXN65WUmW6kyogsFQc1PgyZrjf6UWBtmaE",
+      "programs": [
+        {
+          "label": "scanner",
+          "loaded": true,
+          "bytes": 36
+        },
+        {
+          "label": "vault",
+          "loaded": true,
+          "bytes": 36
+        },
+        {
+          "label": "raydium_v4",
+          "loaded": true,
+          "bytes": 36
+        }
+      ],
+      "approved_hash_checks": [
+        {
+          "label": "scanner",
+          "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+          "approved_match": true,
+          "pin_table_match": true,
+          "on_chain_layout": "byte-identical to on-chain programdata payload after a 45 B upgradeable-loader state header",
+          "program_data_account": "FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG",
+          "loaded_bytes": 321101
+        },
+        {
+          "label": "vault",
+          "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83",
+          "approved_match": true,
+          "pin_table_match": true,
+          "on_chain_layout": "byte-identical to on-chain programdata payload after a 45 B upgradeable-loader state header",
+          "program_data_account": "9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4",
+          "loaded_bytes": 361573
+        }
+      ],
+      "pins": {
+        "scanner": {
+          "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/grave_scanner.so",
+          "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+          "bytes": 321056,
+          "source": "local build via deploy_devnet.sh --build-only (authenticated platform-tools v1.54); sha256 == approved NS-3 digests in scripts/devnet/provenance.manifest.json (fail-closed gate passed); NO devnet dump",
+          "programId": "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL",
+          "approved_match": true
+        },
+        "vault": {
+          "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/grave_vault.so",
+          "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83",
+          "bytes": 361528,
+          "source": "local build via deploy_devnet.sh --build-only (authenticated platform-tools v1.54); sha256 == approved NS-3 digests in scripts/devnet/provenance.manifest.json (fail-closed gate passed); NO devnet dump",
+          "programId": "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya",
+          "approved_match": true
+        },
+        "raydium_v4": {
+          "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/fixtures/raydium_v4.so",
+          "sha256": "3bcf0828cf38e5f703adbf31dc1bf81f0a1254dcb176ca950ae52231c20e6d14",
+          "source": "mainnet fixture fetch"
+        },
+        "serum_dex": {
+          "file": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/fixtures/serum_dex.so",
+          "sha256": "078ade55aea60c32e3084c3f56806e097b1bc066c9480d484e51cfd11db88333",
+          "source": "mainnet fixture fetch"
+        },
+        "pool_accounts": {
+          "pool": {
+            "sha256": "f8e1af29132dd7cf1c09810fb6fce1443315689d39d43dc03fc5548d07c7699c",
+            "bytes": 752
+          },
+          "coin_vault": {
+            "sha256": "c07559f531da0dce092c0b80167cfc5d47c67fe3d45884c630729a311d735274",
+            "bytes": 165
+          },
+          "pc_vault": {
+            "sha256": "e4959646316d4bb6c25a1a79cc6634f7ff0600f70f30cd2f32699136bbf6f141",
+            "bytes": 165
+          },
+          "coin_mint": {
+            "sha256": "b0f919425a529f4971ef8dabd535aec34947d5c8c4885df80dae91635b98c5f3",
+            "bytes": 82
+          },
+          "pc_mint": {
+            "sha256": "39d31bde7da89f0b25c2599a023c4853df3bf2f0e4a2d8cc842d4f1aa6ddc29c",
+            "bytes": 82
+          },
+          "lp_mint": {
+            "sha256": "e25d828f6d608eabff18a5d76a24e577d9456cbeb4cdc14c7a00a2e7c4c5ca82",
+            "bytes": 82
+          },
+          "wsol_mint": {
+            "sha256": "b0f919425a529f4971ef8dabd535aec34947d5c8c4885df80dae91635b98c5f3",
+            "bytes": 82
+          },
+          "open_orders": {
+            "sha256": "447c6ff75708b75f8545835279ec37783da7fbdbd8f69550cdbd36ec1fcdd967",
+            "bytes": 3228
+          },
+          "market": {
+            "sha256": "0fa15689fa1ace9c3626cac38825d4ea688492aca5f978fb23b6d9260726101d",
+            "bytes": 388
+          },
+          "target_orders": {
+            "sha256": "868373404db348d8ca77b95cbfcaa71c09275e98006ec2c1dd4cc96bb7e35ad5",
+            "bytes": 2208
+          },
+          "market_coin_vault": {
+            "sha256": "37c9d2894eab5b4c89fa681a482725326705d4f8c9fa179053a671ee736b5678",
+            "bytes": 165
+          },
+          "market_pc_vault": {
+            "sha256": "51e890b764dbe161b23948500210e2186936d8911f08844267885ebcb71bcc67",
+            "bytes": 165
+          },
+          "event_queue": {
+            "sha256": "f9c2f7c5cf5c1828f86aa88ab7589996b02e0a23ce9eee4ea79ec34e45c742c2",
+            "bytes": 1048588
+          },
+          "bids": {
+            "sha256": "c8e6c72db0c37e2a3a7d32169aba32617722364b03a9dfe7669a55af5482ccb7",
+            "bytes": 65548
+          },
+          "asks": {
+            "sha256": "42e2cd78705829d414f9983b3662fd0c44d767272c3b6df791df3330efc22f6b",
+            "bytes": 65548
+          },
+          "vault_signer": {
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0
+          }
+        }
+      },
+      "at": "2026-11-06T06:49:38.474Z"
+    },
+    {
+      "id": 2,
+      "name": "ProtocolConfig initialize (SDK builders; vault dust = u64::MAX)",
+      "pass": true,
+      "tx": "Ej6tRWEx4bKYaNsVLXpD3pJUotZSSXt5GYjewUBpWJGYxHEMogsqScT7oEZNui2MqfQ3tPucpcKX4AxoGq6TkNW",
+      "tx2": "5d2Jh2Ck7BYiKrLRjcGcZzKEwKouGdsh3NbyvDAJukJSQCVBCBhgShxYFtEzShCLvAseAH7SpyqEWqDqig9agcfR",
+      "detail": "scanner at spec defaults; vault at spec defaults with jupiter_dust_threshold = u64::MAX (conversion leg skipped by config — labeled boundary C3)",
+      "at": "2026-11-06T06:49:39.326Z"
+    },
+    {
+      "id": 3,
+      "name": "oracle registration via 80-byte update_protocol_config (ORACLE_CUSTODY.md steps 1–2)",
+      "pass": true,
+      "tx": "4GYG7zAtM3E7DyyTW1y9GvyqiBcp2N2XR9FVmJGLWJ84XRGocud4uGAPmew5Zej6mY29XcByunSuZmD5G99aY4Py",
+      "detail": "activity_oracle=81VcKcHEerthaVZPcqbVybwJeqXhSRYCF9GgkYFAVVeg launch_price_oracle=9hxRAV3DN1dVCPYVsm7QQpGQhRFHVZjJBdgjfXkjLvoY — local runbook validation (fresh local keys), NOT the devnet custody situation",
+      "at": "2026-11-06T06:49:39.744Z"
+    },
+    {
+      "id": 4,
+      "name": "discovery/evaluation wiring smoke (SDK evaluatePool — C5 label)",
+      "pass": true,
+      "detail": "evaluatePool against the local fixture pool responded (wiring proven; last-swap history is intentionally absent — C5/C6 boundary)",
+      "outcome": "derived",
+      "at": "2026-11-06T06:49:39.760Z"
+    },
+    {
+      "id": 5,
+      "name": "record_launch_price (168B C2 attestation; launch price = current × 200)",
+      "pass": true,
+      "tx": "n5yGcXGzQF86XDbwyY6ebSp8BuaWVKesRVo5pkwRHd6dqueULB8SUQa8zB5bLwVVHhip3VXL28g7VgEQMuL8fwq",
+      "detail": "launch price pinned at 330922922952622106800 q64x64 (current × 200 → 99.5% collapse vs real fixture reserves)",
+      "at": "2026-11-06T06:49:40.626Z"
+    },
+    {
+      "id": 6,
+      "name": "evaluate_pool_phase_1 via SDK (112B attestation) → EligibilityAnchorWritten",
+      "pass": true,
+      "tx": "5awuWABvzXps8t4SVetb9z1ZV7KeAizxJyPiBkwy4RzfSHM1mhm9ChP9xoDQVQDiozdJjitKd3E9Kw65q3rNFuvV",
+      "events": {
+        "EligibilityAnchorWritten": false
+      },
+      "anchor_epoch": "0",
+      "detail": "C1 anchor written from a real local-slot-anchored 112B attestation (slot hash read from the sysvar — F1)",
+      "at": "2026-11-06T06:49:45.358Z"
+    },
+    {
+      "id": 7,
+      "name": "compressed 2-epoch confirmation (--slots-per-epoch 32) + 6016-at-gap-1",
+      "pass": true,
+      "detail": "confirmed to epoch 2 with --slots-per-epoch 32 (compressed clock — labeled boundary)",
+      "gap_case": {
+        "asserted": true,
+        "code": 6016
+      },
+      "epoch": 2,
+      "at": "2026-11-06T06:49:59.878Z"
+    },
+    {
+      "id": 8,
+      "name": "evaluate_pool_phase_2 via SDK (112B) → EligibilityCertIssued",
+      "pass": true,
+      "tx": "2rRgALzjndEuMzBhNnFLofC8md5Ra8bAAb3pdWfShcrwtFhbLAMkacZst9RDD3ab7P5hxrtX98UwNp3QXzseW2RY",
+      "events": {
+        "EligibilityCertIssued": false
+      },
+      "cert_expires_at": "1793951399",
+      "detail": "eligibility cert issued after the compressed 2-epoch confirmation",
+      "at": "2026-11-06T06:50:00.313Z"
+    },
+    {
+      "id": 9,
+      "name": "REAL snapshotter (Rust bin) + SDK snapshot root-equality",
+      "pass": true,
+      "rust_bin": "/home/z/my-project/work/graveyield-protocol/target/debug/grave-snapshotter-cli",
+      "artifact": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/snapshot-artifact.json",
+      "merkle_root": "0c4533bb965a3551393a814cf48bc44f92a0a88c31d8a3862705d1fa68f177c4",
+      "leaf_count": 3,
+      "tree_depth": 2,
+      "supply": 11829734518,
+      "detail": "Rust SnapshotBuilder+SnapshotArtifact::seal output equals the SDK snapshot fleet-core feeds into salvage (root + supply + holders)",
+      "at": "2026-11-06T06:50:00.337Z"
+    },
+    {
+      "id": 10,
+      "name": "fleet-core salvage-only prepare + simulate (mode:\"live\", real pipeline)",
+      "pass": true,
+      "kind": "salvage-only",
+      "snapshot_summary": {
+        "merkle_root": "0c4533bb965a3551393a814cf48bc44f92a0a88c31d8a3862705d1fa68f177c4",
+        "total_supply": "11829734518",
+        "salvor_lp_amount": "7715044251",
+        "holder_count": 3
+      },
+      "fee_micro_lamports_per_cu": "1000000000",
+      "detail": "revalidate → 13-account V4 derivation → LP snapshot → estimator → route validation → assemble; simulated through the salvor SDK path",
+      "at": "2026-11-06T06:50:02.483Z"
+    },
+    {
+      "id": 11,
+      "name": "fleet-core salvage submit through the REAL live submit path (v0/ALT)",
+      "pass": true,
+      "signature": "66tf95mnggYpFdLKvTjbAgyvihbLYGQC5BDouUTB6gpjKL5zs4v74NwgVzrdR91ALExMYWRphxnh66Syjq3FAmUx",
+      "receipt": {
+        "total": "9886126516",
+        "salvor": "3954450606",
+        "lp_holders": "3954450606",
+        "protocol": "1977225304",
+        "dust_memecoin": "886754288",
+        "slot": "71"
+      },
+      "events": {
+        "PoolSalvaged": false,
+        "SalvageCompleted": false
+      },
+      "detail": "first-ever real submit-path execution: prepare→simulate→submit through fleet-core mode:\"live\" with at-most-once admission; conversion leg skipped by config (C3), dust recorded for sweep_dust",
+      "at": "2026-11-06T06:50:02.908Z"
+    },
+    {
+      "id": 12,
+      "name": "settlement shares 40/40/20 ±1 lamport (receipt)",
+      "pass": true,
+      "total_lamports": "9886126516",
+      "legs_lamports": {
+        "lpHolder": "3954450606",
+        "salvor": "3954450606",
+        "protocol": "1977225304"
+      },
+      "lp_holder_pool_balance": "3955341486",
+      "lp_holder_pool_rent": "890880",
+      "detail": "40/40/20 bps settlement verified against the on-chain receipt AND the PDA balance",
+      "at": "2026-11-06T06:50:02.913Z"
+    },
+    {
+      "id": 13,
+      "name": "salvor-bots monitor reconcile (file: import @graveyield/monitor)",
+      "pass": true,
+      "status": "receipt-verified",
+      "accepted_kind": "receipt-verified",
+      "protocol_delta_lamports": "1",
+      "verdict_reason": "monitor verified sums, ±1-lamport share tolerance, and reported figures",
+      "detail": {
+        "sumsOk": true,
+        "sharesOk": true,
+        "reportedOk": true,
+        "expectedSharesBps": {
+          "lpHolder": 4000,
+          "salvor": 4000,
+          "protocol": 2000
+        }
+      },
+      "receipt": {
+        "totalProceedsLamports": "9886126516",
+        "salvorAmountLamports": "3954450606",
+        "lpHolderAmountLamports": "3954450606",
+        "protocolAmountLamports": "1977225304",
+        "dustMemecoinLamports": "886754288",
+        "salvor": "2wEWQbD3QxCcPujc5yfrut4EUtTSRWQyLTv8dKhmvteg",
+        "issuedAtSlot": "71"
+      },
+      "identity_key": "localnet|675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8|58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2",
+      "at": "2026-11-06T06:50:02.917Z"
+    },
+    {
+      "id": 14,
+      "name": "claim_lp_proceeds ×N from Rust artifact proofs (+ dup/7010 negatives)",
+      "pass": true,
+      "claims": [
+        {
+          "holder": "claimant_a",
+          "paid": "859663175",
+          "expected": "859663175"
+        },
+        {
+          "holder": "claimant_b",
+          "paid": "515797905",
+          "expected": "515797905"
+        },
+        {
+          "holder": "salvor",
+          "paid": "2578989525",
+          "expected": "2578989525"
+        }
+      ],
+      "detail": "every holder paid exactly floor(pool × balance / supply) per the Rust artifact proofs; ClaimRecords initialized",
+      "at": "2026-11-06T06:50:04.648Z"
+    },
+    {
+      "id": 15,
+      "name": "sweep_dust (permissionless) positive + re-sweep negative",
+      "pass": true,
+      "dust_memecoin_lamports": "886754288",
+      "treasury_delta": "886754288",
+      "detail": "dust swept to the protocol treasury ATA; vault ATA closed; re-sweep reverted 3012 (closed-ATA Anchor decode precedes the handler's 7021 — fork-covered)",
+      "at": "2026-11-06T06:50:07.431Z"
+    },
+    {
+      "id": 16,
+      "name": "emergency-control drills via protocol_admin.mjs (scanner + vault)",
+      "pass": true,
+      "drills": [
+        {
+          "program": "scanner",
+          "ok": true
+        },
+        {
+          "program": "vault",
+          "ok": true
+        }
+      ],
+      "detail": "production emergency-control drill green on both programs: init-assert → pause → assert → intruder-must-revert (6000/7000) → unpause",
+      "at": "2026-11-06T06:50:10.824Z"
+    }
+  ],
+  "adversarial": [
+    {
+      "id": "A1",
+      "name": "evaluate_pool_phase_1 without the ed25519 precompile instruction",
+      "expected": {
+        "code": 6024
+      },
+      "observed": {
+        "code": 6024,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "6024"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "5Aru1kthcZQeWoXj87NRUk3QVdQMEfdK7mDey4vySRTLWJxvw3ZneqUgw56UpuY2c8wCnjzHR9CgBjjhyMakapXe",
+      "slot": "18",
+      "logs_tail": [
+        "Program log: Instruction: EvaluatePoolPhase1",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-scanner/src/attestation.rs:440. Error Code: AttestationMissing. Error Number: 6024. Error Message: AttestationMissing: no ed25519 verify instruction precedes this instruction..",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 15455 of 200000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0x1788"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:41.100Z"
+    },
+    {
+      "id": "A2",
+      "name": "evaluate_pool_phase_1 with a tampered oracle signature",
+      "expected": {
+        "family": "precompile"
+      },
+      "observed": {
+        "code": 2,
+        "family": "precompile",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "2"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "CBy9APjopv3imuj9cL5xAdgkQEBz5qqwtyuZbXkkYQpkhtES9xCSBavY1cTKe5ZK7e4U8b7sTbyMnoRE2bjWP8q",
+      "slot": "19",
+      "logs_tail": [],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:41.566Z"
+    },
+    {
+      "id": "A3",
+      "name": "evaluate_pool_phase_1 with non-canonical precompile offsets (sig@56)",
+      "expected": {
+        "code": 6025
+      },
+      "observed": {
+        "code": 6025,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "1",
+            {
+              "Custom": "6025"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "47s98ahfzzE9MxymDdRWyzDaZu34rh1nHj4hSMNpZ9gS7Zu642WBbLHdR5otLNgXqK9u3fF9pFzQ8EEpdRKTqL9r",
+      "slot": "20",
+      "logs_tail": [
+        "Program log: Instruction: EvaluatePoolPhase1",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-scanner/src/attestation.rs:292. Error Code: InvalidAttestationOffsets. Error Number: 6025. Error Message: InvalidAttestationOffsets: ed25519 offsets do not bind the signature to the embedded attestation..",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 17736 of 203000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0x1789"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:42.027Z"
+    },
+    {
+      "id": "A4",
+      "name": "evaluate_pool_phase_1 signed by an unauthorized oracle key",
+      "expected": {
+        "code": 6026
+      },
+      "observed": {
+        "code": 6026,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "1",
+            {
+              "Custom": "6026"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "4E2SYX5hwKRLUEKgpm2jVsTSpftbaioSJ92pJXMwdTwkaRdTich56fuS1BEkHGNYEnhmF327nzCRZ6NtvFttp5mT",
+      "slot": "21",
+      "logs_tail": [
+        "Program log: Instruction: EvaluatePoolPhase1",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-scanner/src/attestation.rs:310. Error Code: AttestationOracleMismatch. Error Number: 6026. Error Message: AttestationOracleMismatch: signature public key is not the configured activity oracle..",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 17732 of 203000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0x178a"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:42.483Z"
+    },
+    {
+      "id": "A5",
+      "name": "evaluate_pool_phase_1 with a malformed (111-byte) attestation message",
+      "expected": {
+        "family": "anchor-decode"
+      },
+      "observed": {
+        "code": 102,
+        "family": "anchor-decode",
+        "err": {
+          "InstructionError": [
+            "1",
+            {
+              "Custom": "102"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "4M5cmtPddZ7oPG4i8q2qhF6w9FxJJzbbTtL4QVgvrMsjeJCPoZFwWF1RdAPa8mKur4ng4NxLZV6z6HbboNMbwh5p",
+      "slot": "22",
+      "logs_tail": [
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL invoke [1]",
+        "Program log: Instruction: EvaluatePoolPhase1",
+        "Program log: AnchorError occurred. Error Code: InstructionDidNotDeserialize. Error Number: 102. Error Message: The program could not deserialize the given instruction.",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 5458 of 203000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0x66"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:42.946Z"
+    },
+    {
+      "id": "A10",
+      "name": "illegal transition: evaluate_pool_phase_2 before any anchor exists",
+      "expected": {
+        "code": 3012
+      },
+      "observed": {
+        "code": 3012,
+        "family": "anchor-decode",
+        "err": {
+          "InstructionError": [
+            "1",
+            {
+              "Custom": "3012"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "4MwHinyNubz2uWPHy3Sn5JGXDzxgYcx7NGbuLMTSvLX1ge2i8kaRZpXuunnckaBrQVo7w2nEdJcJWu9xA5j376GX",
+      "slot": "27",
+      "logs_tail": [
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL invoke [1]",
+        "Program log: Instruction: EvaluatePoolPhase2",
+        "Program log: AnchorError caused by account: eligibility_anchor. Error Code: AccountNotInitialized. Error Number: 3012. Error Message: The program expected this account to be already initialized.",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 6519 of 203000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0xbc4"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_anchor": true,
+          "eligibility_cert": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:44.921Z"
+    },
+    {
+      "id": "S7-gap1",
+      "name": "evaluate_pool_phase_2 inside the 2-epoch confirmation gap → 6016",
+      "expected": {
+        "code": 6016
+      },
+      "observed": {
+        "code": 6016,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "1",
+            {
+              "Custom": "6016"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "3ZHwFwLgVxFukntxQ7Sz3kNy83vqNG5axJKAAPE8JcqAaZBqwcb2zpK7gJSX8YURGGFYF3dq4aC1Qdhg5N9p1bEe",
+      "slot": "29",
+      "logs_tail": [
+        "Program log: Instruction: EvaluatePoolPhase2",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-scanner/src/criteria.rs:173. Error Code: EpochConfirmationPending. Error Number: 6016. Error Message: EpochConfirmationPending: anchor first_eligible_epoch + MIN_EPOCH_CONFIRMATION not yet reached..",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL consumed 24669 of 203000 compute units",
+        "Program EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL failed: custom program error: 0x1780"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "10000",
+        "expected_fee_lamports": "10000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "eligibility_cert": true
+        },
+        "accounts_unchanged": {
+          "eligibility_anchor": true
+        },
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:49:45.817Z"
+    },
+    {
+      "id": "A6",
+      "name": "salvage_pool while the vault is paused → 7003",
+      "expected": {
+        "code": 7003
+      },
+      "observed": {
+        "code": 7003,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "7003"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "NsHTpGVqmnWtRrwoCLs1yxKkwC8WFisgbQi9wZcpcsQgp94D8cQ6wU1KpSoJJAPtM6rFYGXTAR1zcEP46mVWwXV",
+      "slot": "67",
+      "logs_tail": [
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+        "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 23580 of 141370 compute units",
+        "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success",
+        "Program log: AnchorError thrown in programs/grave-vault/src/instructions/salvage_pool.rs:296. Error Code: ProtocolPaused. Error Number: 7003. Error Message: Protocol is paused. salvage_pool is unavailable..",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 105273 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: custom program error: 0x1b5b"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "salvage_receipt": true,
+          "pool_registry": true,
+          "lp_holder_pool": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:50:01.281Z"
+    },
+    {
+      "id": "A7",
+      "name": "salvage_pool with a tampered lp_total_supply_at_snapshot → 7018",
+      "expected": {
+        "code": 7018
+      },
+      "observed": {
+        "code": 7018,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "7018"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "4t6FWY1BaPeCm3EqnuEZMSpZLQspLQhoMELE9MW2K9NVioMbZFNWmRpoUJTcTjMA8CRCibW78YD537LDoz2qTn4S",
+      "slot": "69",
+      "logs_tail": [
+        "Program 11111111111111111111111111111111 success",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-vault/src/instructions/salvage_pool.rs:397. Error Code: InvalidSnapshotData. Error Number: 7018. Error Message: Snapshot mismatch with on-chain LP token state..",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 111087 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: custom program error: 0x1b6a"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "salvage_receipt": true,
+          "pool_registry": true,
+          "lp_holder_pool": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:50:02.179Z"
+    },
+    {
+      "id": "A8",
+      "name": "replayed salvage_pool after a completed salvage → registry init failure",
+      "expected": {
+        "family": "anchor-decode"
+      },
+      "observed": {
+        "code": null,
+        "family": "anchor-decode",
+        "err": {
+          "InstructionError": [
+            "0",
+            "InvalidInstructionData"
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "5xeRhoTjAaEPtNbvoE9UuoL6FUfEmW5dq3Q4YjzdBNZ4gUDnwFV1DEKXbVUdzf2NcGjH7yyDeuVgGpVLRqgP6vcW",
+      "slot": "72",
+      "logs_tail": [
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya invoke [1]",
+        "Program log: Instruction: SalvagePool",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 failed: invalid instruction data",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 17842 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: invalid instruction data"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {},
+        "accounts_unchanged": {
+          "salvage_receipt": true,
+          "pool_registry": true,
+          "lp_holder_pool": true
+        },
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "boundary_note": "exact code pinned by observation: Anchor account-already-initialized precedes any handler logic",
+      "at": "2026-11-06T06:50:03.382Z"
+    },
+    {
+      "id": "A9a",
+      "name": "duplicate claim_lp_proceeds → ClaimRecord init failure",
+      "expected": {
+        "family": "anchor-decode"
+      },
+      "observed": {
+        "code": null,
+        "family": "anchor-decode",
+        "err": {
+          "InstructionError": [
+            "0",
+            "InvalidInstructionData"
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "oTCVudVE4Ur1vBoctVTwEuRZvxDSWpmHS6djqgSHMxqePxqktVP5JpV4pHo7vxjg3VVY2BeohGYFYRT3Cc169oR",
+      "slot": "77",
+      "logs_tail": [
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya invoke [1]",
+        "Program log: Instruction: ClaimLpProceeds",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 failed: invalid instruction data",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 8358 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: invalid instruction data"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {},
+        "accounts_unchanged": {
+          "claim_record_a": true
+        },
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "boundary_note": "exact code pinned by observation: AccountAlreadyInitialized on the claim_record init (fork precedent lp_claim_fork L1569-1589)",
+      "at": "2026-11-06T06:50:05.104Z"
+    },
+    {
+      "id": "A9b",
+      "name": "claim with a tampered merkle proof → 7010 (proof does not bind (holder, amount))",
+      "expected": {
+        "code": 7010
+      },
+      "observed": {
+        "code": 7010,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "7010"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "2MG1eERZJVdEgSfZrvpbsS65djks5yBKojzaLvG9H6JsDZd42Di1HT9KtgobrTjrgZSkHFGhBrYF84G8x3KzMxwS",
+      "slot": "78",
+      "logs_tail": [
+        "Program log: Instruction: ClaimLpProceeds",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-vault/src/instructions/claim_lp_proceeds.rs:126. Error Code: InvalidClaimProof. Error Number: 7010. Error Message: Claim proof failed verification against the snapshot Merkle root..",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 15223 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: custom program error: 0x1b62"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "claim_record_intruder": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "at": "2026-11-06T06:50:05.940Z"
+    },
+    {
+      "id": "A9c",
+      "name": "claim with an inflated lp_balance_at_snapshot → proof binding rejects (7010)",
+      "expected": {
+        "code": 7010
+      },
+      "observed": {
+        "code": 7010,
+        "family": "custom",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "7010"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "2eaKXwjbsBCKkmie4EfzZziQjtrvoRuFxLQCAMMVTQ1oiqVLNt2GatNsnM8mi1JXebqHC7SZru6Rb5DKG6RQBGPi",
+      "slot": "80",
+      "logs_tail": [
+        "Program log: Instruction: ClaimLpProceeds",
+        "Program 11111111111111111111111111111111 invoke [2]",
+        "Program 11111111111111111111111111111111 success",
+        "Program log: AnchorError thrown in programs/grave-vault/src/instructions/claim_lp_proceeds.rs:126. Error Code: InvalidClaimProof. Error Number: 7010. Error Message: Claim proof failed verification against the snapshot Merkle root..",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 15484 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: custom program error: 0x1b62"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {
+          "claim_record_intruder": true
+        },
+        "accounts_unchanged": {},
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "boundary_note": "fork-covered boundary: the fork's 7009 math-overflow needs in-VM registry control; on a live validator the proof binding rejects first with 7010",
+      "at": "2026-11-06T06:50:06.376Z"
+    },
+    {
+      "id": "S15-resweep",
+      "name": "second sweep_dust → 3012 (closed vault ATA decode; one-shot guard intact — 7021 unreachable on a live validator)",
+      "expected": {
+        "code": 3012
+      },
+      "observed": {
+        "code": 3012,
+        "family": "anchor-decode",
+        "err": {
+          "InstructionError": [
+            "0",
+            {
+              "Custom": "3012"
+            }
+          ]
+        }
+      },
+      "pass": true,
+      "tx": "9whac37YcvvT9L6vMcpwLDg9NcuxJEErJZtkRad8oeBUvqVw1ebbczKuwpGhghDPGTTqKSJcfKTpyDUDxsi9qVW",
+      "slot": "82",
+      "logs_tail": [
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya invoke [1]",
+        "Program log: Instruction: SweepDust",
+        "Program log: AnchorError caused by account: vault_memecoin_token_account. Error Code: AccountNotInitialized. Error Number: 3012. Error Message: The program expected this account to be already initialized.",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya consumed 5352 of 200000 compute units",
+        "Program 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya failed: custom program error: 0xbc4"
+      ],
+      "zero_movement": {
+        "proved": true,
+        "fee_payer_delta_lamports": "5000",
+        "expected_fee_lamports": "5000",
+        "fee_ok": true,
+        "sol_unchanged": {
+          "authority": true,
+          "activity_oracle": true,
+          "launch_oracle": true,
+          "intruder": true,
+          "claimant_a": true,
+          "claimant_b": true,
+          "treasury_pda": true,
+          "vault_authority_pda": true,
+          "lp_holder_pool_pda": true
+        },
+        "tokens_unchanged": true,
+        "pdas_absent": {},
+        "accounts_unchanged": {
+          "salvage_receipt": true,
+          "pool_registry": true
+        },
+        "note": "the fee payer is debited EXACTLY the transaction's on-chain fee (meta.fee) — the only permitted movement; every other tracked SOL wallet, token account, and existing account must be bit-identical, and listed PDAs must remain absent"
+      },
+      "boundary_note": "fork-covered: the fork suites assert 7021 in-VM where the ATA can be re-funded; on a live validator the closed account decode precedes the handler",
+      "at": "2026-11-06T06:50:07.431Z"
+    }
+  ],
+  "boundaries": [
+    "synthetic C1 lastSwap timestamps (fork-precedented)",
+    "synthetic-collapse launch price ×200 (fork-precedented)",
+    "LP mint supply re-pinned to the local holder set; economics grounded in manifest amm_lp_amount (C6)",
+    "conversion leg config-skipped via u64::MAX dust — canonical full_lifecycle_fork shape (C3)",
+    "route-account shim satisfies fleet-core destination validation; never executed on-chain (skipped leg)",
+    "7002 expired-cert negative fork-covered (no wall-clock fast-forward on a live validator)",
+    "A9c inflated-payout binds to 7010 on a live validator (fork's 7009 needs in-VM registry control)",
+    "7002/6016 gap-1 timing may land fork-covered if the compressed clock passes the gap before stage 7",
+    "stage-13 monitor tolerance: a receipt-anomaly that is EXACTLY the program's protocol-leg rounding remainder is accepted and recorded with its magnitude (Finding D) — never relabeled as receipt-verified",
+    "stage-15 re-sweep reverts 3012 (closed-ATA Anchor decode) on a live validator; the handler's 7021 is fork-covered (Finding C)",
+    "market fixture (F3, Finding E remediation landed on the salvor side): the local market is the UNMODIFIED mainnet fixture — fleet-core (salvor-bots ns3/devnet-preparation) derives the vault signer with the REAL OpenBook rule create_program_address([market, stored_nonce_le]), which reproduces the real signer for stored nonce 1; the October-era string-seed re-pin is retired (see local_plan.market + probe_vault_signer.mjs)"
+  ],
+  "alt_address": "HsEVMRQfjEYXEvqn7Nn2VzodrLZGpw2j6HL5yW8bn25g",
+  "fleet_signature": "66tf95mnggYpFdLKvTjbAgyvihbLYGQC5BDouUTB6gpjKL5zs4v74NwgVzrdR91ALExMYWRphxnh66Syjq3FAmUx",
+  "fleet_events": 6,
+  "component_classification": [
+    {
+      "component": "GraveScanner",
+      "classification": "REAL",
+      "detail": "locally built ELF, sha256 == approved NS-3 digest (provenance gate + stage 1 loaded-bytes check), executed on the local validator via real SDK/RPC transactions"
+    },
+    {
+      "component": "GraveVault",
+      "classification": "REAL",
+      "detail": "locally built ELF, sha256 == approved NS-3 digest, executed on the local validator (init, salvage_pool, claim_lp_proceeds, sweep_dust, drills)"
+    },
+    {
+      "component": "SDK clients (GraveYieldClient + instruction builders)",
+      "classification": "REAL",
+      "detail": "graveyield-protocol sdk/dist executed for config readback, PDAs, attestations, priority fee, snapshots, claims"
+    },
+    {
+      "component": "RPC clients",
+      "classification": "REAL",
+      "detail": "@solana/web3.js (single instance from the salvor checkout) against http://127.0.0.1:8899 only; v0/ALT-aware sender"
+    },
+    {
+      "component": "Snapshotter",
+      "classification": "REAL",
+      "detail": "Rust bin grave-snapshotter-cli (SnapshotBuilder + SnapshotArtifact::seal) run as a real subprocess; cross-checked against the SDK snapshot (root/supply/holder equality)"
+    },
+    {
+      "component": "Salvor components (fleet-core ExecutionPipeline, InMemoryFleetStore)",
+      "classification": "REAL",
+      "detail": "salvor-bots fleet-core mode:\"live\" submit path executed against the local validator over a real v0/ALT transaction (F2); the local market is the UNMODIFIED real mainnet fixture — fleet-core (since the salvor-side Finding E remediation) derives the market vault signer with the REAL OpenBook v1 rule ([market, stored_nonce_le], stored nonce preserved) and the October-era string-seed re-pin is RETIRED (contrast record only); the exact source revision is recorded in the run metadata (salvor_provenance)"
+    },
+    {
+      "component": "Monitoring (@graveyield/monitor reconcile)",
+      "classification": "REAL",
+      "detail": "salvor-bots monitor executed against the local validator state; stage-13 reconciliation gate (Finding D) with recorded rounding-remainder tolerance"
+    },
+    {
+      "component": "Oracle verification (ed25519 precompile + scanner checks)",
+      "classification": "REAL",
+      "detail": "real precompile verify + scanner offset/signer/staleness checks; attestations signed by local throwaway oracle keys (never production custody)"
+    },
+    {
+      "component": "Raydium V4 withdrawal CPI",
+      "classification": "REAL",
+      "detail": "REAL mainnet raydium_v4.so bytes loaded locally at the canonical program ID; the vault's withdraw CPI executes against it with real mainnet pool/vault accounts. ONLY the withdraw leg is exercised — the conversion/swap leg is config-skipped and covered by the Jupiter v6 entry (NOT TESTED)"
+    },
+    {
+      "component": "Serum/OpenBook market leg",
+      "classification": "REAL (bytes) / UNMODIFIED fixture",
+      "detail": "real serum_dex.so + the UNMODIFIED real market accounts (stored nonce 1, real vault owners); fleet-core (since its Finding E remediation) derives the vault signer with the real OpenBook rule and validates the true market relationship at stage 10"
+    },
+    {
+      "component": "Jupiter v6 integration",
+      "classification": "NOT TESTED",
+      "detail": "conversion leg config-skipped (dust threshold u64::MAX, canonical full_lifecycle_fork shape C3); the route-account shim satisfies fleet-core destination validation but is NEVER executed on-chain — no claim of real Jupiter execution is made"
+    },
+    {
+      "component": "Merkle proof generation",
+      "classification": "REAL",
+      "detail": "snapshotter Rust artifact proofs drive stage 14 claims + A9 negatives; TS buildMerkleTree is a port cross-check"
+    },
+    {
+      "component": "LP-holder claims (claim_lp_proceeds)",
+      "classification": "REAL",
+      "detail": "three real claims paid exactly floor(pool × balance / supply); duplicates/tampered/inflated proofs rejected (A9a–c) with zero movement"
+    },
+    {
+      "component": "Settlement accounting (40/40/20)",
+      "classification": "REAL",
+      "detail": "receipt legs 40/40/20 bps ± 1 lamport + PDA balance cross-checks + salvage receipt accounting (stage 12/13)"
+    },
+    {
+      "component": "Dust handling (sweep_dust)",
+      "classification": "REAL",
+      "detail": "permissionless sweep to treasury + one-shot guard (re-sweep observed 3012; 7021 fork-covered — Finding C)"
+    },
+    {
+      "component": "Devnet/Mainnet deployment acceptance (verify_ns3_deployment.mjs)",
+      "classification": "NOT TESTED",
+      "detail": "owner-executed, read-only, against the public cluster — out of W1 scope (no public-cluster operations permitted)"
+    }
+  ],
+  "reporting": {
+    "complete": true,
+    "markdown_path": "/home/z/my-project/work/graveyield-protocol/target/lifecycle-rehearsal/run-report-2026-11-06T06-49-37-889Z.summary.md",
+    "error": null
+  }
+}
