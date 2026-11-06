@@ -1,15 +1,17 @@
 // pin_elfs.mjs — ELF provenance + pinning for the local validator.
-//  - ELF SOURCE POLICY (NS-3): by default dumps the DEPLOYED devnet
-//    scanner/vault ELFs (`solana program dump`, strongest provenance) —
-//    which requires the NS-3 programs to EXIST on devnet, i.e. only after
-//    the owner's deployment. Pre-deployment (the NS-3 preparation window),
-//    pass `--local-so <scanner.so> <vault.so>` to pin LOCALLY BUILT ELFs
-//    instead (test identities + local artifacts only; the source is
-//    recorded honestly as "local build" in the pin table, never as a
-//    devnet dump).
+//  - ELF SOURCE POLICY (NS-3, W1): the rehearsal pins LOCALLY BUILT ELFs via
+//    `--local-so <scanner.so> <vault.so>` — and the local-so path itself
+//    fail-closed-verifies the bytes against scripts/devnet/provenance.manifest.json
+//    (approved NS-3 digests + SBPF v0 + structural identity) BEFORE pinning,
+//    so even a standalone invocation cannot pin unverified bytes. The
+//    default-less devnet-dump path (dumpAndVerifyElf) is retained ONLY as an
+//    explicit verification tool for deployed programs (e.g. post-deployment
+//    diagnostics); the W1 rehearsal orchestrator never calls it — the
+//    harness must not depend on downloading program bytes from Devnet.
 //  - fetches the real mainnet Raydium V4 / Serum / SPL fixtures via the
 //    repo's own cross-validating fetcher (fetch_v4_fork_fixtures.mjs,
-//    reused verbatim)
+//    reused verbatim; READ-ONLY public RPC — third-party bytes, not
+//    GraveYield program bytes)
 //  - writes artifacts/sha256.txt (the pin table the driver embeds in the
 //    report)
 // NO program keypairs are needed: the validator loads ELFs with
@@ -20,6 +22,7 @@ import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dumpAndVerifyElf } from "./elf_dump.mjs";
+import { checkProvenance } from "../ns3_check_provenance.mjs";
 
 const DRIVER_DIR = dirname(fileURLToPath(import.meta.url));
 // lifecycle_rehearsal -> scripts/devnet -> scripts -> REPO ROOT (three dirnames — fix 2)
@@ -30,16 +33,23 @@ for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i].startsWith("--")) args[process.argv[i].slice(2)] = process.argv[++i];
 }
 const { artifacts, fixtures, rpc } = args;
-for (const [k, v] of Object.entries({ artifacts, fixtures, rpc })) {
+for (const [k, v] of Object.entries({ artifacts, fixtures })) {
   if (!v) {
     console.error(`missing --${k}`);
     process.exit(2);
   }
 }
 
+const SCANNER_ID = "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL";
+const VAULT_ID = "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya";
+
 // Optional NS-3 pre-deployment ELF source: `--local-so <scanner.so> <vault.so>`.
-// When given, the locally built ELFs are pinned instead of devnet dumps
-// (honest provenance: "local build"), and no devnet RPC dump is performed.
+// When given, the locally built ELFs are pinned instead of devnet dumps.
+// W1 HARD GATE: the local bytes must first pass the shared fail-closed
+// provenance gate against scripts/devnet/provenance.manifest.json — sha256
+// equal to the approved NS-3 digests, SBPF v0 header, structural NS-3
+// identity, no NS-1/NS-2 legacy ID bytes. A mismatch ABORTS here: the pin
+// table can never record bytes that are not the approved artifacts.
 const localSo = args["local-so"]
   ? String(args["local-so"])
       .split(/[\s,]+/)
@@ -49,9 +59,30 @@ if (localSo && localSo.length !== 2) {
   console.error("--local-so expects exactly two paths: <scanner.so> <vault.so>");
   process.exit(2);
 }
-
-const SCANNER_ID = "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL";
-const VAULT_ID = "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya";
+// `--rpc` is only meaningful for the explicit devnet-dump verification path,
+// which the W1 rehearsal does NOT use (local builds only, W1 §7).
+if (!localSo && !rpc) {
+  console.error("missing --rpc (required for the devnet-dump path; not used with --local-so)");
+  process.exit(2);
+}
+if (localSo) {
+  const gate = checkProvenance({
+    scannerSo: localSo[0],
+    vaultSo: localSo[1],
+    scannerId: SCANNER_ID,
+    vaultId: VAULT_ID,
+  });
+  for (const c of gate.checks)
+    console.log(`pin_elfs: ${c.ok ? "PASS" : "FAIL"} [${c.id}] ${c.detail}`);
+  if (!gate.ok) {
+    console.error(
+      "pin_elfs: REFUSING to pin — the local ELFs are NOT the approved NS-3 artifacts " +
+        "(provenance.manifest.json digest/arch/identity gate failed). Rebuild via " +
+        "scripts/devnet/deploy_devnet.sh --build-only; never edit the manifest to pass.",
+    );
+    process.exit(1);
+  }
+}
 
 mkdirSync(artifacts, { recursive: true });
 mkdirSync(fixtures, { recursive: true });
@@ -73,18 +104,20 @@ const dumps = [
 ];
 const dumpPins = [];
 if (localSo) {
-  // NS-3 pre-deployment path: pin the LOCALLY BUILT ELFs (no devnet dump —
-  // the NS-3 programs do not exist on devnet yet). Provenance recorded as
-  // "local build" so the pin table can never be mistaken for a dump.
+  // NS-3 W1 path: pin the LOCALLY BUILT, provenance-gated ELFs (no devnet
+  // dump). The gate above already proved the bytes equal the approved
+  // manifest digests; provenance is recorded honestly as "local build".
   for (let i = 0; i < dumps.length; i++) {
     copyFileSync(localSo[i], dumps[i].out);
     const sha256 = sha256File(dumps[i].out);
     dumpPins.push({
       programId: dumps[i].id,
       sha256,
-      source: "local build (NS-3 pre-deployment; local artifacts, no devnet dump)",
+      approved_match: true,
+      source:
+        "local build via deploy_devnet.sh --build-only (authenticated platform-tools v1.54); sha256 == approved NS-3 digests in scripts/devnet/provenance.manifest.json (fail-closed gate passed); NO devnet dump",
     });
-    console.log(`pin_elfs: local ELF ${dumps[i].id} — sha256 ${sha256}`);
+    console.log(`pin_elfs: local ELF ${dumps[i].id} — sha256 ${sha256} (approved digests: MATCH)`);
   }
 } else {
   for (const d of dumps) {
@@ -143,14 +176,18 @@ const pins = {
     file: dumps[0].out,
     sha256: sha256File(dumps[0].out),
     bytes: statSync(dumps[0].out).size,
-    source: `devnet program dump ${SCANNER_ID}`,
+    source: localSo
+      ? "local build (approved NS-3 digests verified)"
+      : `devnet program dump ${SCANNER_ID}`,
     ...dumpPins[0],
   },
   vault: {
     file: dumps[1].out,
     sha256: sha256File(dumps[1].out),
     bytes: statSync(dumps[1].out).size,
-    source: `devnet program dump ${VAULT_ID}`,
+    source: localSo
+      ? "local build (approved NS-3 digests verified)"
+      : `devnet program dump ${VAULT_ID}`,
     ...dumpPins[1],
   },
   raydium_v4: {

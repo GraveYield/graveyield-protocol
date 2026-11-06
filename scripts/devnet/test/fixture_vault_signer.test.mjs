@@ -18,13 +18,15 @@
 //   1. The REAL OpenBook v1 rule — create_program_address([market, nonce_le])
 //      — with the market's stored nonce reproduces the real mainnet vault
 //      signer. (The real market IS canonical under the program's own rule.)
-//   2. fleet-core's string-seed scheme — find_program_address(
-//      ["vault-signer", market]) — does NOT reproduce the real signer and
-//      its bump is what prepare_local_accounts.mjs pins into the LOCAL
-//      market (the documented fleet-core-compatibility adaptation).
-//   3. The exact transform prepare_local_accounts.mjs applies (read nonce
-//      @45 → write the string-PDA bump) turns a market carrying nonce=1
-//      into the adapted fixture with pinned_nonce = that bump.
+//   2. fleet-core (since the salvor-side Finding E remediation,
+//      ns3/devnet-preparation) derives the vault signer with that SAME real
+//      rule — so the UNMODIFIED mainnet market is the compatible fixture.
+//   3. The October-era string-seed re-pin adaptation is RETIRED: the
+//      string-seed PDA (bump 253) is recorded for contrast only, and any
+//      market carrying it would be ON-CURSE (invalid) under the real rule —
+//      the W1 harness must load the market UNMODIFIED. If a regression ever
+//      re-introduces the re-pin, the create_program_address([market, 253])
+//      assertion below fails exactly like the live stage-10 discovery did.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
@@ -87,40 +89,28 @@ describe("market vault-signer derivations (Finding E)", () => {
     );
   });
 
-  test("fleet-core's string-seed PDA ≠ the real signer; its bump is the fixture's pinned_nonce", async () => {
+  test("fleet-core's HISTORICAL string-seed PDA ≠ the real signer (contrast record)", async () => {
     const [pda, bump] = await findPda(
       [Buffer.from("vault-signer", "utf8"), MARKET.toBytes()],
       MARKET_PROGRAM,
     );
     assert.notEqual(pda.toBase58(), REAL_VAULT_SIGNER);
-    // Recorded from the rebuilt harness's local_plan.json (run-42 era) — the
-    // bump prepare_local_accounts.mjs pins into the local market's nonce.
+    // Contrast record from the rebuilt harness's local_plan.json (run-42 era).
     assert.equal(bump, 253);
     assert.equal(pda.toBase58(), "HdbYFz2SANRZLn8zkdEcs67oMKi4SMcEFve7xeRceWRJ");
   });
 
-  test("the prepare_local_accounts transform: nonce @45 → string-PDA bump", async () => {
-    // Synthesize a market account carrying the REAL stored nonce, apply the
-    // exact transform prepare_local_accounts.mjs applies, and verify the
-    // result.
+  test("RETIRED re-pin regression guard: a market carrying the string-seed bump is INVALID under the real rule", async () => {
+    // The retired October-era adaptation wrote bump 253 into the market's
+    // nonce field. Under the REAL OpenBook rule that nonce produces an
+    // ON-CURVE address — fleet-core's fail-closed discovery (now on the real
+    // rule) hard-fails with "address must fall off the ed25519 curve". This
+    // is the exact failure the W1 stage-10 rehearsal hit before the
+    // adaptation was retired; if anyone re-introduces the re-pin, this test
+    // documents why the local market must stay UNMODIFIED.
     const market = Buffer.alloc(388, 0);
     market.writeBigUInt64LE(STORED_NONCE, NONCE_OFFSET);
-    const oldNonce = market.readBigUInt64LE(NONCE_OFFSET);
-    const [canonicalSigner, bump] = await findPda(
-      [Buffer.from("vault-signer", "utf8"), MARKET.toBytes()],
-      MARKET_PROGRAM,
-    );
-    assert.equal(oldNonce, 1n);
-    market.writeBigUInt64LE(BigInt(bump), NONCE_OFFSET);
-    assert.equal(market.readBigUInt64LE(NONCE_OFFSET), 253n);
-    // The re-pointed vault owners are the string-PDA (fleet-core's world),
-    // NOT the real mainnet signer — the documented deviation.
-    assert.notEqual(canonicalSigner.toBase58(), REAL_VAULT_SIGNER);
-    // And the REAL rule under the ADAPTED nonce no longer reproduces the
-    // real signer either — which is exactly why the adapted market is a
-    // modified approximation valid only inside fleet-core's model, and why
-    // the on-chain withdraw path (which ignores the market vault signer)
-    // never exercises it.
+    assert.equal(market.readBigUInt64LE(NONCE_OFFSET), 1n);
     await assert.rejects(
       createProgramAddress([MARKET.toBytes(), nonceToLe(253n)], MARKET_PROGRAM),
       /off the ed25519 curve|Invalid seeds/i,

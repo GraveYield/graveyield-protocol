@@ -1,26 +1,57 @@
 # W1 Lifecycle Rehearsal Harness
 
 One command, local, end-to-end: **16 lifecycle stages + an adversarial battery,
-every one executing REAL transactions against REAL deployed program bytes
-through the REAL TypeScript SDK client paths and the REAL salvor-bots
-fleet-core submit path.** No mock replaces program execution anywhere; every
-compressed/stubbed edge is labeled in the run report's `boundaries` array.
+every one executing REAL transactions against REAL, approved-hash-verified
+program bytes through the REAL TypeScript SDK client paths and the REAL
+salvor-bots fleet-core submit path.** No mock replaces program execution
+anywhere; every compressed/stubbed edge is labeled in the run report's
+`boundaries` array, and every component is classified (REAL / MOCK / STUB /
+EXTERNAL / NOT TESTED) in the report's `component_classification` + the
+Markdown run summary.
 
 ```bash
-# prereqs: agave 3.0.10, rust 1.91.1, node ≥ 24, pnpm 9 — and BOTH workspaces
-# built:  (graveyield-protocol)$ pnpm install && pnpm -r build
+# prereqs: agave 3.0.10, rust 1.91.1 (host; the SBF build itself runs on the
+#          hash-verified platform-tools v1.54 embedded toolchain, rustc
+#          1.89.0-dev), node ≥ 24, pnpm 9 — and BOTH workspaces built:
+#         (graveyield-protocol)$ pnpm install && pnpm -r build
 #         (salvor-bots)     $ pnpm install && pnpm -r build
 
 bash scripts/devnet/lifecycle_rehearsal.sh          # uses ../salvor-bots
 #   or: SALVOR_BOTS=/path/to/salvor-bots bash scripts/devnet/lifecycle_rehearsal.sh
-#   artifacts + run report land in target/lifecycle-rehearsal/
+#   artifacts + run report + Markdown summary land in target/lifecycle-rehearsal/
 ```
+
+## ELF source policy (NS-3, W1 §7 — no Devnet program dumps)
+
+The rehearsal executes the LOCALLY BUILT scanner/vault ELFs and never
+downloads GraveYield program bytes from Devnet or Mainnet:
+
+1. `scripts/devnet/deploy_devnet.sh --build-only` builds both programs with
+   the repo's authenticated toolchain (platform-tools v1.54 archive
+   sha256-verified against `scripts/devnet/provenance.manifest.json` on
+   every run; embedded rustc 1.89.0-dev; SBPF v0).
+2. `scripts/devnet/ns3_check_provenance.mjs` (fail-closed) verifies the
+   built ELFs' sha256 equal the APPROVED NS-3 digests, the SBPF v0 header,
+   and the structural NS-3 identity (no NS-1/NS-2 legacy bytes) — BEFORE
+   anything is pinned or loaded.
+3. `pin_elfs.mjs --local-so` re-runs the same gate inside the pin step and
+   records honest provenance ("local build", approved digests matched).
+4. Stage 1 of the driver re-verifies the LOADED on-chain program bytes:
+   sha256(loaded) == approved manifest digest == pin table, after boot,
+   before any lifecycle stage.
+
+If a locally built ELF does NOT match the approved digests the run aborts —
+the digests are never weakened and the manifest is never edited to pass
+(re-pin procedure: docs/DEVNET.md, only after an independently reviewed
+rebuild). The only remaining public-RPC reads are the READ-ONLY mainnet
+fixture fetches (Raydium V4 / Serum / pool accounts — third-party bytes,
+cross-validated by `scripts/fetch_v4_fork_fixtures.mjs`).
 
 ## What it does
 
 | # | Stage | How |
 |---|---|---|
-| 1 | validator boot + ELF load at the NS-2 IDs | devnet `solana program dump` (scanner/vault) + real mainnet fixtures (Raydium V4, Serum) via `--bpf-program` (no program keypairs needed); sha256 pins recorded |
+| 1 | validator boot + ELF load at the NS-3 IDs (approved-hash verified) | locally built, provenance-gated scanner/vault ELFs (see the ELF source policy above) + real mainnet fixtures (Raydium V4, Serum) via `--bpf-program` (no program keypairs needed); stage 1 re-hashes the LOADED program bytes against the approved NS-3 digests + pin table and asserts the RPC endpoint is exactly `http://127.0.0.1:8899`; genesis identity recorded |
 | 2 | ProtocolConfig initialize | real SDK builders; vault dust = `u64::MAX` (conversion leg config-skipped — boundary C3, canonical `full_lifecycle_fork` shape) |
 | 3 | oracle registration | hand-rolled 80-byte `update_protocol_config` (no SDK builder exists — governance action, per ORACLE_CUSTODY.md) |
 | 4 | discovery wiring smoke | SDK `evaluatePool` against the fixture pool (tolerant — C5/C6 boundary) |
@@ -65,23 +96,21 @@ signature fee, recorded, never normalized away):
   `VersionedTransaction` v0 over a REAL local address-lookup table, created
   and pre-warmed BEFORE the battery so creation costs never enter a
   zero-movement window.
-- **F3 — market vault signer (Finding E remediation)**: fleet-core's
-  account-discovery pipeline derives the market vault signer as the
-  string-seed PDA `["vault-signer", market]` under the market program — a
-  scheme that matches NO real OpenBook market. The REAL OpenBook v1 rule is
+- **F3 — market vault signer (Finding E remediation landed on the salvor
+  side)**: the REAL OpenBook v1 rule is
   `create_program_address([market, nonce_le])`, and the real SOL/USDC
   market's stored nonce `1` (u64 LE @45) IS canonical under it — it
   reproduces the real mainnet vault signer exactly (asserted on every run
-  by `probe_vault_signer.mjs` and `prepare_local_accounts.mjs`). The local
-  fixture is therefore ADAPTED to fleet-core's scheme: the local market's
-  stored nonce is re-pinned to the string-seed PDA's bump and both market
-  vault token accounts' owner is re-pointed to that PDA. This is a
-  documented fleet-core-compatibility adaptation — the local market
-  DEVIATES from mainnet semantics, and the modified relationship is never
-  validated on-chain by the W1 salvage path (the vault's Raydium withdraw
-  CPI ignores the market vault signer). Faithful CPI evidence lives in the
-  fork suite (`raydium_v4_fork.rs`), which uses the UNMODIFIED mainnet
-  market. Evidence: `probe_vault_signer.mjs`, `local_plan.market`.
+  by `probe_vault_signer.mjs` and `prepare_local_accounts.mjs`). fleet-core
+  (salvor-bots `ns3/devnet-preparation`) now derives the vault signer with
+  that SAME real rule, so the W1 local market loads **UNMODIFIED** (real
+  mainnet bytes, real vault owners) and the stage-10 fail-closed discovery
+  validates the true market relationship. The October-era string-seed
+  re-pin adaptation (stored nonce → `["vault-signer", market]` bump 253 +
+  re-pointed vault owners) is RETIRED — under the real rule that adapted
+  nonce is on-curve and would fail discovery (regression-guarded in
+  `test/fixture_vault_signer.test.mjs`). Evidence: `probe_vault_signer.mjs`,
+  `local_plan.market`, salvor-bots `fleet-core/src/raydiumAccounts.ts`.
 
 ## Labeled boundaries (none silent)
 
@@ -159,28 +188,35 @@ rebuild iterations, the load-bearing ones beyond F1–F3:
   Regression: `scripts/devnet/test/monitor_gate.test.mjs`.
 - **E — fixture derivation**: the F3 narrative was inverted — the real
   market IS canonical under the real OpenBook rule; fleet-core's string-seed
-  derivation is the mismatch. `probe_vault_signer.mjs` now derives with the
+  derivation was the mismatch. `probe_vault_signer.mjs` derives with the
   REAL rule and hard-fails on mismatch, `prepare_local_accounts.mjs`
   records both derivations in `local_plan.market` and hard-fails if the
-  real rule stops reproducing the manifest signer, and the fixture is
-  documented as a fleet-core-compatibility adaptation. Regression:
-  `scripts/devnet/test/fixture_vault_signer.test.mjs`.
+  real rule stops reproducing the manifest signer. The remediation
+  completed on the salvor side (fleet-core now derives the REAL rule), so
+  the W1 fixture loads UNMODIFIED and the former re-pin adaptation is
+  retired. Regression: `scripts/devnet/test/fixture_vault_signer.test.mjs`.
 
 ## Files
 
-- `lifecycle_rehearsal.sh` (repo `scripts/devnet/`) — orchestrator
+- `lifecycle_rehearsal.sh` (repo `scripts/devnet/`) — orchestrator (local
+  authenticated build → approved-hash gate → pin → boot → drive)
 - `lib.mjs` — plumbing: single web3.js instance from the salvor checkout,
   BigInt-safe JSON, sysvar slot-hash reader, v0/ALT-aware sender, error-family
   classifier mirroring grave-indexer's `classifySim`, ESM `require` shim for
   the SDK's lazy spl-token load
-- `pin_elfs.mjs` — devnet dumps (via `elf_dump.mjs`: isolated destination,
-  checked subprocess result, SBF ELF validation, on-chain byte-identity
-  provenance) + mainnet fixture fetch + sha256 pin table
+- `pin_elfs.mjs` — LOCALLY BUILT ELF pinning with the approved-digest gate
+  (`--local-so`; the explicit devnet-dump verifier `elf_dump.mjs` is retained
+  as a post-deployment diagnostics tool, unused by this orchestrator) +
+  mainnet fixture fetch + sha256 pin table
 - `prepare_local_accounts.mjs` — patched accounts + holder ATAs + loader flags
   (written ONCE, after the holder section — run-2 fix)
 - `register_oracle.mjs` — the 80-byte governance ix + readback asserts
 - `drive_lifecycle.mjs` — the 16-stage + adversarial driver
 - `elf_dump.mjs` — Finding A: checked, provenance-verified program dumps
+  (post-deployment diagnostics; NOT used by the W1 orchestrator)
 - `monitor_gate.mjs` — Finding D: explicit stage-13 reconciliation gate
+- `summarize.mjs` — W1 §11: component classification (REAL/MOCK/STUB/
+  EXTERNAL/NOT TESTED) + Markdown run summary next to the JSON report
 - `probe_slothash.mjs`, `probe_vault_signer.mjs` — F1/F3 evidence probes
 - `test/` — node:test regression suites (run: `pnpm --filter @graveyield/devnet-tools test`)
+- Inspection record: `docs/W1_NS3_REHEARSAL_INSPECTION.md`

@@ -38,7 +38,9 @@
 //  AccountNotInitialized precedes the handler's 6015);  8 scanner remaining
 //  accounts include the UNCX marker PDA (6020 otherwise);  9 loader flags
 //  written after holder dumps;  10 SLOT-HASH from the sysvar (F1);  11 v0/ALT
-//  salvage tx (F2);  12 market nonce re-pin (F3, in prepare_local_accounts);
+//  salvage tx (F2);  12 market nonce re-pin (F3, in prepare_local_accounts —
+//  HISTORICAL: that re-pin is RETIRED since the salvor-side Finding E
+//  remediation; the market now loads UNMODIFIED);
 //  13 single web3 instance from the salvor checkout + 3.x simulate adapter.
 import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -73,6 +75,10 @@ import {
 } from "./lib.mjs";
 import { registerOracles, readbackAssertOracles } from "./register_oracle.mjs";
 import { classifyReconciliation } from "./monitor_gate.mjs";
+import { loadProvenanceManifest } from "../ns3_check_provenance.mjs";
+import { matchOnChainProgramData } from "./elf_dump.mjs";
+import { gitProvenance, sanitizeRemoteUrl } from "./provenance.mjs";
+import { COMPONENT_CLASSIFICATION, completeReporting, w1ExitStatus } from "./summarize.mjs";
 
 // --- args --------------------------------------------------------------------
 const args = {};
@@ -183,11 +189,78 @@ const SOL_WATCH = () => ({
 
 // --- report ---------------------------------------------------------------------
 const ts = new Date().toISOString().replace(/[:.]/g, "-");
+
+// W1 §11 metadata: repository / branch / commit / toolchain context. Git
+// values are read best-effort (the harness may run from a tarball); absent
+// git metadata is recorded as null rather than invented. The remote URL is
+// SANITIZED (same credential-leak surface as the salvor provenance below):
+// a credentialed remote must never reach the JSON/Markdown reports.
+function gitMeta() {
+  const run = (args) => {
+    try {
+      return spawnSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).stdout?.trim() ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    repository: sanitizeRemoteUrl(run(["remote", "get-url", "origin"])),
+    base_branch: "main",
+    base_commit: run(["rev-parse", "origin/main"]),
+    feature_branch: run(["branch", "--show-current"]),
+    feature_commit: run(["rev-parse", "HEAD"]),
+  };
+}
+
+function toolchainMeta() {
+  const v = (cmd, args) => {
+    try {
+      // Collapse embedded newlines (--version strings like cargo-build-sbf's
+      // carry a second line) so report/summary tables stay single-line.
+      return ((spawnSync(cmd, args, { encoding: "utf8" }).stdout ?? "").trim() || null)?.replace(
+        /\s+/g,
+        " ",
+      );
+    } catch {
+      return null;
+    }
+  };
+  // The pinned SBF toolchain: platform-tools v1.54 (embedded rustc
+  // 1.89.0-dev) as hash-verified by the orchestrator's provenance gate.
+  const ptStamp = (() => {
+    try {
+      return readFileSync(
+        pjoin(
+          process.env.HOME ?? "",
+          ".cache/solana/v1.51/platform-tools/.graveyield-pinned-sha256",
+        ),
+        "utf8",
+      ).trim();
+    } catch {
+      return null;
+    }
+  })();
+  return {
+    solana_cli: v("solana", ["--version"]),
+    cargo_build_sbf: v("cargo-build-sbf", ["--version"]),
+    platform_tools_pinned_sha256: ptStamp,
+    platform_tools_version: "v1.54 (embedded rustc 1.89.0-dev; approved NS-3 build toolchain)",
+    node: process.version,
+  };
+}
+
 const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
   authorization:
     "W1 Lifecycle Rehearsal Harness — owner authorization, Handoff Vol IV §8 (verbatim)",
   cluster: "solana-test-validator (local, --slots-per-epoch 32)",
   url,
+  ...gitMeta(),
+  toolchain: toolchainMeta(),
+  // W1 §11: the salvor-bots checkout is part of the execution environment
+  // (fleet-core submit path + monitor reconcile) — its exact source revision
+  // is recorded here, or the limitation is stated explicitly (never silently
+  // presented as complete provenance).
+  salvor_provenance: gitProvenance(salvorBots),
   program_ids: {
     scanner: IDS.scanner.toBase58(),
     vault: IDS.vault.toBase58(),
@@ -205,10 +278,35 @@ const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
   boundaries_note: "see 'boundaries' — every mocked/stubbed/compressed edge is labeled here",
 });
 
+// Early-failure finalization (W1 P2 review finding). failFast() previously
+// finalized the JSON directly (`report.finish` + `process.exit`) and BYPASSED
+// completeReporting — an early lifecycle failure could produce a JSON report
+// without the mandatory Markdown summary and without a reporting-completeness
+// stamp. The failure now finalizes through the SAME mandatory-reporting
+// mechanism as normal completion:
+//   - the original failure reason is preserved verbatim — as a failed report
+//     entry (so all_pass can never stay true, even with zero recorded stages)
+//     and as a top-level `failure` field in the JSON;
+//   - BOTH reports (JSON + Markdown) are generated whenever possible, and the
+//     JSON is stamped with the explicit `reporting` marker;
+//   - a reporting failure is recorded as such and never conceals (or is
+//     substituted for) the original lifecycle failure;
+//   - the exit code stays non-zero: the lifecycle failed, whatever reporting
+//     did.
 function failFast(msg) {
-  report.finish({});
+  report.stage({
+    id: "FATAL",
+    name: "early failure — mandatory reporting finalization",
+    pass: false,
+    reason: msg,
+  });
+  const doc = report.finish({ failure: msg });
+  const reporting = completeReporting(doc, report.outPath);
+  if (reporting.ok) console.log(`run summary: ${reporting.mdPath}`);
   console.error(`FATAL: ${msg}`);
-  process.exit(1);
+  const exitStatus = w1ExitStatus(doc, reporting);
+  for (const reason of exitStatus.reasons) console.error(`W1 INCOMPLETE: ${reason}`);
+  process.exit(exitStatus.code === 0 ? 1 : exitStatus.code);
 }
 
 // --- shared helpers ---------------------------------------------------------------
@@ -507,7 +605,23 @@ function malformedPhase1Ix({ ammProgramId, poolAddress, shortMsg, writer }) {
 }
 
 // --- [stage 1] validator + ELF provenance ---------------------------------------------
-await stage(1, "validator boot + ELF load at NS-2 IDs (sha256 pins)", async () => {
+// W1 §8.A: the RPC endpoint must be EXACTLY the local validator, the NS-3
+// program identities must be loaded and executable, and the LOADED program
+// bytes must hash to the APPROVED NS-3 digests (provenance.manifest.json)
+// AND match the pin table — belt-and-braces on top of the orchestrator's
+// pre-boot gate: this proves what the validator is actually EXECUTING.
+const APPROVED_MANIFEST = loadProvenanceManifest();
+const APPROVED_IDS = { scanner: IDS.scanner.toBase58(), vault: IDS.vault.toBase58() };
+
+await stage(1, "validator boot + ELF load at NS-3 IDs (approved-hash verified)", async () => {
+  // 0. Endpoint guard — no transaction may target anything but the local
+  // validator (W1 execution boundary).
+  if (url !== "http://127.0.0.1:8899") {
+    failFast(
+      `RPC endpoint is ${url} — the W1 rehearsal executes ONLY against http://127.0.0.1:8899`,
+    );
+  }
+  const genesisHash = await connection.getGenesisHash();
   const checks = [];
   for (const [label, id] of [
     ["scanner", IDS.scanner],
@@ -519,6 +633,72 @@ await stage(1, "validator boot + ELF load at NS-2 IDs (sha256 pins)", async () =
       throw new Error(`${label} program not loaded/executable at ${id.toBase58()}`);
     checks.push({ label, loaded: true, bytes: info.data.length });
   }
+  // Loaded GraveYield bytes must CONTAIN the approved NS-3 artifacts.
+  // Layout note: `--bpf-program` boots the ELF under the upgradeable loader,
+  // so the on-chain program account data is a ProgramData header + the ELF
+  // (loader-v3), not the raw file — the byte-identity must be established
+  // the way elf_dump.mjs does it (header-aware), and the hash compared is
+  // the PINNED ELF FILE's sha256 (== approved digest, proven pre-boot and
+  // re-asserted here). Hashing the raw account data would be a category
+  // error, not a provenance failure.
+  const approvedByLabel = {
+    scanner: APPROVED_MANIFEST.programs.grave_scanner.sha256,
+    vault: APPROVED_MANIFEST.programs.grave_vault.sha256,
+  };
+  const hashChecks = [];
+  const BPF_LOADER_V3 = "BPFLoaderUpgradeab1e11111111111111111111111";
+  for (const label of ["scanner", "vault"]) {
+    const programId = pk(APPROVED_IDS[label]);
+    const info = await connection.getAccountInfo(programId);
+    if (!info) throw new Error(`${label} program account missing for hash verification`);
+    // The 36-byte upgradeable-loader program account is a POINTER to the
+    // ProgramData account (derived PDA of [programId] under the loader) —
+    // the ELF payload lives THERE after its state header. Resolve it the
+    // same deterministic way elf_dump.mjs does (verified layout handling).
+    let onChainData = Buffer.from(info.data);
+    let programDataAddr = null;
+    if (info.owner.toBase58() === BPF_LOADER_V3) {
+      const [dataPda] = W3.PublicKey.findProgramAddressSync(
+        [programId.toBytes()],
+        new W3.PublicKey(BPF_LOADER_V3),
+      );
+      programDataAddr = dataPda.toBase58();
+      const di = await connection.getAccountInfo(dataPda);
+      if (!di) throw new Error(`${label}: ProgramData account ${programDataAddr} missing`);
+      onChainData = Buffer.from(di.data);
+    }
+    const pin = label === "scanner" ? elfPins.scanner : elfPins.vault;
+    const pinFile = pin?.file;
+    if (!pinFile || !existsSync(pinFile))
+      throw new Error(
+        `${label}: pinned ELF file missing (${pinFile ?? "none"}) — pin_elfs must run first`,
+      );
+    const elfBuf = readFileSync(pinFile);
+    const sha256 = createHash("sha256").update(elfBuf).digest("hex");
+    const approved = approvedByLabel[label];
+    if (sha256 !== approved)
+      throw new Error(
+        `${label}: pinned ELF sha256 ${sha256} != APPROVED NS-3 digest ${approved} — refusing to run the lifecycle on unapproved bytes`,
+      );
+    if (pin.sha256 !== sha256)
+      throw new Error(
+        `${label}: pin table sha256 != pinned file sha256 (${pin.sha256} vs ${sha256})`,
+      );
+    const m = matchOnChainProgramData(elfBuf, onChainData);
+    if (!m.match)
+      throw new Error(
+        `${label}: loaded on-chain program data (${onChainData.length} B) does NOT byte-contain the approved ELF (${elfBuf.length} B) — refusing to run`,
+      );
+    hashChecks.push({
+      label,
+      sha256,
+      approved_match: true,
+      pin_table_match: true,
+      on_chain_layout: m.layout,
+      program_data_account: programDataAddr,
+      loaded_bytes: onChainData.length,
+    });
+  }
   const serumProgram = pk(manifest.market_program);
   const serumInfo = await connection.getAccountInfo(serumProgram);
   if (!serumInfo || !serumInfo.executable) throw new Error("serum_dex program not loaded");
@@ -528,8 +708,11 @@ await stage(1, "validator boot + ELF load at NS-2 IDs (sha256 pins)", async () =
   if (!mintInfo) throw new Error("lp_mint account missing");
   return {
     detail:
-      "all programs executable at the NS-2 IDs; pool + re-pinned lp_mint loaded from real mainnet bytes",
+      "all programs executable at the NS-3 IDs; loaded scanner/vault program data byte-contains the pinned ELF whose sha256 == approved NS-3 digests (provenance.manifest.json) == pin table; pool + re-pinned lp_mint loaded from real mainnet bytes",
+    rpc_endpoint: url,
+    genesis_hash: genesisHash,
     programs: checks,
+    approved_hash_checks: hashChecks,
     pins: elfPins,
   };
 });
@@ -1762,15 +1945,28 @@ const boundaries = [
   "7002/6016 gap-1 timing may land fork-covered if the compressed clock passes the gap before stage 7",
   "stage-13 monitor tolerance: a receipt-anomaly that is EXACTLY the program's protocol-leg rounding remainder is accepted and recorded with its magnitude (Finding D) — never relabeled as receipt-verified",
   "stage-15 re-sweep reverts 3012 (closed-ATA Anchor decode) on a live validator; the handler's 7021 is fork-covered (Finding C)",
-  "market fixture adaptation (F3): the local market's nonce + market-vault owners are re-pointed to fleet-core's string-seed vault-signer PDA — a fleet-core-compatibility adaptation that deviates from the real OpenBook derivation ([market, nonce]); see local_plan.market + probe_vault_signer.mjs (Finding E)",
+  "market fixture (F3, Finding E remediation landed on the salvor side): the local market is the UNMODIFIED mainnet fixture — fleet-core (salvor-bots ns3/devnet-preparation) derives the vault signer with the REAL OpenBook rule create_program_address([market, stored_nonce_le]), which reproduces the real signer for stored nonce 1; the October-era string-seed re-pin is retired (see local_plan.market + probe_vault_signer.mjs)",
 ];
 const doc = report.finish({
   boundaries,
   alt_address: ALT_ADDRESS.toBase58(),
   fleet_signature: FLEET_SIGNATURE,
   fleet_events: fleetEvents.length,
+  component_classification: COMPONENT_CLASSIFICATION,
 });
-if (!doc.all_pass) process.exit(1);
+// W1 §11: BOTH reports are mandatory — the machine-readable JSON (already
+// written by finish()) AND the readable Markdown summary. A Markdown
+// generation failure is FATAL even when every lifecycle stage passed: a
+// missing mandatory report must never yield a successful completion status.
+// completeReporting stamps the JSON with an explicit `reporting` marker
+// (complete:false + the error) so an on-disk report can never masquerade as
+// complete, and w1ExitStatus preserves genuine stage failures alongside any
+// reporting failure (never overwritten, never relabeled).
+const reporting = completeReporting(doc, report.outPath);
+if (reporting.ok) console.log(`run summary: ${reporting.mdPath}`);
+const exitStatus = w1ExitStatus(doc, reporting);
+for (const reason of exitStatus.reasons) console.error(`W1 INCOMPLETE: ${reason}`);
+if (exitStatus.code !== 0) process.exit(exitStatus.code);
 console.log(
   `W1 LIFECYCLE REHEARSAL COMPLETE — 16 stages + adversarial battery all green (ALT ${ALT_ADDRESS.toBase58()}, salvage ${FLEET_SIGNATURE})`,
 );
