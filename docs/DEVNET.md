@@ -387,6 +387,83 @@ do not — see the honest-form note), that future upgrades are safe (the
 upgrade authority remains the deployer key), or anything about programs
 other than the two NS-3 addresses.
 
+### 5.1 Deployed-ELF digest verification (`verify_ns3_elf_digests.mjs`)
+
+The acceptance verifier above proves the deployment ARRANGEMENT but does
+not hash deployed bytes (the W2 report §5 records this gap explicitly).
+The deployed-ELF digest proof is a separate, standalone, strictly
+READ-ONLY utility next to it — `getGenesisHash` / `getEpochInfo` /
+`getAccountInfo` only; no signer dependency, no keypair argument, no
+transaction capability, and no override flags (the verified program IDs
+and the expected digests are the pinned repository constants, never
+options):
+
+```bash
+node scripts/devnet/verify_ns3_elf_digests.mjs --url https://api.devnet.solana.com
+# machine-readable: add --json. Commitment defaults to FINALIZED;
+# --commitment confirmed is a diagnostic override, recorded verbatim.
+```
+
+Per program (scanner A1–A4 / B1–B4 / C1–C5; vault A6–A9 / B6–B9 /
+C6–C10), plus the cluster-identity gate first:
+
+- **G — cluster identity**: the endpoint must report the pinned Devnet
+  genesis before any deployed bytes are interpreted. A foreign cluster
+  is an immediate FAIL; a failed genesis request is UNVERIFIED, which
+  forces INCOMPLETE.
+- **A — program account**: exists, loader-owned, executable, and its
+  embedded ProgramData pointer equals the INDEPENDENTLY derived loader
+  PDA (`PDA([program_id], BPFLoaderUpgradeable)`).
+- **B — ProgramData**: the REAL account is fetched at that address
+  (deriving the address does not prove existence — an absent ProgramData
+  is a FAIL, never a digest match), loader-owned, structurally decoded
+  (u32 tag=3 + u64 slot + u8 authority flag), and the upgrade-authority
+  metadata must name the deployer (absent / malformed / unexpected
+  authorities are reported as DISTINCT conditions and FAIL).
+- **C — deployed ELF**: the payload is extracted at the STRUCTURAL
+  metadata boundary (45 B when an authority is present, 13 B with
+  authority = None — the packed layout current agave writes, verified
+  byte-for-byte against devnet ProgramData accounts and the
+  loader-v3-interface sources; a legacy 48/16 B bincode-layout account
+  is reported precisely and REFUSED — the extraction boundary is never
+  silently shifted). The hashed span is the ELF's OWN declared size
+  (end of the section header table), so loader padding can never enter
+  the digest: all-zero padding is tolerated and excluded, non-zero
+  bytes beyond the declared ELF end are refused. The repository's own
+  provenance gate (`ns3_check_provenance.mjs`) then runs over the EXACT
+  retrieved bytes: SHA-256 against the
+  [`../scripts/devnet/provenance.manifest.json`](../scripts/devnet/provenance.manifest.json)
+  pin, the SBPF v0 architecture (e_machine 263 / e_flags 0), and the
+  structural NS-3 identity (embedded program ID inside allocated
+  sections; no NS-1/NS-2 legacy ID bytes).
+
+Result classifications — identical semantics to the acceptance verifier:
+`PASS` (exit 0) — both programs satisfy every required check; `FAIL`
+(exit 1) — a definitive mismatch, absent required account, malformed
+account, unexpected identity, invalid loader structure, or digest
+mismatch is established (an RPC timeout is never misreported as an
+absent account, and a malformed account can never produce a PASS);
+`INCOMPLETE` (exit 3) — RPC transport or retrieval failures prevented a
+definitive determination, only when no FAIL exists. A definitive FAIL
+takes precedence over INCOMPLETE. `--json` emits the context, a manifest
+summary, and one record per program with identical key sets on every
+evidence path: existence/owner/executable fields, embedded vs derived
+pointer comparison, loader state, upgrade-authority metadata, payload
+offset / payload size / declared ELF size / trailing padding, observed
+vs expected SHA-256, digest match, SBPF validity, and the structural
+identity verdict.
+
+Relationship to the acceptance verifier: deployment acceptance requires
+BOTH verifiers to pass on the same cluster — §5 proves the approved
+arrangement (identity, authorities, configs, oracles, pause state);
+§5.1 proves the deployed bytes are exactly the approved provenance.
+Neither substitutes for the other, and neither is modified by the
+other's presence. Historical note: the W2 exercise performed the same
+loaded-byte procedure with a one-off supplemental collector that was
+NOT committed ([`W2_ACCEPTANCE_REPORT.md`](w2-ns3-acceptance/W2_ACCEPTANCE_REPORT.md)
+§5); this utility is the reproducible replacement. It was NOT part of
+the W2 run — the W2 REJECTED classification stands exactly as recorded.
+
 ## 6. Deliberately out of scope here
 
 - **Indexer / SDK publication / first Salvor / Merkle service** — roadmap
