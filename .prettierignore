@@ -10,3 +10,9 @@ pnpm-lock.yaml
 # Prose is out of scope for the code formatter.
 *.md
 .github/
+
+# Verbatim lifecycle-rehearsal run reports are machine-generated evidence
+# (JSON.stringify(...) copies of target/lifecycle-rehearsal outputs). They are
+# committed byte-exact on purpose; reformatting would break the verbatim
+# provenance claim, and every future re-run would re-trip `fmt:ts:check`.
+docs/**/run-report-*.json
