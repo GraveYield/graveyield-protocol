@@ -1,0 +1,87 @@
+=== NS-3 deployment acceptance — STRICTLY READ-ONLY ===
+overall: FAIL (pass 3 / fail 26 / unverified 0 / info 4)
+context: slot 519265913 epoch 1202 commitment finalized
+cluster: genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG — pinned Devnet EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+identities: deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831 [pinned], governance BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5 [pinned], activity oracle 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o [pinned], launch-price oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee [pinned]
+
+Section G — cluster identity (pinned Solana Devnet genesis hash; runs before any deployment state)
+  PASS       [G1 devnet] RPC endpoint reports the pinned Solana Devnet genesis hash
+             genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG matches the pinned Devnet identity
+
+Section A — program accounts, ProgramData relationship, upgrade authority
+  FAIL       [A1 scanner] program account exists
+             no account exists at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL — the NS-3 scanner program is NOT deployed on this cluster
+  FAIL       [A2 scanner] program account owner is the BPF upgradeable loader
+             cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL
+  FAIL       [A3 scanner] program account is executable
+             cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL
+  FAIL       [A4 scanner] ProgramData account decodes from the program account pointer
+             cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL
+  FAIL       [A5 scanner] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             cannot verify — program account absent at EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL
+  FAIL       [A6 vault] program account exists
+             no account exists at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya — the NS-3 vault program is NOT deployed on this cluster
+  FAIL       [A7 vault] program account owner is the BPF upgradeable loader
+             cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
+  FAIL       [A8 vault] program account is executable
+             cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
+  FAIL       [A9 vault] ProgramData account decodes from the program account pointer
+             cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
+  FAIL       [A10 vault] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             cannot verify — program account absent at 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
+
+Section B — ProtocolConfig PDA, schema decode, governance authority, approved defaults
+  PASS       [B1 scanner] ['protocol_config'] PDA derived independently and matches the pinned derivation
+             derived 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe (bump 255) == pinned 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  FAIL       [B2 scanner] config account exists
+             scanner ProtocolConfig 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe does NOT exist — initialize has not run (or ran on a different cluster)
+  FAIL       [B3 scanner] config account owner is its own program
+             cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  FAIL       [B4 scanner] config carries the Anchor account:ProtocolConfig discriminator
+             cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  FAIL       [B5 scanner] config decodes per the current on-chain schema
+             cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  FAIL       [B6 scanner] config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+             cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  FAIL       [B7 scanner] config values match the approved spec defaults
+             cannot verify — no account at the derived PDA 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  PASS       [B8 vault] ['protocol_config'] PDA derived independently and matches the pinned derivation
+             derived 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda (bump 255) == pinned 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  FAIL       [B9 vault] config account exists
+             vault ProtocolConfig 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda does NOT exist — initialize has not run (or ran on a different cluster)
+  FAIL       [B10 vault] config account owner is its own program
+             cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  FAIL       [B11 vault] config carries the Anchor account:ProtocolConfig discriminator
+             cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  FAIL       [B12 vault] config decodes per the current on-chain schema
+             cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  FAIL       [B13 vault] config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+             cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  FAIL       [B14 vault] config values match the approved spec defaults
+             cannot verify — no account at the derived PDA 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+
+Section C — dedicated oracle signers
+  FAIL       [C1] activity oracle is the dedicated NS-3 key 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o
+             cannot verify — scanner ProtocolConfig did not decode
+  FAIL       [C2] launch-price oracle is the dedicated NS-3 key 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee
+             cannot verify — scanner ProtocolConfig did not decode
+
+Section D — emergency (paused) state, reported verbatim
+  FAIL       [D1 scanner] scanner emergency state reported and unpaused
+             cannot verify — scanner ProtocolConfig did not decode
+  FAIL       [D2 vault] vault emergency state reported and unpaused
+             cannot verify — vault ProtocolConfig did not decode
+
+Section E — NS-1/NS-2 residual identities (report only)
+  INFO       [E NS-1 scanner] legacy NS-1 scanner (5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-1 vault] legacy NS-1 vault (HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-2 scanner] legacy NS-2 scanner (CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-2 vault] legacy NS-2 vault (Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict
+
+OVERALL RESULT: FAIL
+  The on-chain state does not match the approved NS-3 arrangement. Do not treat
+  this deployment as accepted; investigate every FAIL above.
