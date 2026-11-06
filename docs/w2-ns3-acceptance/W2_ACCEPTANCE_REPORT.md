@@ -42,7 +42,7 @@ construction — the CLI accepts no identity or key inputs):
 ```
 node scripts/devnet/verify_ns3_deployment.mjs --url https://api.devnet.solana.com
 node scripts/devnet/verify_ns3_deployment.mjs --url https://api.devnet.solana.com --json
-node scripts/w2_elf_digest_check.mjs   # evidence collector run OUTSIDE the repo (not committed); see §5
+node w2_elf_digest_check.mjs   # supplemental ELF-digest evidence collector — run OUTSIDE the repo, script NOT committed (not independently reproducible from this PR alone); see §5
 ```
 
 Pre-execution inspection performed (per the W2 preparation checklist):
@@ -90,9 +90,9 @@ distinction and checks each against its own pin).
 | ProgramData address (loader-derived) | `FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG` | `9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4` |
 | ProgramData exists | **NO — corroborated independently (§5)** | **NO — corroborated independently (§5)** |
 | ProgramData owner / structure | not observable (absent) | not observable (absent) |
-| Observed upgrade authority | none (no ProgramData) | none (no ProgramData) |
+| Observed upgrade authority | not observable (ProgramData account absent) | not observable (ProgramData account absent) |
 | Expected upgrade authority | deployer `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` | deployer `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` |
-| Authority comparison | **FAIL** — approved authority arrangement not present on cluster | **FAIL** — approved authority arrangement not present on cluster |
+| Authority comparison | **FAIL** — required ProgramData account is absent; upgrade authority cannot be observed | **FAIL** — required ProgramData account is absent; upgrade authority cannot be observed |
 
 No correct deployment is inferred from the matching program IDs: the accounts were read
 directly and are absent.
@@ -109,17 +109,22 @@ payload, compare against the `provenance.manifest.json` pins).
 
 That procedure was executed reusing the repository's own helper modules
 (`programDataPda`, `parseProgramDataAccount`, `validateSbfElfBytes`,
-`matchOnChainProgramData`) in a collector script run OUTSIDE the repository (not
-committed; no repo file modified). Result (see [elf_digest_check.json](./elf_digest_check.json)):
+`matchOnChainProgramData`) in a one-off supplemental collector script — separate from
+`verify_ns3_deployment.mjs`, which was not modified in any way. The collector performed
+read-only account retrieval only (`getAccountInfo`); it signed nothing, submitted
+nothing, and wrote nothing on-chain. The collector script itself was NOT committed to
+the repository, so the exact collector execution is not independently reproducible from
+this PR alone; what is preserved is the documented procedure above and the collector's
+output below. Result (see [elf_digest_check.json](./elf_digest_check.json)):
 
 | Program | Deployed bytes found | Observed SHA-256 | Approved SHA-256 | Result |
 |---|---|---|---|---|
 | GraveScanner | none (ProgramData absent) | — | `e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98` | **UNVERIFIABLE — no deployed bytes on cluster** |
 | GraveVault | none (ProgramData absent) | — | `8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83` | **UNVERIFIABLE — no deployed bytes on cluster** |
 
-There are no deployed ELF bytes to hash, so digest comparison is not possible. This is
-reported honestly as an unverifiable category within an overall REJECTED acceptance; it
-is not recorded as a pass.
+There are no deployed ELF bytes to hash, so digest comparison is not possible and no
+SHA-256 match is claimed. This is reported honestly as an unverifiable category within
+an overall REJECTED acceptance; it is not recorded as a pass.
 
 ## 6. Configuration verification (Sections B, C, D)
 
@@ -172,10 +177,28 @@ Explicitly: this REJECTED classification must not be read as a successful accept
 and it does not authorize any deployment change. Closing the gap is an owner-executed
 Mode 2 deployment (and Mode 2 initialization/drill/oracle registration) per
 [docs/DEVNET.md](../DEVNET.md); after the owner executes it, a fresh W2 run of this
-same read-only verifier — unmodified — is the acceptance path. No INCOMPLETE finding
-was caused by an RPC failure (unverified count is 0); the only unverifiable sub-item is
-the ELF digest comparison, which is impossible by absence of deployed bytes and is
-reported as such, not as a pass.
+same read-only verifier — unmodified — is the acceptance path.
+
+Three distinct facts must be read separately here:
+
+1. **Existing verifier result: 3 PASS, 26 FAIL, 0 UNVERIFIED, 4 INFO** (§8; counts as
+   recorded, unchanged). Every RPC call succeeded, so no INCOMPLETE finding was caused
+   by an RPC failure — absence is definitive, not a transport problem. Under the
+   existing verifier's acceptance rules, a missing account makes every dependent check
+   FAIL: the governance authority (B6/B13), the dedicated oracles (C1/C2), the pause
+   state (D1/D2), and the ProgramData-derived authority checks (Section A) were all
+   unobservable because their accounts are absent, and the verifier records each of
+   them as FAIL — none is recorded as verified or as a pass, and none is reclassified
+   here.
+2. **Supplemental deployed-ELF digest check: UNVERIFIABLE** (§5) — the GraveScanner and
+   GraveVault program accounts and their ProgramData accounts are absent, so there are
+   no deployed ELF bytes to hash. This check lives outside the unmodified verifier
+   (which does not hash deployed bytes); it is reported as UNVERIFIABLE, not as a pass,
+   and it is not the only unobservable item — the account-dependent values above were
+   equally unobservable and are carried as FAILs by the verifier.
+3. **Overall W2 result: REJECTED** — because the required deployment accounts are
+   absent. The REJECTED classification rests on the verifier's FAIL verdict across the
+   missing deployment accounts, not on the supplemental ELF check.
 
 ## 10. Security statement
 
@@ -199,7 +222,7 @@ reported as such, not as a pass.
 |---|---|
 | [verify_ns3_deployment.output.txt](./verify_ns3_deployment.output.txt) | Raw terminal output, verifier run 1 (verbatim) |
 | [verify_ns3_deployment.output.json](./verify_ns3_deployment.output.json) | Raw machine-readable output, verifier run 2 (`--json`, verbatim) |
-| [elf_digest_check.json](./elf_digest_check.json) | Deployed-ELF digest check results (established procedure, repo helper modules) |
+| [elf_digest_check.json](./elf_digest_check.json) | Supplemental deployed-ELF digest check output — separate read-only collector, verifier unmodified; collector script not committed, so the exact execution is not independently reproducible from this PR alone (see §5); no SHA-256 match claimed |
 | [W2_ACCEPTANCE_REPORT.md](./W2_ACCEPTANCE_REPORT.md) | This report |
 
 Sanitization: all evidence files were scanned for credential markers (`github_pat`,
