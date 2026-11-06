@@ -34,6 +34,56 @@ function git(args, cwd) {
   return gitOut(args, cwd) || null;
 }
 
+// --- remote-URL sanitization (W1 P2 review finding) --------------------------------
+// Git remotes can embed credentials — `https://user:token@host/repo.git`,
+// token-bearing query strings (`?token=…`), fragments — and the raw
+// `git remote get-url origin` output previously went straight into the JSON
+// report and the Markdown summary. sanitizeRemoteUrl keeps what identifies
+// the repository (scheme, host, port, repository path) and drops everything
+// that can carry a secret (userinfo, query string, fragment).
+//
+// The invariant is strict and testable: the returned value NEVER contains
+// `@`, `?` or `#` — the only characters that can introduce credentials or
+// hidden parameters — so no credential material can survive any input shape.
+// A value that cannot be sanitized CONFIDENTLY returns null: callers must
+// then record the provenance as withheld/unavailable (never fabricate a
+// plausible-looking URL).
+export function sanitizeRemoteUrl(raw) {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (s === "") return null;
+  let candidate = null;
+  try {
+    const u = new URL(s);
+    if (u.hostname) {
+      // Scheme-bearing remote (https, ssh, git, git+ssh, …): protocol +
+      // host[:port] + path only. Userinfo, the ENTIRE query string and the
+      // fragment are dropped — there is no parameter allowlist, because
+      // token-like parameters cannot be enumerated reliably.
+      candidate = `${u.protocol}//${u.host}${u.pathname}`;
+    } else if (u.protocol === "file:") {
+      // Local checkout path (`file:///…`): no credential surface beyond the
+      // path itself, which is already recorded in the provenance `path`.
+      candidate = `${u.protocol}//${u.pathname}`;
+    }
+    // A parsed URL with neither host nor file: (opaque scheme like
+    // `git:something`) keeps its payload in an opaque path that cannot be
+    // credibly sanitized — leave candidate null (withheld below).
+  } catch {
+    // Not a parseable URL. scp-like short remotes (`[user@]host:path`) carry
+    // the credential in the userinfo — strip it, keep `host:path`.
+    const scp = /^(?:[^@\s/]+@)?([^\s:@/]+):([^\s/].*)$/.exec(s);
+    if (scp) candidate = `${scp[1]}:${scp[2]}`;
+    // Anything else (bare relative paths, malformed values) stays null:
+    // record nothing rather than risk recording credentials.
+  }
+  // Belt-and-braces invariant: no credential- or parameter-bearing character
+  // may survive sanitization. A remote whose repository path would need
+  // `@`, `?` or `#` is withheld, not recorded.
+  if (candidate === null || /[@?#]/.test(candidate)) return null;
+  return candidate;
+}
+
 const UNAVAILABLE_BASE = Object.freeze({
   path: null,
   inspectable: false,
@@ -60,7 +110,12 @@ export function gitProvenance(repoPath) {
       note: `PROVENANCE UNAVAILABLE: '${path}' is not a git working tree — source revision UNKNOWN`,
     };
   }
-  const repository = git(["remote", "get-url", "origin"], path);
+  // The recorded repository URL is SANITIZED (never the raw remote): git
+  // remotes can embed credentials that must not leak into reports. When a
+  // remote exists but cannot be recorded safely, that is stated explicitly —
+  // it is never silently dropped or replaced with fabricated metadata.
+  const rawRepository = git(["remote", "get-url", "origin"], path);
+  const repository = sanitizeRemoteUrl(rawRepository);
   const branch = git(["branch", "--show-current"], path);
   const head = git(["rev-parse", "HEAD"], path);
   // The commit pin is the minimum useful provenance; without it the record
@@ -75,7 +130,13 @@ export function gitProvenance(repoPath) {
   const status = gitOut(["status", "--porcelain"], path); // "" == clean (valid)
   const dirty = status === null ? null : status.length > 0;
   const notes = [];
-  if (!repository) notes.push("origin remote not configured — repository URL unknown");
+  if (!repository) {
+    notes.push(
+      rawRepository
+        ? "origin remote URL withheld — the configured remote could not be recorded without credential exposure"
+        : "origin remote not configured — repository URL unknown",
+    );
+  }
   if (dirty === null)
     notes.push("working-tree status could not be determined — dirty/clean UNKNOWN");
   if (dirty === true)

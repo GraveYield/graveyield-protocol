@@ -178,14 +178,31 @@ export function completeReporting(doc, outJsonPath) {
 // reporting failures are reported SIDE BY SIDE — a reporting error must
 // never overwrite (or be written over) a real stage failure, and a passing
 // lifecycle must never mask a missing mandatory report.
+//
+// Fail-closed (W1 P2 review finding): the reporting confirmation is NOT
+// optional. A null, missing, or malformed reporting state can never yield
+// exit 0 — it would mean mandatory reporting was skipped entirely, and a
+// green lifecycle without verified reporting is an INCOMPLETE result.
+// Valid reporting states keep their exact previous behavior ({ok:true} →
+// no reporting reason, {ok:false,error} → the error is named).
 export function w1ExitStatus(doc, reporting) {
   const reasons = [];
   if (!doc.all_pass)
     reasons.push(
       "lifecycle results: at least one stage or adversarial case FAILED (see the run report JSON for the exact failures)",
     );
-  if (reporting && !reporting.ok)
-    reasons.push(`mandatory reporting incomplete: ${reporting.error}`);
+  if (
+    reporting === null ||
+    reporting === undefined ||
+    typeof reporting !== "object" ||
+    typeof reporting.ok !== "boolean"
+  ) {
+    reasons.push(
+      "mandatory reporting incomplete: reporting confirmation MISSING or MALFORMED — a lifecycle result without verified mandatory reporting cannot exit 0",
+    );
+  } else if (!reporting.ok) {
+    reasons.push(`mandatory reporting incomplete: ${reporting.error ?? "reporting failed"}`);
+  }
   return { code: reasons.length === 0 ? 0 : 1, reasons };
 }
 

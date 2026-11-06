@@ -77,7 +77,7 @@ import { registerOracles, readbackAssertOracles } from "./register_oracle.mjs";
 import { classifyReconciliation } from "./monitor_gate.mjs";
 import { loadProvenanceManifest } from "../ns3_check_provenance.mjs";
 import { matchOnChainProgramData } from "./elf_dump.mjs";
-import { gitProvenance } from "./provenance.mjs";
+import { gitProvenance, sanitizeRemoteUrl } from "./provenance.mjs";
 import { COMPONENT_CLASSIFICATION, completeReporting, w1ExitStatus } from "./summarize.mjs";
 
 // --- args --------------------------------------------------------------------
@@ -192,7 +192,9 @@ const ts = new Date().toISOString().replace(/[:.]/g, "-");
 
 // W1 §11 metadata: repository / branch / commit / toolchain context. Git
 // values are read best-effort (the harness may run from a tarball); absent
-// git metadata is recorded as null rather than invented.
+// git metadata is recorded as null rather than invented. The remote URL is
+// SANITIZED (same credential-leak surface as the salvor provenance below):
+// a credentialed remote must never reach the JSON/Markdown reports.
 function gitMeta() {
   const run = (args) => {
     try {
@@ -202,7 +204,7 @@ function gitMeta() {
     }
   };
   return {
-    repository: run(["remote", "get-url", "origin"]),
+    repository: sanitizeRemoteUrl(run(["remote", "get-url", "origin"])),
     base_branch: "main",
     base_commit: run(["rev-parse", "origin/main"]),
     feature_branch: run(["branch", "--show-current"]),
@@ -276,10 +278,35 @@ const report = new RunReport(pjoin(artifacts, `run-report-${ts}.json`), {
   boundaries_note: "see 'boundaries' — every mocked/stubbed/compressed edge is labeled here",
 });
 
+// Early-failure finalization (W1 P2 review finding). failFast() previously
+// finalized the JSON directly (`report.finish` + `process.exit`) and BYPASSED
+// completeReporting — an early lifecycle failure could produce a JSON report
+// without the mandatory Markdown summary and without a reporting-completeness
+// stamp. The failure now finalizes through the SAME mandatory-reporting
+// mechanism as normal completion:
+//   - the original failure reason is preserved verbatim — as a failed report
+//     entry (so all_pass can never stay true, even with zero recorded stages)
+//     and as a top-level `failure` field in the JSON;
+//   - BOTH reports (JSON + Markdown) are generated whenever possible, and the
+//     JSON is stamped with the explicit `reporting` marker;
+//   - a reporting failure is recorded as such and never conceals (or is
+//     substituted for) the original lifecycle failure;
+//   - the exit code stays non-zero: the lifecycle failed, whatever reporting
+//     did.
 function failFast(msg) {
-  report.finish({});
+  report.stage({
+    id: "FATAL",
+    name: "early failure — mandatory reporting finalization",
+    pass: false,
+    reason: msg,
+  });
+  const doc = report.finish({ failure: msg });
+  const reporting = completeReporting(doc, report.outPath);
+  if (reporting.ok) console.log(`run summary: ${reporting.mdPath}`);
   console.error(`FATAL: ${msg}`);
-  process.exit(1);
+  const exitStatus = w1ExitStatus(doc, reporting);
+  for (const reason of exitStatus.reasons) console.error(`W1 INCOMPLETE: ${reason}`);
+  process.exit(exitStatus.code === 0 ? 1 : exitStatus.code);
 }
 
 // --- shared helpers ---------------------------------------------------------------
