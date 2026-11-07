@@ -1194,13 +1194,19 @@ async function verifyProgram({
   // (which subsumes the in-range section-table and program-header-table
   // validation — elfDeclaredSpan derives the extent THROUGH
   // parseElf64Sections and validates the phdr table itself), and the SBPF
-  // v0 architecture. Trailing-byte disclosure is a diagnostic, not a
-  // structural stage. Digest stages are content, not structure:
-  // digest_match=false with structure_valid=true is the meaningful "right
-  // shape, wrong bytes" outcome, not a contradiction. A regression test
-  // asserts these invariants on every evidence path.
-  report.elf.structure_valid =
-    report.elf.extraction === "OK" && spanInfo !== null && report.elf.sbpf_valid === true;
+  // v0 architecture. The extent stage is enforced by CONTROL FLOW, not by
+  // a boolean term here: elfDeclaredSpan either throws (the fail-closed
+  // early return above — structure_valid=false, nothing hashed) or
+  // returns a span object, so reaching this line PROVES the stage ran and
+  // passed; re-testing spanInfo against null here would be a dead
+  // comparison (an object against null) — and would protect nothing,
+  // since spanInfo.span is already dereferenced above. Trailing-byte
+  // disclosure is a diagnostic, not a structural stage. Digest stages are
+  // content, not structure: digest_match=false with structure_valid=true
+  // is the meaningful "right shape, wrong bytes" outcome, not a
+  // contradiction. A regression test asserts these invariants on every
+  // evidence path.
+  report.elf.structure_valid = report.elf.extraction === "OK" && report.elf.sbpf_valid === true;
 
   add(
     "C",
