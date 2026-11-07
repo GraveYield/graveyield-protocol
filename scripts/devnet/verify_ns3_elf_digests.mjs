@@ -170,7 +170,12 @@ import {
   checkElfProvenance,
   loadProvenanceManifest,
 } from "./ns3_check_provenance.mjs";
-import { parseElf64Sections, validateSbfElfHeader } from "./ns3_verify_elf.mjs";
+import {
+  assertShnumNotReserved,
+  assertShstrndxNotReserved,
+  parseElf64Sections,
+  validateSbfElfHeader,
+} from "./ns3_verify_elf.mjs";
 
 export const TOOL_NAME = "verify_ns3_elf_digests";
 
@@ -341,6 +346,19 @@ export function elfDeclaredSpan(payload) {
   // arithmetic) and the complete 64-byte-per-entry table must fit inside
   // the payload (shtEnd checks below) — every oversized or malformed
   // count fails closed in O(1) before anything is hashed.
+  //
+  // RESERVED section-numbering values (ELF gABI) fail closed FIRST, via
+  // the SAME shared validators parseElf64Sections enforces (identical
+  // messages, zero drift between the two parsing paths): a direct
+  // e_shnum in [0xff00, 0xffff] is reserved — only e_shnum = 0 is the
+  // extended-count escape — and a direct e_shstrndx in [0xff00, 0xfffe]
+  // is reserved — only SHN_XINDEX (0xffff) is the extended-index escape.
+  // The e_shstrndx gate runs here even though this function does not
+  // resolve that field itself (the resolution below re-enters
+  // parseElf64Sections): the reserved check then fires BEFORE any table
+  // arithmetic on BOTH paths, with the same field-identifying error.
+  assertShnumNotReserved(payload.readUInt16LE(60));
+  assertShstrndxNotReserved(payload.readUInt16LE(62));
   let extendedSectionNumbering = false;
   let shnum = payload.readUInt16LE(60);
   if (shnum === 0) {
@@ -376,9 +394,10 @@ export function elfDeclaredSpan(payload) {
   }
 
   // Section extents — from the SAME parse the structural-identity gate
-  // uses (parseElf64Sections re-validates the header, the extended
-  // numbering, the table range, the string table, and every section's
-  // range against THIS payload; any throw fails closed here).
+  // uses (parseElf64Sections re-validates the header, the reserved
+  // section-numbering values, the extended numbering, the table range,
+  // the string table, and every section's range against THIS payload;
+  // any throw fails closed here).
   const sections = parseElf64Sections(payload);
   let sectionMax = 0;
   for (const s of sections) {

@@ -59,6 +59,77 @@ export const SBF_E_MACHINES = [247, 263];
 const SHF_ALLOC = 0x2;
 const SHF_EXECINSTR = 0x4;
 
+// ----------------------------------------------------- reserved index values
+
+/** SHN_LORESERVE (ELF gABI): lower bound of the reserved index range. */
+export const SHN_LORESERVE = 0xff00;
+
+/** SHN_XINDEX (ELF gABI): e_shstrndx escape — real index in SH0.sh_link. */
+export const SHN_XINDEX = 0xffff;
+
+/**
+ * Reserved e_shnum values — strict fail-closed gate (ELF gABI).
+ *
+ * The 16-bit e_shnum header field has exactly two legal shapes:
+ *   - 0 (with a nonzero e_shoff): the EXTENDED-NUMBERING ESCAPE — the real
+ *     section count lives in the u64 sh_size field of section header 0
+ *     (resolved by the parser that owns that resolution); and
+ *   - a DIRECT count in [1, SHN_LORESERVE): subject to the ordinary
+ *     structural validation (safe-integer table arithmetic, payload fit).
+ * Every value in [SHN_LORESERVE, 0xffff] is RESERVED by the specification
+ * and is NOT a valid direct section count — a real count >= SHN_LORESERVE
+ * MUST be expressed through the escape instead. Accepting a reserved value
+ * as a "direct count" would silently reinterpret a malformed header, so
+ * this gate throws BEFORE any escape handling, table arithmetic, or
+ * iteration; reserved values are never normalized into escapes.
+ *
+ * Passes 0 (the caller resolves the escape) and direct counts below
+ * SHN_LORESERVE; throws for [0xff00, 0xffff] with the offending field
+ * name, its value (decimal + hex), and the reason.
+ */
+export function assertShnumNotReserved(eShnum) {
+  if (eShnum >= SHN_LORESERVE) {
+    throw new Error(
+      `reserved e_shnum value ${eShnum} (0x${eShnum.toString(16)}) — values in ` +
+        `[0x${SHN_LORESERVE.toString(16)}, 0xffff] are reserved by the ELF specification and are not ` +
+        "valid direct section counts; a real count >= 0xff00 must use extended numbering " +
+        "(e_shnum = 0 with the real count in the sh_size field of section header 0)",
+    );
+  }
+}
+
+/**
+ * Reserved e_shstrndx values — strict fail-closed gate (ELF gABI).
+ *
+ * The 16-bit e_shstrndx header field has exactly two legal shapes:
+ *   - a DIRECT string-table index in [0, SHN_LORESERVE): subject to the
+ *     ordinary bounds validation against the resolved section count; and
+ *   - SHN_XINDEX (0xffff): the EXTENDED-INDEX ESCAPE — the real index
+ *     lives in the u32 sh_link field of section header 0 (resolved by the
+ *     parser that owns that resolution).
+ * Every value in [SHN_LORESERVE, SHN_XINDEX) — [0xff00, 0xfffe] — is
+ * RESERVED by the specification and is NOT a valid direct index. Note the
+ * asymmetry with e_shnum: the e_shstrndx escape is 0xffff, NOT 0, so the
+ * two fields need separate gates — conflating them would either reject the
+ * valid SHN_XINDEX escape or accept the reserved [0xff00, 0xfffe] range.
+ * This gate throws BEFORE any escape handling or bounds arithmetic;
+ * reserved values are never normalized into escapes.
+ *
+ * Passes [0, 0xfeff] and 0xffff (the caller resolves the escape); throws
+ * for [0xff00, 0xfffe] with the offending field name, its value
+ * (decimal + hex), and the reason.
+ */
+export function assertShstrndxNotReserved(eShstrndx) {
+  if (eShstrndx >= SHN_LORESERVE && eShstrndx !== SHN_XINDEX) {
+    throw new Error(
+      `reserved e_shstrndx value ${eShstrndx} (0x${eShstrndx.toString(16)}) — values in ` +
+        `[0x${SHN_LORESERVE.toString(16)}, 0xfffe] are reserved by the ELF specification and are not ` +
+        "valid direct string-table indices; only SHN_XINDEX (0xffff) invokes extended " +
+        "resolution (the real index in the sh_link field of section header 0)",
+    );
+  }
+}
+
 /** Validate the fixed ELF header as a 64-bit LSB SBF ELF. Throws with a
  *  precise message on any mismatch (mirrors elf_dump.mjs acceptance). */
 export function validateSbfElfHeader(buf) {
@@ -84,6 +155,18 @@ export function validateSbfElfHeader(buf) {
  * any structural problem (no section table, bad entry size, out-of-range
  * offsets/indices) — the caller fails closed on parse errors.
  *
+ * RESERVED SECTION-NUMBERING VALUES (ELF gABI): only two shapes of the
+ * 16-bit header fields are legal. e_shnum is either a direct count in
+ * [1, 0xfeff] or the escape 0 (real count in SH0.sh_size); every value in
+ * [SHN_LORESERVE, 0xffff] is RESERVED and fails closed — a reserved value
+ * is never normalized into an escape and never accepted as a direct
+ * count. e_shstrndx is either a direct index in [0, 0xfeff] or the escape
+ * SHN_XINDEX (0xffff) (real index in SH0.sh_link); every value in
+ * [0xff00, 0xfffe] is RESERVED and fails closed. The gates (shared with
+ * elfDeclaredSpan via the exported assertShnumNotReserved /
+ * assertShstrndxNotReserved validators, so the two parsing paths cannot
+ * drift) run BEFORE escape resolution, table arithmetic, and iteration.
+ *
  * EXTENDED SECTION NUMBERING (ELF spec §1.7 / System V ABI): when the
  * file declares e_shnum = 0 (with e_shoff != 0), the real section count
  * lives in sh_size of section header 0; when e_shstrndx = SHN_XINDEX
@@ -92,7 +175,9 @@ export function validateSbfElfHeader(buf) {
  * this repository applies — so a section table is either fully supported
  * across the full verification path (span derivation, structural
  * identity, provenance) or explicitly refused; there is no partial
- * support.
+ * support. The RESERVED values above are the exact boundary of these
+ * escapes: the escapes are 0 (e_shnum) and 0xffff (e_shstrndx), nothing
+ * else in the reserved range.
  *
  * FULL VALID RANGE: the extended-numbering escape exists precisely so the
  * count can exceed the 16-bit e_shnum field (counts >= SHN_LORESERVE
@@ -124,6 +209,13 @@ export function parseElf64Sections(buf) {
       `unexpected section header entry size ${eShentsize} (ELF64 fixed layout is 64)`,
     );
   }
+  // Reserved section-numbering values (ELF gABI) fail closed BEFORE the
+  // escapes are considered and before any arithmetic or iteration — a
+  // reserved value is never treated as a direct count/index and never
+  // normalized into an extended-numbering escape (see the validators
+  // above for the exact spec rules and the error contract).
+  assertShnumNotReserved(eShnumRaw);
+  assertShstrndxNotReserved(eShstrndxRaw);
   // Extended numbering: e_shnum = 0 ⇒ real count in sh_size of SH0;
   // e_shstrndx = SHN_XINDEX ⇒ real index in sh_link of SH0. Both reads
   // require section header 0 itself to be in range.

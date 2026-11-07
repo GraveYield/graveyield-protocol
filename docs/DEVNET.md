@@ -520,6 +520,33 @@ C6–C10), plus the cluster-identity gate first:
   resolution (the `span_basis` field names which structure set the
   maximum, including "extended numbering").
 
+  **Reserved section-numbering values fail closed** (ELF gABI). The two
+  16-bit header fields each have exactly two legal shapes, and everything
+  else in their range is RESERVED — never accepted as a direct value and
+  never normalized into an escape:
+  - `e_shnum`: a DIRECT count in `[1, 0xfeff]` (the largest legal direct
+    count), or the extended-count escape `0` (real count in SH0
+    `sh_size`). Every value in `[0xff00, 0xffff]` is RESERVED and is
+    rejected — a real count >= 0xff00 MUST be expressed through the
+    escape.
+  - `e_shstrndx`: a DIRECT index in `[0, 0xfeff]` (bounds-validated
+    against the resolved count), or the `SHN_XINDEX` escape `0xffff`
+    (real index in SH0 `sh_link`). Every value in `[0xff00, 0xfffe]` is
+    RESERVED and is rejected. Note the asymmetry: the `e_shstrndx` escape
+    is `0xffff`, not `0`.
+  Both parsing paths — `parseElf64Sections()` (the one section parser
+  every consumer shares: the pre-deployment identity gate, the provenance
+  gate, and the digest verifier) and `elfDeclaredSpan()` — enforce the
+  same rules through one shared validator, BEFORE any escape resolution,
+  table arithmetic, iteration, or hashing; the failure names the
+  offending field, its value, and the reason, and a reserved-value
+  rejection is a distinct failure class from the ordinary out-of-range
+  bounds error. The `PN_XNUM` program-count escape (`e_phnum = 0xffff`)
+  is unaffected. Adversarial fixtures prove the reserved values fail
+  closed even when the declared table is complete and in range (the
+  rejection is the value itself, never truncation), and that the largest
+  legal direct values (`0xfeff`) verify end-to-end on the full path.
+
   The repository's own provenance gate (`ns3_check_provenance.mjs`)
   then runs over the EXACT full extracted payload — the very bytes whose
   digest was taken: SHA-256 against the

@@ -32,6 +32,13 @@
 //     FULL VALID RANGE — counts above 65,535 included (real count from
 //     SH0.sh_size, bounded by safe-integer arithmetic + payload fit; no
 //     artificial ceiling) — one rule, JSON and human output agree
+//   ✔ RESERVED section-numbering values (ELF gABI) fail closed on BOTH
+//     parsing paths (parseElf64Sections AND elfDeclaredSpan — identical
+//     shared-validator messages) and on the FULL deployed-ELF path:
+//     direct e_shnum in [0xff00, 0xffff] and direct e_shstrndx in
+//     [0xff00, 0xfffe] are rejected before any table arithmetic; the
+//     largest legal direct values (0xfeff) verify end-to-end; no hashing
+//     stage runs after a malformed structural header is detected
 //   ✔ structure_valid reflects the stages that ACTUALLY ran (no
 //     contradictory fields on any evidence path — regression battery)
 //   ✔ genesis gate order: failed genesis SHORT-CIRCUITS the run (the RPC
@@ -74,6 +81,7 @@ import { parseElf64Sections } from "../ns3_verify_elf.mjs";
 import { DEFAULT_MANIFEST_PATH, loadProvenanceManifest } from "../ns3_check_provenance.mjs";
 import { NS3, programDataPda } from "../ns3_identities.mjs";
 import {
+  buildDirectShnumElf,
   buildExtendedCountElf,
   buildSbfElf,
   encodeProgramAccount,
@@ -1731,6 +1739,205 @@ describe("extended section numbering above 65,535 — full valid range (adversar
     assert.equal(r.programs[0].elf.identity_verdict, "structural");
     assert.equal(r.programs[0].elf.digest_match, true);
     assert.equal(r.programs[0].elf.structure_valid, true);
+  });
+});
+
+describe("reserved section-numbering values — both parsing paths fail closed (ELF gABI)", () => {
+  // The ELF gABI reserves 16-bit header values: a direct e_shnum in
+  // [0xff00, 0xffff] and a direct e_shstrndx in [0xff00, 0xfffe] are NOT
+  // legal counts/indices (only the escapes e_shnum=0 and
+  // e_shstrndx=SHN_XINDEX invoke extended resolution). This battery pins
+  // the correction END-TO-END: both parsing paths reject the reserved
+  // values with the SAME shared-validator message (byte-identical — no
+  // drift), the full deployed-ELF path fails closed BEFORE any hashing
+  // stage runs, the largest legal direct values (0xfeff) verify
+  // end-to-end, and reserved-value rejection stays a DISTINCT failure
+  // class from the ordinary out-of-range bounds error.
+
+  test("35. elfDeclaredSpan enforces the SAME reserved-e_shnum rule parseElf64Sections enforces — byte-identical messages, complete in-range tables", () => {
+    for (const reserved of [0xff00, 0xff01, 0xffff]) {
+      const elf = buildDirectShnumElf({ eShnum: reserved, idBase58: NS3.scannerProgramId });
+      // The declared table is COMPLETE and inside the fixture — the ONLY
+      // possible rejection reason is the reserved value itself:
+      const eShoff = Number(elf.readBigUInt64LE(40));
+      assert.ok(eShoff + reserved * 64 <= elf.length, `table fits for 0x${reserved.toString(16)}`);
+      let parseMsg = "";
+      let spanMsg = "";
+      try {
+        parseElf64Sections(elf);
+      } catch (err) {
+        parseMsg = err.message;
+      }
+      try {
+        elfDeclaredSpan(elf);
+      } catch (err) {
+        spanMsg = err.message;
+      }
+      assert.match(
+        parseMsg,
+        new RegExp(`reserved e_shnum value ${reserved} \\(0x${reserved.toString(16)}\\)`),
+      );
+      // ONE shared validator on both paths — the messages cannot drift:
+      assert.equal(
+        spanMsg,
+        parseMsg,
+        `0x${reserved.toString(16)}: the two parsing paths must agree`,
+      );
+    }
+  });
+
+  test("36. the largest direct count (0xfeff) spans exactly on the digest path — a direct count is NOT 'extended numbering'", () => {
+    const elf = buildDirectShnumElf({ eShnum: 0xfeff, idBase58: NS3.scannerProgramId });
+    const spanInfo = elfDeclaredSpan(elf);
+    assert.equal(spanInfo.span, elf.length); // exact fit — SHT is the last structure
+    assert.equal(spanInfo.extendedSectionNumbering, false); // direct count, no escape
+    assert.match(spanInfo.basis, /section header table end/);
+    assert.doesNotMatch(spanInfo.basis, /extended numbering/);
+    assert.equal(parseElf64Sections(elf).length, 0xfeff);
+  });
+
+  test("37. elfDeclaredSpan enforces the SAME reserved-e_shstrndx rule — byte-identical messages through the shared validator", () => {
+    for (const reserved of [0xff00, 0xff01, 0xfffe]) {
+      const elf = buildSbfElf({ idBase58: NS3.scannerProgramId });
+      elf.writeUInt16LE(reserved, 62);
+      let parseMsg = "";
+      let spanMsg = "";
+      try {
+        parseElf64Sections(elf);
+      } catch (err) {
+        parseMsg = err.message;
+      }
+      try {
+        elfDeclaredSpan(elf);
+      } catch (err) {
+        spanMsg = err.message;
+      }
+      assert.match(
+        parseMsg,
+        new RegExp(`reserved e_shstrndx value ${reserved} \\(0x${reserved.toString(16)}\\)`),
+      );
+      assert.equal(
+        spanMsg,
+        parseMsg,
+        `0x${reserved.toString(16)}: the two parsing paths must agree`,
+      );
+    }
+  });
+
+  test("38. full path: reserved e_shnum FAILS before anything is hashed — no identity acceptance, no digest, no hashing stage ran", async () => {
+    for (const reserved of [0xff00, 0xff01, 0xffff]) {
+      const elf = buildDirectShnumElf({ eShnum: reserved, idBase58: NS3.scannerProgramId });
+      const r = await run(fullState({ scannerElf: elf }));
+      assert.equal(r.overall, "FAIL", `0x${reserved.toString(16)}`);
+      const c2 = checkOf(r, "C2 scanner");
+      assert.equal(c2[0].status, "FAIL", `0x${reserved.toString(16)}`);
+      assert.match(c2[0].detail, new RegExp(`reserved e_shnum value ${reserved}`));
+      const e = r.programs[0].elf;
+      // HASHING-PROOF (structural, not verdict inference): observed_sha256
+      // is written at exactly ONE site in the verifier — the statement
+      // that computes sha256Hex(payload) AFTER the span gate returns. A
+      // null across the whole downstream battery proves every stage from
+      // span establishment through hashing was never reached:
+      assert.equal(e.structure_valid, false, `0x${reserved.toString(16)}`);
+      assert.equal(e.identity_verdict, null, `0x${reserved.toString(16)}`); // identity gate never ran
+      assert.equal(e.declared_elf_size, null, `0x${reserved.toString(16)}`); // span never established
+      assert.equal(e.hash_span_bytes, null, `0x${reserved.toString(16)}`); // hash span never computed
+      assert.equal(e.observed_sha256, null, `0x${reserved.toString(16)}`); // sha256Hex(payload) never ran
+      assert.equal(e.digest_match, null, `0x${reserved.toString(16)}`); // no digest verdict exists
+    }
+  });
+
+  test("39. full path: reserved e_shstrndx FAILS before anything is hashed; an out-of-range RESOLVED index stays the distinct bounds failure", async () => {
+    for (const reserved of [0xff00, 0xff01, 0xfffe]) {
+      const elf = buildSbfElf({ idBase58: NS3.scannerProgramId });
+      elf.writeUInt16LE(reserved, 62);
+      const r = await run(fullState({ scannerElf: elf }));
+      assert.equal(r.overall, "FAIL", `0x${reserved.toString(16)}`);
+      const c2 = checkOf(r, "C2 scanner");
+      assert.equal(c2[0].status, "FAIL", `0x${reserved.toString(16)}`);
+      assert.match(c2[0].detail, new RegExp(`reserved e_shstrndx value ${reserved}`));
+      assert.doesNotMatch(c2[0].detail, /out of range/, "reserved ≠ bounds failure");
+      const e = r.programs[0].elf;
+      assert.equal(e.structure_valid, false, `0x${reserved.toString(16)}`);
+      assert.equal(e.identity_verdict, null, `0x${reserved.toString(16)}`);
+      assert.equal(e.observed_sha256, null, `0x${reserved.toString(16)}`);
+      assert.equal(e.digest_match, null, `0x${reserved.toString(16)}`);
+    }
+    // Distinction at the full path: the SHN_XINDEX escape with an
+    // out-of-range RESOLVED index (SH0.sh_link >= count) is the ORDINARY
+    // bounds failure — still fail-closed, but a different error class:
+    const bad = buildExtendedCountElf({ idBase58: NS3.scannerProgramId });
+    const eShoff = Number(bad.readBigUInt64LE(40));
+    bad.writeUInt32LE(70000, eShoff + 40); // sh_link = 70000 >= count
+    const r2 = await run(fullState({ scannerElf: bad }));
+    assert.equal(r2.overall, "FAIL");
+    const c2b = checkOf(r2, "C2 scanner");
+    assert.equal(c2b[0].status, "FAIL");
+    assert.match(c2b[0].detail, /out of range/);
+    assert.doesNotMatch(c2b[0].detail, /reserved/);
+    assert.equal(r2.programs[0].elf.observed_sha256, null);
+    assert.equal(r2.programs[0].elf.digest_match, null);
+    assert.equal(r2.programs[0].elf.structure_valid, false);
+  });
+
+  test("40. CLI: a reserved e_shnum leaves NO observed digest anywhere in the human-readable report (hash canary absent)", async () => {
+    const elf = buildDirectShnumElf({ eShnum: 0xff00, idBase58: NS3.scannerProgramId });
+    const canary = sha256(elf); // what hashing the payload WOULD have produced
+    const state = fullState({ scannerElf: elf });
+    let humanOut;
+    await withVerification(state, async ({ url }) => {
+      humanOut = await runCli(url, []);
+    });
+    assert.equal(humanOut.code, 1);
+    assert.match(humanOut.stdout, /reserved e_shnum value 65280/);
+    // The digest of the malformed payload appears NOWHERE in the output —
+    // hashing never happened, so its result cannot have leaked out:
+    assert.ok(!humanOut.stdout.includes(canary));
+  });
+
+  test("41. full path: the largest DIRECT count (e_shnum=0xfeff, COMPLETE table) verifies END-TO-END — structure, identity and whole-payload digest agree", async () => {
+    const elf = buildDirectShnumElf({ eShnum: 0xfeff, idBase58: NS3.scannerProgramId });
+    const r = await run(fullState({ scannerElf: elf }));
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.match(scanner.elf.span_basis, /section header table end/);
+    assert.doesNotMatch(scanner.elf.span_basis, /extended numbering/); // direct, not the escape
+    assert.equal(scanner.elf.declared_elf_size, elf.length);
+    assert.equal(scanner.elf.hash_span_bytes, scanner.elf.payload_size); // WHOLE payload hashed
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 0);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf));
+    assert.equal(scanner.elf.digest_match, true);
+    assert.equal(scanner.elf.identity_verdict, "structural");
+  });
+
+  test("42. full path: the largest DIRECT e_shstrndx (0xfeff, real string table) over an extended count verifies END-TO-END; JSON + human output agree", async () => {
+    const elf = buildExtendedCountElf({
+      idBase58: NS3.scannerProgramId,
+      strtabIndex: 0xfeff,
+      directShstrndx: 0xfeff,
+    });
+    const state = fullState({ scannerElf: elf });
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.match(scanner.elf.span_basis, /extended numbering/); // the COUNT is the escape here
+    assert.equal(scanner.elf.observed_sha256, sha256(elf));
+    assert.equal(scanner.elf.digest_match, true);
+    assert.equal(scanner.elf.identity_verdict, "structural");
+    // JSON and human output report the SAME span basis — one rule, no
+    // output path contradicts the other:
+    let jsonOut;
+    let humanOut;
+    await withVerification(state, async ({ url }) => {
+      jsonOut = await runCli(url, ["--json"]);
+      humanOut = await runCli(url, []);
+    });
+    const j = JSON.parse(jsonOut.stdout).programs[0];
+    assert.equal(j.elf.structure_valid, true);
+    assert.match(j.elf.span_basis, /extended numbering/);
+    assert.match(humanOut.stdout, /span basis: section header table end \(extended numbering\)/);
   });
 });
 
