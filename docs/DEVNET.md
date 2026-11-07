@@ -387,6 +387,221 @@ do not — see the honest-form note), that future upgrades are safe (the
 upgrade authority remains the deployer key), or anything about programs
 other than the two NS-3 addresses.
 
+### 5.1 Deployed-ELF digest verification (`verify_ns3_elf_digests.mjs`)
+
+The acceptance verifier above proves the deployment ARRANGEMENT but does
+not hash deployed bytes (the W2 report §5 records this gap explicitly).
+The deployed-ELF digest proof is a separate, standalone, strictly
+READ-ONLY utility next to it — `getGenesisHash` / `getEpochInfo` /
+`getAccountInfo` only; no signer dependency, no keypair argument, no
+transaction capability, and no override flags (the verified program IDs
+and the expected digests are the pinned repository constants, never
+options):
+
+```bash
+node scripts/devnet/verify_ns3_elf_digests.mjs --url https://api.devnet.solana.com
+# machine-readable: add --json. Commitment defaults to FINALIZED;
+# --commitment confirmed is a diagnostic override, recorded verbatim.
+```
+
+Per program (scanner A1–A4 / B1–B4 / C1–C5; vault A6–A9 / B6–B9 /
+C6–C10), plus the cluster-identity gate first:
+
+- **G — cluster identity (runs FIRST, strict short-circuit)**: the
+  endpoint must report the pinned Devnet genesis before any deployed
+  bytes are interpreted. A foreign cluster is an immediate FAIL; a
+  FAILED genesis request is UNVERIFIED and SHORT-CIRCUITS the whole
+  run — the tool returns INCOMPLETE (exit 3) having issued NOT ONE
+  `getAccountInfo` call. On a cluster whose identity could not be
+  established, no deployed byte is fetched or interpreted at all. The
+  test suite pins this against the recorded RPC call history, not just
+  the final classification.
+- **A — program account**: exists, loader-owned, executable, and its
+  embedded ProgramData pointer equals the INDEPENDENTLY derived loader
+  PDA (`PDA([program_id], BPFLoaderUpgradeable)`).
+- **B — ProgramData**: the REAL account is fetched at that address
+  (deriving the address does not prove existence — an absent ProgramData
+  is a FAIL, never a digest match), loader-owned, structurally decoded
+  (u32 tag=3 + u64 slot + u8 authority flag), and the upgrade-authority
+  metadata must name the deployer (absent / malformed / unexpected
+  authorities are reported as DISTINCT conditions and FAIL).
+- **C — deployed ELF**: the payload is extracted at the STRUCTURAL
+  metadata boundary (45 B when an authority is present, 13 B with
+  authority = None — the packed layout current agave writes, verified
+  byte-for-byte against devnet ProgramData accounts and the
+  loader-v3-interface sources; a legacy 48/16 B bincode-layout account
+  is reported precisely and REFUSED — the extraction boundary is never
+  silently shifted).
+
+  **Hash-span methodology (what exactly enters the SHA-256).** Five
+  different "ELF length" notions exist:
+  1. the ProgramData PAYLOAD length (account bytes after the loader
+     metadata) — what is on the wire;
+  2. the section-header-table end (`e_shoff + e_shnum·e_shentsize`) —
+     a common but NOT universal ELF end;
+  3. the MAX byte extent the ELF's own structures imply — the SHT end,
+     the program-header TABLE end (`e_phoff + e_phnum·56`), every
+     non-NOBITS section extent (`sh_offset + sh_size`), and every
+     program-header extent (`p_offset + p_filesz`);
+  4. the uploaded `.so` file length — the span the approved manifest
+     digests were computed over;
+  5. the loader-interpreted span — the whole payload.
+
+  **The digest covers the ENTIRE extracted payload (concepts 1 and 5):
+  every byte the account holds after the derived metadata boundary
+  enters the SHA-256.** There is no structure-implied truncation and no
+  tail exclusion — genuine trailing artifact bytes are never silently
+  stripped, and a one-byte alteration anywhere in the payload (including
+  bytes beyond every structure the ELF declares) changes the digest.
+
+  Evidence basis (all in-repository): the documented NS-3 deploy path
+  (`deploy_devnet.sh`) runs `solana program deploy` and never passes
+  `--max-len`, so no extra account capacity is reserved; the W1
+  byte-verification (`lifecycle_rehearsal/elf_dump.mjs`,
+  `matchOnChainProgramData`, byte-verified against devnet ProgramData
+  accounts on 2026-10-29) proves the upgradeable loader stores the ELF
+  so it "runs to the EXACT END of the account"; and the W1/W1.1
+  lifecycle rehearsal REFUSES to run unless the loaded ProgramData
+  payload byte-matches the pinned ELF exactly (the same exact-length
+  helper) — and passed, with digests equal to the approved pins. On the
+  documented path the payload therefore IS the artifact, and the
+  full-payload digest IS the approved whole-artifact digest.
+
+  The structure-implied extent (concept 3 — INCLUDING the
+  program-header table's own extent, so a table positioned beyond the
+  SHT end and beyond all section/segment extents is validated AND
+  counted, never omitted) is still computed — as the STRUCTURAL GATE
+  and an honest diagnostic, never as the hash boundary: the ELF64
+  header, the section table, every section extent, the program-header
+  table and every segment extent must fit inside the payload, and a
+  payload that cannot be structurally established FAILS CLOSED before
+  anything is hashed. When the payload is longer than the extent, the
+  excess is DISCLOSED in both outputs (`trailing_bytes_beyond_declared_structure`
+  plus the all-zero flag) but NOT excluded — extra allocation capacity
+  (e.g. an explicit larger `--max-len`, which the documented deploy
+  path never uses) cannot be distinguished from genuine artifact bytes
+  without independent, trustworthy length evidence, so the verifier
+  does not guess which trailing bytes are loader padding: it excludes
+  nothing, and if the full-payload digest does not match the approved
+  whole-artifact pin the verdict is FAIL. The approved-digest
+  comparison is never weakened to accommodate synthetic layouts.
+
+  **Structural validity vs digest match.** `structure_valid` reflects
+  only the structural stages that actually ran: `null` — no ELF payload
+  was assessed; `false` — a payload was assessed and at least one
+  structural stage failed (ELF64 header validation, structure-implied
+  extent establishment, in-range section/program-header tables, SBPF v0
+  architecture); `true` — all structural stages ran and passed. A
+  digest mismatch is a CONTENT-integrity failure (`digest_match=false`
+  with `structure_valid=true` — "right shape, wrong bytes"), never a
+  structural contradiction, and the JSON and human-readable outputs
+  carry the same information.
+
+  **Extended section numbering over the FULL valid range** (ELF spec:
+  `e_shnum = 0` with the real count in the u64 `sh_size` field of section
+  header 0; `e_shstrndx = SHN_XINDEX` with the real index in the u32
+  `sh_link` field of section header 0; `e_phnum = PN_XNUM` with the real
+  count in `sh_info` of section header 0) is supported on the FULL path —
+  structure establishment, structural identity, and digest all resolve it
+  with the same rule; there is no partial support. Because the escape
+  exists precisely so the count can exceed the 16-bit `e_shnum` field,
+  there is NO 65,535 ceiling: a spec-valid ELF with any section count
+  whose 64-byte-per-entry section-header table fits inside the extracted
+  payload is parsed — the accepted range is bounded only by the real
+  format limits (exact safe-integer arithmetic and payload fit), not by
+  an artificial constant. The bounds that ARE enforced — each failing
+  closed before anything is hashed or iterated — are: a zero extended
+  count is malformed; a count beyond the JavaScript safe-integer bound is
+  refused before any arithmetic; `e_shoff + count·64` must be an exact
+  safe integer AND fit inside the payload (a truncated or impossible
+  table is rejected before any allocation or iteration); and the
+  string-table index (direct or `SHN_XINDEX`-resolved) must be inside the
+  resolved count. The JSON and human-readable outputs report the same
+  resolution (the `span_basis` field names which structure set the
+  maximum, including "extended numbering").
+
+  **Reserved section-numbering values fail closed** (ELF gABI). The two
+  16-bit header fields each have exactly two legal shapes, and everything
+  else in their range is RESERVED — never accepted as a direct value and
+  never normalized into an escape:
+  - `e_shnum`: a DIRECT count in `[1, 0xfeff]` (the largest legal direct
+    count), or the extended-count escape `0` (real count in SH0
+    `sh_size`). Every value in `[0xff00, 0xffff]` is RESERVED and is
+    rejected — a real count >= 0xff00 MUST be expressed through the
+    escape.
+  - `e_shstrndx`: a DIRECT index in `[0, 0xfeff]` (bounds-validated
+    against the resolved count), or the `SHN_XINDEX` escape `0xffff`
+    (real index in SH0 `sh_link`). Every value in `[0xff00, 0xfffe]` is
+    RESERVED and is rejected. Note the asymmetry: the `e_shstrndx` escape
+    is `0xffff`, not `0`.
+  Both parsing paths — `parseElf64Sections()` (the one section parser
+  every consumer shares: the pre-deployment identity gate, the provenance
+  gate, and the digest verifier) and `elfDeclaredSpan()` — enforce the
+  same rules through one shared validator, BEFORE any escape resolution,
+  table arithmetic, iteration, or hashing; the failure names the
+  offending field, its value, and the reason, and a reserved-value
+  rejection is a distinct failure class from the ordinary out-of-range
+  bounds error. The `PN_XNUM` program-count escape (`e_phnum = 0xffff`)
+  is unaffected. Adversarial fixtures prove the reserved values fail
+  closed even when the declared table is complete and in range (the
+  rejection is the value itself, never truncation), and that the largest
+  legal direct values (`0xfeff`) verify end-to-end on the full path.
+
+  The repository's own provenance gate (`ns3_check_provenance.mjs`)
+  then runs over the EXACT full extracted payload — the very bytes whose
+  digest was taken: SHA-256 against the
+  [`../scripts/devnet/provenance.manifest.json`](../scripts/devnet/provenance.manifest.json)
+  pin, the SBPF v0 architecture (e_machine 263 / e_flags 0), and the
+  structural NS-3 identity (embedded program ID inside allocated
+  sections; no NS-1/NS-2 legacy ID bytes).
+
+Result classifications — identical semantics to the acceptance verifier:
+`PASS` (exit 0) — both programs satisfy every required check; `FAIL`
+(exit 1) — a definitive mismatch, absent required account, malformed
+account, unexpected identity, invalid loader structure, or digest
+mismatch is established (an RPC timeout is never misreported as an
+absent account, and a malformed account can never produce a PASS);
+`INCOMPLETE` (exit 3) — RPC transport or retrieval failures prevented a
+definitive determination, only when no FAIL exists. A definitive FAIL
+takes precedence over INCOMPLETE. `--json` emits the context, a manifest
+summary, and one record per program with identical key sets on every
+evidence path: existence/owner/executable fields, embedded vs derived
+pointer comparison, loader state, upgrade-authority metadata, payload
+offset / payload size / hash span (`hash_span_bytes` — always the full
+payload) / declared ELF size (structure-implied extent, program-header
+table included) / span basis / trailing bytes beyond the declared
+structure with the all-zero flag, observed vs expected SHA-256, digest
+match, SBPF validity, and the structural identity verdict.
+
+The `structure_valid` field reflects the structural stages that
+ACTUALLY ran, and never contradicts the evidence: `null` — no ELF
+payload was ever assessed (extraction failed or was never reached:
+absent accounts, malformed loader metadata, RPC-UNVERIFIED paths);
+`false` — ELF bytes existed and were assessed and at least one
+structural stage FAILED (ELF64 header validation, structure-implied
+extent establishment from the ELF's own metadata, in-range section
+table, in-range program-header table, or the SBPF v0 architecture
+requirement);
+`true` — all of those stages actually ran and passed. Trailing payload
+bytes beyond the structure-implied extent are a disclosed diagnostic,
+never a structural stage. Digest stages are
+content, not structure: a digest mismatch on a structurally valid ELF
+reports `digest_match: false` with `structure_valid: true` ("right
+shape, wrong bytes") — that is the intended, non-contradictory outcome,
+and a regression test asserts these invariants across every evidence
+path.
+
+Relationship to the acceptance verifier: deployment acceptance requires
+BOTH verifiers to pass on the same cluster — §5 proves the approved
+arrangement (identity, authorities, configs, oracles, pause state);
+§5.1 proves the deployed bytes are exactly the approved provenance.
+Neither substitutes for the other, and neither is modified by the
+other's presence. Historical note: the W2 exercise performed the same
+loaded-byte procedure with a one-off supplemental collector that was
+NOT committed ([`W2_ACCEPTANCE_REPORT.md`](w2-ns3-acceptance/W2_ACCEPTANCE_REPORT.md)
+§5); this utility is the reproducible replacement. It was NOT part of
+the W2 run — the W2 REJECTED classification stands exactly as recorded.
+
 ## 6. Deliberately out of scope here
 
 - **Indexer / SDK publication / first Salvor / Merkle service** — roadmap

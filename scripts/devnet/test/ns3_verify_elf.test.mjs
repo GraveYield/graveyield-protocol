@@ -25,6 +25,21 @@
 //   ✖ negative: stripped section table (e_shoff=0) → FAIL-CLOSED even
 //     though raw bytes are present
 //   ✖ negative: corrupt section table (out-of-range) → FAIL-CLOSED
+//   ✔ extended section numbering, FULL VALID RANGE: a spec-valid ELF with
+//     MORE than 65,535 sections (e_shnum=0, real count in SH0.sh_size,
+//     e_shstrndx=SHN_XINDEX with the real index in SH0.sh_link) parses
+//     exactly; the identity gate scans sections beyond the 16-bit index
+//     space; truncated tables, zero counts, safe-integer-hostile counts,
+//     and arithmetic-overflow counts all FAIL CLOSED before iteration
+//   ✔ regression: the SHN_XINDEX escape resolves on ordinary-count tables
+//   ✔ RESERVED section-numbering values (ELF gABI): direct e_shnum in
+//     [0xff00, 0xffff] and direct e_shstrndx in [0xff00, 0xfffe] FAIL
+//     CLOSED even when the declared table is complete and in range (the
+//     rejection is the reserved value itself, never truncation); the
+//     largest legal direct values (0xfeff both fields) still parse; the
+//     escapes (e_shnum=0 / e_shstrndx=0xffff) still resolve; reserved
+//     rejection is a DISTINCT, field-specific error — never normalized
+//     into an escape, never reported as a plain out-of-range
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -32,6 +47,11 @@ import { Buffer } from "node:buffer";
 import { PublicKey } from "@solana/web3.js";
 import { parseElf64Sections, verifyElfIdentity, NS3_LEGACY_IDS } from "../ns3_verify_elf.mjs";
 import { NS3 } from "../ns3_identities.mjs";
+import {
+  buildDirectShnumElf,
+  buildExtendedCountElf,
+  buildSbfElf,
+} from "./helpers/provenance_fixtures.mjs";
 
 const NS3_SCANNER = NS3.scannerProgramId;
 const NS3_VAULT = NS3.vaultProgramId;
@@ -224,5 +244,247 @@ describe("ELF structural identity verifier", () => {
     assert.equal(rodata.flags & SHF_ALLOC, SHF_ALLOC);
     const debug = sections.find((s) => s.name === ".debug_info");
     assert.equal(debug.flags & SHF_ALLOC, 0, "debug section is not allocated");
+  });
+});
+
+describe("extended section numbering — full valid range (> 65,535 sections)", () => {
+  // The gABI extended-numbering escape (e_shnum = 0; real count in
+  // SH0.sh_size, a u64 field) exists precisely so the count can exceed the
+  // 16-bit e_shnum space — a 65,535 ceiling would reject SPEC-VALID
+  // binaries. These tests pin: valid large counts parse exactly (and the
+  // identity gate scans sections beyond the 16-bit index space), while
+  // truncated tables, zero counts, safe-integer-hostile counts, and
+  // arithmetic-overflow counts fail closed BEFORE any allocation or
+  // iteration.
+
+  test("A: a valid 70,000-section ELF parses exactly — count, SHN_XINDEX-resolved names, and the high-index section all resolve", () => {
+    const elf = buildExtendedCountElf({ idBase58: NS3_SCANNER });
+    assert.equal(elf.readUInt16LE(60), 0); // e_shnum = 0 (extended numbering)
+    assert.equal(elf.readUInt16LE(62), 0xffff); // e_shstrndx = SHN_XINDEX
+    const sections = parseElf64Sections(elf);
+    assert.equal(sections.length, 70000); // real count from SH0.sh_size — no 65,535 ceiling
+    assert.equal(sections[0].name, ""); // NULL carrier
+    assert.equal(sections[1].name, ".text");
+    assert.equal(sections[2].name, ".shstrtab"); // resolved THROUGH SHN_XINDEX → SH0.sh_link
+    const high = sections[66000];
+    assert.equal(high.name, ".rodata");
+    assert.equal(high.flags & SHF_ALLOC, SHF_ALLOC);
+    // The ID bytes really sit in the high-index section's data range:
+    assert.ok(elf.subarray(high.offset, high.offset + high.size).includes(idBytes(NS3_SCANNER)));
+  });
+
+  test("A(2): identity verification scans the >0xffff-index section — the ID is found there, verdict structural", () => {
+    const elf = buildExtendedCountElf({ idBase58: NS3_SCANNER });
+    const r = verifyElfIdentity(elf, NS3_SCANNER, NS3_LEGACY_IDS);
+    assert.equal(r.verdict, "structural");
+    assert.equal(r.hits.length, 1);
+    assert.equal(r.hits[0].section, ".rodata");
+    // The hit points at the ID inside the high-index section (32 B into it):
+    const high = parseElf64Sections(elf)[66000];
+    assert.equal(r.hits[0].offset, high.offset + 32);
+  });
+
+  test("C: an extended count whose section-header table extends beyond the file FAILS CLOSED — rejected before iteration (no partial parse, no overrun)", () => {
+    // Declares 70,000 sections, physically holds only SH0: the declared
+    // table end (shoff + 70000·64) lies far beyond the buffer. A parser
+    // that iterated anyway would fault on entry 1 — the pinned error is
+    // the pre-iteration range check with the exact declared count.
+    const elf = buildExtendedCountElf({ idBase58: NS3_SCANNER, physicalShnum: 1 });
+    assert.throws(
+      () => parseElf64Sections(elf),
+      new RegExp(`section header table out of range.*e_shnum=70000.*file=${elf.length} B`, "s"),
+    );
+  });
+
+  test("D: a zero extended count FAILS CLOSED", () => {
+    const elf = buildExtendedCountElf({
+      idBase58: NS3_SCANNER,
+      physicalShnum: 1,
+      countOverride: 0n,
+    });
+    assert.throws(() => parseElf64Sections(elf), /zero extended section count/);
+  });
+
+  test("E: a count beyond the JavaScript safe-integer bound FAILS CLOSED before any arithmetic", () => {
+    // SH0.sh_size is u64; a hostile 2^63 must be refused as a Number
+    // conversion hazard BEFORE the table-end arithmetic runs.
+    const elf = buildExtendedCountElf({
+      idBase58: NS3_SCANNER,
+      physicalShnum: 1,
+      countOverride: 2n ** 63n,
+    });
+    assert.throws(() => parseElf64Sections(elf), /exceeds the JavaScript safe-integer bound/);
+  });
+
+  test("E(2): a count whose table-end arithmetic overflows the safe-integer range FAILS CLOSED", () => {
+    // 2^52 is itself safe, but 2^52 · 64 = 2^58 is not: the exact-integer
+    // table-end check must reject it (never round, never iterate).
+    const elf = buildExtendedCountElf({
+      idBase58: NS3_SCANNER,
+      physicalShnum: 1,
+      countOverride: 2n ** 52n,
+    });
+    assert.throws(() => parseElf64Sections(elf), /exceeds the safe-integer bound/);
+  });
+
+  test("regression: the direct (non-escaped) e_shstrndx form still works alongside a >65,535 count", () => {
+    const elf = buildExtendedCountElf({ idBase58: NS3_SCANNER, directShstrndx: true });
+    const sections = parseElf64Sections(elf);
+    assert.equal(sections.length, 70000);
+    assert.equal(sections[2].name, ".shstrtab");
+    assert.equal(sections[66000].name, ".rodata");
+  });
+
+  test("regression: the SHN_XINDEX escape resolves on an ordinary-count table (e_shstrndx=0xffff, real index in SH0.sh_link)", () => {
+    const elf = buildElf64({ idPlacements: [{ section: ".rodata", id: NS3_SCANNER }] });
+    elf.writeUInt16LE(0xffff, 62); // e_shstrndx = SHN_XINDEX
+    const eShoff = Number(elf.readBigUInt64LE(40));
+    elf.writeUInt32LE(4, eShoff + 40); // SH0.sh_link → .shstrtab (section 4)
+    const sections = parseElf64Sections(elf);
+    assert.deepEqual(
+      sections.map((s) => s.name),
+      ["", ".text", ".rodata", ".debug_info", ".shstrtab"],
+    );
+    const r = verifyElfIdentity(elf, NS3_SCANNER, NS3_LEGACY_IDS);
+    assert.equal(r.verdict, "structural");
+  });
+});
+
+describe("reserved section-numbering values — strict fail-closed (ELF gABI)", () => {
+  // The ELF gABI gives the 16-bit header fields exactly two legal shapes
+  // each. e_shnum: a direct count in [1, 0xfeff] or the escape 0 (real
+  // count in SH0.sh_size) — every value in [SHN_LORESERVE, 0xffff] is
+  // RESERVED and must fail closed. e_shstrndx: a direct index in
+  // [0, 0xfeff] or the SHN_XINDEX (0xffff) escape (real index in
+  // SH0.sh_link) — every value in [0xff00, 0xfffe] is RESERVED. These
+  // tests pin: the largest valid direct values are accepted (their tables
+  // are COMPLETE, so no rejection can be blamed on truncation), the
+  // reserved ranges are rejected on the field itself, the escapes still
+  // resolve, and a reserved-value rejection is a DISTINCT failure from an
+  // ordinary out-of-range index.
+
+  // ---------------------------------------------------- A: e_shnum
+  describe("A — e_shnum", () => {
+    test("0xfeff is a VALID direct count — the largest one (complete declared table, full parse, structural identity)", () => {
+      const elf = buildDirectShnumElf({ eShnum: 0xfeff, idBase58: NS3_SCANNER });
+      // The declared table really is complete and in range — the fixture
+      // cannot be rejected for truncation:
+      const eShoff = Number(elf.readBigUInt64LE(40));
+      assert.ok(eShoff + 0xfeff * 64 <= elf.length);
+      const sections = parseElf64Sections(elf);
+      assert.equal(sections.length, 0xfeff); // exactly the direct count
+      assert.equal(sections[1].name, ".text");
+      assert.equal(sections[2].name, ".shstrtab");
+      assert.equal(sections[3].name, ".rodata");
+      const r = verifyElfIdentity(elf, NS3_SCANNER, NS3_LEGACY_IDS);
+      assert.equal(r.verdict, "structural");
+    });
+
+    test("0xff00, 0xff01, 0xffff are RESERVED and fail closed even with a COMPLETE, in-range declared table", () => {
+      for (const reserved of [0xff00, 0xff01, 0xffff]) {
+        const elf = buildDirectShnumElf({ eShnum: reserved, idBase58: NS3_SCANNER });
+        // Sanity: the table the header declares is fully present — the
+        // only reason to reject is the reserved value itself.
+        const eShoff = Number(elf.readBigUInt64LE(40));
+        assert.ok(
+          eShoff + reserved * 64 <= elf.length,
+          `table fits for 0x${reserved.toString(16)}`,
+        );
+        assert.throws(
+          () => parseElf64Sections(elf),
+          new RegExp(`reserved e_shnum value ${reserved} \\(0x${reserved.toString(16)}\\)`),
+          `0x${reserved.toString(16)} must be rejected as reserved`,
+        );
+      }
+    });
+
+    test("0 remains the valid extended-numbering escape; a zero SH0.sh_size count still fails closed", () => {
+      // The escape boundary is untouched by the reserved-value gates:
+      const valid = buildExtendedCountElf({ idBase58: NS3_SCANNER });
+      assert.equal(valid.readUInt16LE(60), 0); // e_shnum = 0 (escape)
+      assert.equal(parseElf64Sections(valid).length, 70000);
+      // ... and the malformed zero count still fails closed:
+      const zero = buildExtendedCountElf({
+        idBase58: NS3_SCANNER,
+        physicalShnum: 1,
+        countOverride: 0n,
+      });
+      assert.throws(() => parseElf64Sections(zero), /zero extended section count/);
+    });
+  });
+
+  // ------------------------------------------------ B: e_shstrndx
+  describe("B — e_shstrndx", () => {
+    test("0xfeff is a VALID direct index when the RESOLVED count covers it and the section is a real string table", () => {
+      // A direct index of 0xfeff can never be valid under a DIRECT count
+      // (direct counts stop at 0xfeff, so the max valid index is 0xfefe):
+      // it is reachable only over an EXTENDED count — exactly the
+      // specification's structure. The fixture resolves the count to
+      // 70,000 through the escape and places the REAL .shstrtab at index
+      // 0xfeff; names must resolve through it.
+      const elf = buildExtendedCountElf({
+        idBase58: NS3_SCANNER,
+        strtabIndex: 0xfeff,
+        directShstrndx: 0xfeff,
+      });
+      assert.equal(elf.readUInt16LE(60), 0); // count via the escape
+      assert.equal(elf.readUInt16LE(62), 0xfeff); // direct index, NOT reserved
+      const sections = parseElf64Sections(elf);
+      assert.equal(sections.length, 70000);
+      assert.equal(sections[0xfeff].name, ".shstrtab"); // the real table
+      assert.equal(sections[1].name, ".text");
+      assert.equal(sections[66000].name, ".rodata");
+      const r = verifyElfIdentity(elf, NS3_SCANNER, NS3_LEGACY_IDS);
+      assert.equal(r.verdict, "structural");
+    });
+
+    test("0xff00, 0xff01, 0xfffe are RESERVED and fail closed — field-specific error, not an out-of-range report", () => {
+      for (const reserved of [0xff00, 0xff01, 0xfffe]) {
+        const elf = buildSbfElf({ idBase58: NS3_SCANNER });
+        elf.writeUInt16LE(reserved, 62);
+        assert.throws(
+          () => parseElf64Sections(elf),
+          (err) => {
+            assert.match(err.message, new RegExp(`reserved e_shstrndx value ${reserved}`));
+            // DISTINCT from the ordinary bounds failure:
+            assert.doesNotMatch(err.message, /out of range/);
+            return true;
+          },
+          `0x${reserved.toString(16)} must be rejected as reserved`,
+        );
+      }
+    });
+
+    test("0xffff remains the SHN_XINDEX escape; an out-of-range RESOLVED index fails with the bounds error, not the reserved error", () => {
+      // Valid escape (resolved index in range):
+      const valid = buildExtendedCountElf({ idBase58: NS3_SCANNER });
+      assert.equal(valid.readUInt16LE(62), 0xffff); // SHN_XINDEX
+      assert.equal(parseElf64Sections(valid)[2].name, ".shstrtab");
+      // Escape with an out-of-range resolved index (SH0.sh_link >= count):
+      const bad = buildExtendedCountElf({ idBase58: NS3_SCANNER });
+      const eShoff = Number(bad.readBigUInt64LE(40));
+      bad.writeUInt32LE(70000, eShoff + 40); // sh_link = 70000 >= count
+      assert.throws(
+        () => parseElf64Sections(bad),
+        (err) => {
+          assert.match(err.message, /out of range/);
+          assert.doesNotMatch(err.message, /reserved/);
+          return true;
+        },
+      );
+    });
+
+    test("distinction: a plain out-of-range direct index (5 on a 4-section table) reports the BOUNDS error — reserved rejection is a different failure", () => {
+      const elf = buildSbfElf({ idBase58: NS3_SCANNER }); // 4 sections
+      elf.writeUInt16LE(5, 62); // direct, in-range of nothing
+      assert.throws(
+        () => parseElf64Sections(elf),
+        (err) => {
+          assert.match(err.message, /out of range/);
+          assert.doesNotMatch(err.message, /reserved/);
+          return true;
+        },
+      );
+    });
   });
 });
