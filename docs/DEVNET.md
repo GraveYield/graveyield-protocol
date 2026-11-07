@@ -497,13 +497,27 @@ C6–C10), plus the cluster-identity gate first:
   structural contradiction, and the JSON and human-readable outputs
   carry the same information.
 
-  **Extended section numbering** (ELF spec: `e_shnum = 0` with the real
-  count in `sh_size` of section header 0; `e_shstrndx = SHN_XINDEX`;
-  `e_phnum = PN_XNUM` with the real count in `sh_info` of section
-  header 0) is supported on the FULL path — structure establishment,
-  structural identity, and digest all resolve it with the same rule; there is no
-  partial support, and the JSON and human-readable outputs report the
-  same resolution (the `span_basis` field names which structure set the
+  **Extended section numbering over the FULL valid range** (ELF spec:
+  `e_shnum = 0` with the real count in the u64 `sh_size` field of section
+  header 0; `e_shstrndx = SHN_XINDEX` with the real index in the u32
+  `sh_link` field of section header 0; `e_phnum = PN_XNUM` with the real
+  count in `sh_info` of section header 0) is supported on the FULL path —
+  structure establishment, structural identity, and digest all resolve it
+  with the same rule; there is no partial support. Because the escape
+  exists precisely so the count can exceed the 16-bit `e_shnum` field,
+  there is NO 65,535 ceiling: a spec-valid ELF with any section count
+  whose 64-byte-per-entry section-header table fits inside the extracted
+  payload is parsed — the accepted range is bounded only by the real
+  format limits (exact safe-integer arithmetic and payload fit), not by
+  an artificial constant. The bounds that ARE enforced — each failing
+  closed before anything is hashed or iterated — are: a zero extended
+  count is malformed; a count beyond the JavaScript safe-integer bound is
+  refused before any arithmetic; `e_shoff + count·64` must be an exact
+  safe integer AND fit inside the payload (a truncated or impossible
+  table is rejected before any allocation or iteration); and the
+  string-table index (direct or `SHN_XINDEX`-resolved) must be inside the
+  resolved count. The JSON and human-readable outputs report the same
+  resolution (the `span_basis` field names which structure set the
   maximum, including "extended numbering").
 
   The repository's own provenance gate (`ns3_check_provenance.mjs`)

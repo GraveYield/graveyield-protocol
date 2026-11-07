@@ -28,8 +28,10 @@
 //     never omitted; malformed/out-of-range tables fail closed before
 //     anything is hashed
 //   ✔ extended section numbering (e_shnum=0 / SHN_XINDEX / PN_XNUM) is
-//     supported on the FULL path (structure + identity + digest) — one
-//     rule, JSON and human output agree
+//     supported on the FULL path (structure + identity + digest) over the
+//     FULL VALID RANGE — counts above 65,535 included (real count from
+//     SH0.sh_size, bounded by safe-integer arithmetic + payload fit; no
+//     artificial ceiling) — one rule, JSON and human output agree
 //   ✔ structure_valid reflects the stages that ACTUALLY ran (no
 //     contradictory fields on any evidence path — regression battery)
 //   ✔ genesis gate order: failed genesis SHORT-CIRCUITS the run (the RPC
@@ -72,6 +74,7 @@ import { parseElf64Sections } from "../ns3_verify_elf.mjs";
 import { DEFAULT_MANIFEST_PATH, loadProvenanceManifest } from "../ns3_check_provenance.mjs";
 import { NS3, programDataPda } from "../ns3_identities.mjs";
 import {
+  buildExtendedCountElf,
   buildSbfElf,
   encodeProgramAccount,
   encodeProgramDataAccount,
@@ -160,6 +163,7 @@ const PHENTSIZE = 56;
  *   programHeader   — { offset, filesz }: one PT_LOAD program header
  *   extendedShnum   — e_shnum = 0; real count in SH0.sh_size
  *   extendedPhnum   — e_phnum = PN_XNUM; real count in SH0.sh_info
+ *   extendedShstrndx— e_shstrndx = SHN_XINDEX; real index in SH0.sh_link
  *   phdrAfterSht    — place the program-header TABLE beyond the SHT end
  *                     AND beyond every section-content and segment file
  *                     extent (Finding A fixture; the default segment then
@@ -175,6 +179,7 @@ function buildLayoutedElf({
   programHeader = null,
   extendedShnum = false,
   extendedPhnum = false,
+  extendedShstrndx = false,
   phdrAfterSht = false,
   extraZeroTail = 0,
 }) {
@@ -220,7 +225,7 @@ function buildLayoutedElf({
   buf.writeUInt16LE(extendedPhnum ? 0xffff : hasPhdr ? 1 : 0, 56); // e_phnum
   buf.writeUInt16LE(shentsz, 58);
   buf.writeUInt16LE(extendedShnum ? 0 : shnum, 60); // e_shnum
-  buf.writeUInt16LE(2, 62); // e_shstrndx → .shstrtab
+  buf.writeUInt16LE(extendedShstrndx ? 0xffff : 2, 62); // e_shstrndx → .shstrtab
 
   if (tailData) tailData.copy(buf, tailOff);
   textData.copy(buf, textOff);
@@ -244,6 +249,7 @@ function buildLayoutedElf({
     if (i === 0) {
       if (extendedShnum) buf.writeBigUInt64LE(BigInt(shnum), base + 32); // sh_size
       if (extendedPhnum) buf.writeUInt32LE(1, base + 44); // sh_info
+      if (extendedShstrndx) buf.writeUInt32LE(2, base + 40); // sh_link → .shstrtab
       continue;
     }
     buf.writeUInt32LE(nameOffs[i], base);
@@ -1523,6 +1529,15 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
         })(),
       ],
       [
+        "extended count above 65,535",
+        (() => {
+          const s = fullState({
+            scannerElf: buildExtendedCountElf({ idBase58: NS3.scannerProgramId }),
+          });
+          return s;
+        })(),
+      ],
+      [
         "adversarial tail section",
         (() => {
           const s = fullState();
@@ -1587,6 +1602,135 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
       assert.ok(r.programs.length === 2, name);
       for (const p of r.programs) assertNoFieldContradictions(p, name);
     }
+  });
+});
+
+describe("extended section numbering above 65,535 — full valid range (adversarial)", () => {
+  // The ELF gABI extended-numbering escape (e_shnum = 0, real count in
+  // SH0.sh_size — a u64 field) exists precisely so counts >= SHN_LORESERVE
+  // can be represented; nothing in the format caps them at 65,535. These
+  // tests pin the FULL VALID RANGE end-to-end: a spec-valid 70,000-section
+  // ELF verifies (structure + identity + digest agree), while truncated,
+  // zero, hostile, and arithmetic-hostile counts fail closed before
+  // anything is hashed.
+
+  test("29. valid extended count above 65,535 verifies END-TO-END — a 70,000-section ELF: structure, identity (ID found in a >0xffff-index section), and whole-payload digest all agree", async () => {
+    const elf = buildExtendedCountElf({ idBase58: NS3.scannerProgramId });
+    assert.equal(elf.readUInt16LE(60), 0); // e_shnum = 0 (extended numbering)
+    // The SAME parse serves the identity gate and the span derivation —
+    // the count resolves exactly and the high-index section is reachable:
+    const sections = parseElf64Sections(elf);
+    assert.equal(sections.length, 70000); // real count from SH0.sh_size — no ceiling
+    assert.equal(sections[66000].name, ".rodata"); // names resolve through SHN_XINDEX → SH0.sh_link
+    const state = fullState({ scannerElf: elf }); // fullState pins the fixture digest itself
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.match(scanner.elf.span_basis, /extended numbering/);
+    assert.equal(scanner.elf.declared_elf_size, elf.length); // exact fit — SHT is the last structure
+    assert.equal(scanner.elf.hash_span_bytes, scanner.elf.payload_size); // the WHOLE payload is hashed
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 0);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf));
+    assert.equal(scanner.elf.digest_match, true);
+    // Identity: the program ID sits ONLY in the section at index 66,000 —
+    // a parser that stopped at the 16-bit index space would report "absent".
+    assert.equal(scanner.elf.identity_verdict, "structural");
+  });
+
+  test("30. extended count above 65,535: JSON and human output report the same extended span basis (structure valid; the digest still fails against the committed pins, as designed offline)", async () => {
+    const elf = buildExtendedCountElf({ idBase58: NS3.scannerProgramId });
+    const state = fullState({ scannerElf: elf });
+    let jsonOut, humanOut;
+    await withVerification(state, async ({ url }) => {
+      jsonOut = await runCli(url, ["--json"]);
+      humanOut = await runCli(url, []);
+    });
+    assert.equal(jsonOut.code, 1); // committed pins ≠ fixture digest (expected offline)
+    const j = JSON.parse(jsonOut.stdout);
+    const scanner = j.programs[0];
+    assert.match(scanner.elf.span_basis, /extended numbering/);
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.equal(scanner.elf.digest_match, false);
+    // The human-readable report carries the SAME span basis — no output
+    // path claims something the other contradicts.
+    assert.match(humanOut.stdout, /span basis: section header table end \(extended numbering\)/);
+    assert.match(humanOut.stdout, /\[C2 scanner\]/);
+    assert.equal(humanOut.code, 1);
+  });
+
+  test("31. an extended count whose section-header table is LARGER than the available payload FAILS CLOSED before anything is hashed (structure_valid=false)", async () => {
+    // Declares 70,000 sections but physically holds only SH0 — the
+    // declared table end lies far beyond the account bytes.
+    const elf = buildExtendedCountElf({
+      idBase58: NS3.scannerProgramId,
+      realShnum: 70000,
+      physicalShnum: 1,
+    });
+    const state = fullState({ scannerElf: elf });
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const c2 = checkOf(r, "C2 scanner");
+    assert.equal(c2[0].status, "FAIL");
+    assert.match(c2[0].detail, /section header table out of range/);
+    assert.match(c2[0].detail, /truncated payload/);
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.observed_sha256, null); // refused to hash
+    assert.equal(scanner.elf.digest_match, null);
+    assert.equal(scanner.elf.structure_valid, false);
+  });
+
+  test("32. invalid extended counts FAIL CLOSED: a zero count and a count beyond the safe-integer bound", async () => {
+    for (const [count, msgRe] of [
+      [0n, /zero extended section count/],
+      [2n ** 63n, /exceeds the JavaScript safe-integer bound/],
+    ]) {
+      const elf = buildExtendedCountElf({
+        idBase58: NS3.scannerProgramId,
+        physicalShnum: 1,
+        countOverride: count,
+      });
+      const state = fullState({ scannerElf: elf });
+      const r = await run(state);
+      assert.equal(r.overall, "FAIL", `count ${count}`);
+      const c2 = checkOf(r, "C2 scanner");
+      assert.equal(c2[0].status, "FAIL", `count ${count}`);
+      assert.match(c2[0].detail, msgRe);
+      assert.equal(r.programs[0].elf.observed_sha256, null, `count ${count}`);
+      assert.equal(r.programs[0].elf.structure_valid, false, `count ${count}`);
+    }
+  });
+
+  test("33. section-count arithmetic exceeding safe-integer bounds FAILS CLOSED — no crash, no hang, no unreasonable allocation", async () => {
+    // 2^52 is itself a safe integer, but 2^52 · 64 = 2^58 is not: the
+    // exact-integer table-end check must reject it before any allocation
+    // or iteration (a buggy float-arithmetic path would round and proceed).
+    const elf = buildExtendedCountElf({
+      idBase58: NS3.scannerProgramId,
+      physicalShnum: 1,
+      countOverride: 2n ** 52n,
+    });
+    const state = fullState({ scannerElf: elf });
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const c2 = checkOf(r, "C2 scanner");
+    assert.equal(c2[0].status, "FAIL");
+    assert.match(c2[0].detail, /impossible section header table end/);
+    assert.equal(r.programs[0].elf.observed_sha256, null);
+    assert.equal(r.programs[0].elf.structure_valid, false);
+  });
+
+  test("34. regression: the SHN_XINDEX string-table escape (e_shstrndx=0xffff) verifies END-TO-END on an ordinary-count ELF", async () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId, extendedShstrndx: true });
+    const sections = parseElf64Sections(elf);
+    assert.equal(sections.length, 4);
+    assert.equal(sections[2].name, ".shstrtab"); // resolved THROUGH the escape
+    const state = fullState({ scannerElf: elf });
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    assert.equal(r.programs[0].elf.identity_verdict, "structural");
+    assert.equal(r.programs[0].elf.digest_match, true);
+    assert.equal(r.programs[0].elf.structure_valid, true);
   });
 });
 

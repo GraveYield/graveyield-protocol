@@ -335,6 +335,12 @@ export function elfDeclaredSpan(payload) {
 
   // Section count: the SAME extended-numbering rule parseElf64Sections
   // applies (real count in sh_size of section header 0 when e_shnum = 0).
+  // The extended escape exists precisely so the count can exceed the
+  // 16-bit e_shnum field — there is NO 65,535 ceiling. Real bounds: the
+  // count must be a JS safe integer (a hostile u64 is refused BEFORE any
+  // arithmetic) and the complete 64-byte-per-entry table must fit inside
+  // the payload (shtEnd checks below) — every oversized or malformed
+  // count fails closed in O(1) before anything is hashed.
   let extendedSectionNumbering = false;
   let shnum = payload.readUInt16LE(60);
   if (shnum === 0) {
@@ -343,15 +349,18 @@ export function elfDeclaredSpan(payload) {
         `section header table out of range (e_shoff=${eShoff}, extended section count unreadable, file=${payload.length} B)`,
       );
     }
-    shnum = Number(payload.readBigUInt64LE(eShoff + 32));
-    if (shnum === 0) {
+    const shnumBig = payload.readBigUInt64LE(eShoff + 32);
+    if (shnumBig === 0n) {
       throw new Error(
         "e_shnum = 0 with a zero extended section count — malformed section table; refusing to hash",
       );
     }
-    if (shnum > 0xffff) {
-      throw new Error(`extended section count ${shnum} exceeds the ELF64 u16 section-index space`);
+    if (shnumBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(
+        `extended section count ${shnumBig} exceeds the JavaScript safe-integer bound — malformed section table; refusing to hash`,
+      );
     }
+    shnum = Number(shnumBig);
     extendedSectionNumbering = true;
   }
   const shtEnd = eShoff + shnum * 64;

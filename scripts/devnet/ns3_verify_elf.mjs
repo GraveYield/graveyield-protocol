@@ -93,6 +93,22 @@ export function validateSbfElfHeader(buf) {
  * across the full verification path (span derivation, structural
  * identity, provenance) or explicitly refused; there is no partial
  * support.
+ *
+ * FULL VALID RANGE: the extended-numbering escape exists precisely so the
+ * count can exceed the 16-bit e_shnum field (counts >= SHN_LORESERVE
+ * REQUIRE it), and SH0.sh_size is a u64 — so there is NO 65,535 ceiling
+ * here. The enforced bounds are the real ones:
+ *   - the resolved count must be nonzero (zero = malformed table);
+ *   - the count must be a JavaScript safe integer (a u64 count beyond
+ *     Number.MAX_SAFE_INTEGER is refused before any arithmetic);
+ *   - e_shoff + count*64 (the complete section-header table) must be an
+ *     exact safe integer AND fit inside the buffer — so no declared table
+ *     can exceed the actual bytes, and nothing is allocated or iterated
+ *     before those checks pass (a hostile count fails closed in O(1));
+ *   - the string-table index (direct or SHN_XINDEX-resolved) must be
+ *     inside the resolved count.
+ * A spec-valid ELF with more than 65,535 sections parses; a malformed or
+ * impossible count fails closed.
  */
 export function parseElf64Sections(buf) {
   validateSbfElfHeader(buf);
@@ -122,19 +138,38 @@ export function parseElf64Sections(buf) {
   let shnum = eShnumRaw;
   let shstrndx = eShstrndxRaw;
   if (shnum === 0) {
-    shnum = readSh0Field(32, buf.readBigUInt64LE, "section count");
-    if (shnum === 0n) {
+    const shnumBig = readSh0Field(32, buf.readBigUInt64LE, "section count");
+    if (shnumBig === 0n) {
       throw new Error("e_shnum = 0 with a zero extended section count — malformed section table");
     }
-    if (shnum > 0xffffn) {
-      throw new Error(`extended section count ${shnum} exceeds the ELF64 u16 section-index space`);
+    // Extended numbering exists precisely so the count can exceed the
+    // 16-bit e_shnum field — SH0.sh_size is u64 and there is NO 65,535
+    // ceiling. The real bounds: the count must be a JS safe integer (a
+    // hostile u64 is refused BEFORE any arithmetic), and the complete
+    // 64-byte-per-entry table must fit inside the buffer (checked below
+    // with exact-integer arithmetic) — so no count can trigger an
+    // unreasonable allocation or iteration.
+    if (shnumBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(
+        `extended section count ${shnumBig} exceeds the JavaScript safe-integer bound — malformed section table`,
+      );
     }
-    shnum = Number(shnum);
+    shnum = Number(shnumBig);
   }
   if (shstrndx === 0xffff) {
-    shstrndx = readSh0Field(40, buf.readBigUInt32LE, "string table index");
+    // SH0.sh_link is a u32 field — read it with readUInt32LE (a Number).
+    // (readBigUInt32LE does not exist: the Big* Buffer readers are 64-bit
+    // only. The previous reader reference here was undefined, so a
+    // spec-valid SHN_XINDEX escape crashed with a TypeError instead of
+    // resolving — exposed by the >65,535-section fixtures and fixed.)
+    shstrndx = readSh0Field(40, buf.readUInt32LE, "string table index");
   }
   const need = eShoff + shnum * eShentsize;
+  if (!Number.isSafeInteger(need)) {
+    throw new Error(
+      `section header table end ${need} (e_shoff=${eShoff}, e_shnum=${shnum}) exceeds the safe-integer bound — impossible section table`,
+    );
+  }
   if (buf.length < need) {
     throw new Error(
       `section header table out of range (e_shoff=${eShoff}, e_shnum=${shnum}, file=${buf.length} B)`,

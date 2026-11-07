@@ -10,6 +10,12 @@
 // section, optional legacy ID bytes can be injected anywhere, and the
 // e_machine/e_flags pair controls the SBPF architecture verdict.
 //
+// buildExtendedCountElf() fabricates a spec-honest ELF64 whose section
+// count exceeds the 16-bit e_shnum space (extended section numbering:
+// e_shnum = 0, real count in SH0.sh_size, e_shstrndx = SHN_XINDEX with
+// the real index in SH0.sh_link), for the full-valid-range parser and
+// deployed-digest-verifier tests.
+//
 // The account encoders mirror the byte layouts documented (and on-chain
 // verified) in docs/LEGACY_DEPLOYMENTS.md §3 and the Rust state structs.
 import { createHash } from "node:crypto";
@@ -99,6 +105,137 @@ export function buildSbfElf({ idBase58, eMachine = 263, eFlags = 0, injectBytes 
 
 export function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
+}
+
+// ------------------------------------------------ extended-count ELF builder
+
+/**
+ * Build a spec-honest ELF64 whose section count exceeds the ordinary
+ * 16-bit e_shnum space, exercising the EXTENDED SECTION NUMBERING escapes
+ * (System V ABI / ELF gABI §1.7): e_shnum = 0 with the real count in
+ * SH0.sh_size (u64), and (by default) e_shstrndx = SHN_XINDEX (0xffff)
+ * with the real string-table index in SH0.sh_link (u32).
+ *
+ * Layout (payload-relative, exact fit — the section header table is the
+ * last structure, so the structure-implied extent equals the file size):
+ *   ELF header | .text (SHF_ALLOC|EXECINSTR, no ID) |
+ *   .rodata (SHF_ALLOC, the 32-byte program ID INSIDE it) | .shstrtab |
+ *   section header table (realShnum × 64 B)
+ *
+ * The program ID is placed ONLY in the section at `highIndex` (> 0xffff
+ * by default): a parser that mishandles section iteration beyond the
+ * 16-bit index space will not scan that section and the identity verdict
+ * degrades to "absent" — the fixture therefore discriminates real
+ * full-range support from a merely-accepted header.
+ *
+ * opts:
+ *   idBase58        — program ID embedded in the high-index section
+ *   realShnum       — section count written to SH0.sh_size (default 70000)
+ *   highIndex       — index of the allocated .rodata (default 66000);
+ *                     must be > 0xffff and < realShnum for the fixture to
+ *                     exercise the extended index space
+ *   physicalShnum   — entries the buffer ACTUALLY holds (default =
+ *                     realShnum). A value < realShnum fabricates a
+ *                     TRUNCATED extended table (declared table larger
+ *                     than the available bytes) for fail-closed tests;
+ *                     keep ≥ 1 so SH0 itself stays readable.
+ *   countOverride   — writes this exact u64 into SH0.sh_size instead of
+ *                     realShnum (0 / 2n**63n / 2n**52n fabricate invalid,
+ *                     safe-integer-hostile, and arithmetic-overflow
+ *                     counts respectively)
+ *   directShstrndx  — write the string-table index directly into
+ *                     e_shstrndx instead of the SHN_XINDEX escape
+ *                     (default false — the escape is the interesting case)
+ */
+export function buildExtendedCountElf({
+  idBase58,
+  realShnum = 70000,
+  highIndex = 66000,
+  physicalShnum,
+  countOverride,
+  directShstrndx = false,
+}) {
+  if (highIndex <= 0xffff || highIndex >= realShnum) {
+    throw new Error("buildExtendedCountElf: highIndex must be > 0xffff and < realShnum");
+  }
+  const phys = physicalShnum ?? realShnum;
+  if (phys < 1) throw new Error("buildExtendedCountElf: physicalShnum must be >= 1 (SH0 readable)");
+
+  const idBytes = Buffer.from(new PublicKey(idBase58).toBytes());
+  const textData = Buffer.alloc(96, 0);
+  const rodataData = Buffer.concat([Buffer.alloc(32, 0), idBytes]);
+  // name offsets within .shstrtab: .text=1, .shstrtab=7, .rodata=17
+  const strtab = Buffer.from("\0.text\0.shstrtab\0.rodata\0", "utf8");
+
+  const ehsz = 64;
+  const shentsz = 64;
+  const textOff = ehsz;
+  const rodataOff = textOff + textData.length;
+  const strtabOff = rodataOff + rodataData.length;
+  const shoff = strtabOff + strtab.length;
+  // The buffer holds only `phys` entries; the DECLARED count may be larger.
+  const total = shoff + phys * shentsz;
+
+  const buf = Buffer.alloc(total);
+  // ---- ELF header
+  ELF_MAGIC.copy(buf, 0);
+  buf[4] = 2; // EI_CLASS ELFCLASS64
+  buf[5] = 1; // EI_DATA LSB
+  buf[6] = 1; // EI_VERSION
+  buf.writeUInt16LE(2, 16); // e_type EXEC
+  buf.writeUInt16LE(263, 18); // e_machine EM_SBF (SBPF v0)
+  buf.writeUInt32LE(1, 20); // e_version
+  buf.writeBigUInt64LE(0x1000n, 24); // e_entry
+  buf.writeBigUInt64LE(0n, 32); // e_phoff
+  buf.writeUInt32LE(0, 36); // e_flags (SBPF v0)
+  buf.writeBigUInt64LE(BigInt(shoff), 40); // e_shoff
+  buf.writeUInt16LE(ehsz, 52); // e_ehsize
+  buf.writeUInt16LE(0, 54); // e_phentsize
+  buf.writeUInt16LE(0, 56); // e_phnum
+  buf.writeUInt16LE(shentsz, 58); // e_shentsize
+  buf.writeUInt16LE(0, 60); // e_shnum = 0 → extended numbering
+  buf.writeUInt16LE(directShstrndx ? 2 : 0xffff, 62); // e_shstrndx / SHN_XINDEX
+
+  textData.copy(buf, textOff);
+  rodataData.copy(buf, rodataOff);
+  strtab.copy(buf, strtabOff);
+
+  // ---- section header 0: the extended-numbering carrier (always present:
+  // physicalShnum >= 1 is enforced so the declared count stays readable)
+  buf.writeBigUInt64LE(countOverride ?? BigInt(realShnum), shoff + 32); // sh_size = real count
+  buf.writeUInt32LE(2, shoff + 40); // sh_link = .shstrtab index (u32)
+
+  // ---- section 1: .text (allocated, executable, NO ID inside)
+  if (phys > 1) {
+    buf.writeUInt32LE(1, shoff + 1 * shentsz); // sh_name → ".text"
+    buf.writeUInt32LE(SHT_PROGBITS, shoff + 1 * shentsz + 4);
+    buf.writeBigUInt64LE(BigInt(SHF_ALLOC | SHF_EXECINSTR), shoff + 1 * shentsz + 8);
+    buf.writeBigUInt64LE(BigInt(textOff), shoff + 1 * shentsz + 24);
+    buf.writeBigUInt64LE(BigInt(textData.length), shoff + 1 * shentsz + 32);
+  }
+
+  // ---- section 2: .shstrtab
+  if (phys > 2) {
+    buf.writeUInt32LE(7, shoff + 2 * shentsz); // sh_name → ".shstrtab"
+    buf.writeUInt32LE(SHT_STRTAB, shoff + 2 * shentsz + 4);
+    buf.writeBigUInt64LE(BigInt(strtabOff), shoff + 2 * shentsz + 24);
+    buf.writeBigUInt64LE(BigInt(strtab.length), shoff + 2 * shentsz + 32);
+  }
+
+  // ---- the high-index allocated section carrying the ID (only when the
+  // entry physically exists; truncated fixtures shrink `phys`)
+  if (phys > highIndex) {
+    const hb = shoff + highIndex * shentsz;
+    buf.writeUInt32LE(17, hb); // sh_name → ".rodata"
+    buf.writeUInt32LE(SHT_PROGBITS, hb + 4);
+    buf.writeBigUInt64LE(BigInt(SHF_ALLOC), hb + 8);
+    buf.writeBigUInt64LE(BigInt(rodataOff), hb + 24);
+    buf.writeBigUInt64LE(BigInt(rodataData.length), hb + 32);
+  }
+  // All other entries stay zeroed: type 0 (NULL), offset 0, size 0 — the
+  // same shape linkers emit for reserved-but-empty section slots.
+
+  return buf;
 }
 
 // ------------------------------------------------- loader account encoders
