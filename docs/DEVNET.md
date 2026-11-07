@@ -135,7 +135,7 @@ consistency is asserted by `scripts/devnet/test/ns3_sync.test.mjs`.
     `register-oracle` fee afterwards. Recheck the live balance
     immediately before executing: a previously recorded balance is not
     a guarantee — and passing this gate is not a guarantee that the rest
-    of the sequence can finish (post-deployment balance check in §3).
+    of the sequence can finish (deployer funding sequence in §3).
   - **Governance authority** — needs its OWN devnet SOL: each drill's
     authority pause/unpause transactions are signed AND paid by the
     governance keypair (two landed transactions per program drill). No
@@ -286,30 +286,42 @@ upgrade authority) and follow the normal `solana program deploy` re-run;
 the identity, artifact-refusal, and provenance checks all still apply —
 there is no upgrade path that skips the gate.
 
-**Post-deployment deployer balance check (OPERATIONAL, owner-executed —
-the balance check itself is READ-ONLY).** Passing the stage [2/7] funding
-gate does NOT guarantee the deployer can finish the whole sequence: the
-estimated deployment expenditure is ≈ 5.7–6.0 SOL against a 6 SOL gate,
-so a deployer funded near the minimum can land near zero, and the SAME
-deployer keypair still pays the two `init-*` transaction fees and (when
-`--fee-payer` is supplied) the `register-oracle` fee. There is NO
-protocol-enforced post-deployment minimum — this is a sequence-completion
-concern, not a rule the chain enforces, and nothing on-chain checks it.
-After the two deploy transactions confirm, re-check the deployer's
-remaining balance with the same lamport-exact read the deploy script's
-funding gate uses:
+**Deployer funding sequence (OPERATIONAL, owner-executed — the balance
+checks themselves are READ-ONLY).** The stage [2/7] threshold is a
+PRE-deployment gate only — passing it is NOT a guarantee that the
+subsequent operations are funded. The owner executes ONE sequence, in
+this order:
 
-```bash
-solana --url https://api.devnet.solana.com balance --lamports /path/to/deployer-keypair.json
-```
+1. **Verify ≥ 6 SOL immediately before deployment** — the stage [2/7]
+   gate (`MIN_DEPLOY_LAMPORTS = 6 000 000 000`, lamport-exact) refuses
+   to run below it and prints the shortfall; re-read the LIVE balance
+   rather than trusting any previously recorded figure.
+2. **Deploy GraveScanner and GraveVault** — the two `solana program
+   deploy` transactions above; the deployer signs and pays both. The
+   estimated expenditure is ≈ 5.7–6.0 SOL against the 6 SOL gate, so a
+   deployer funded near the minimum can land near zero.
+3. **Recheck the deployer's remaining SOL balance** after BOTH deploy
+   transactions confirm and BEFORE initialization, with the same
+   lamport-exact read the funding gate uses:
 
-Confirm the remaining balance can cover the initialization and any
-subsequent transaction fees before continuing to §4. If it cannot, the
-owner must fund the deployer again BEFORE running `init-*` or
-`register-oracle` — that funding transfer is an OWNER-EXECUTED ON-CHAIN
-WRITE, exactly like every other funding operation in this runbook. Do
-not extrapolate from a previously recorded balance: balances move, and
-only the live lamport read is evidence.
+   ```bash
+   solana --url https://api.devnet.solana.com balance --lamports /path/to/deployer-keypair.json
+   ```
+
+4. **Confirm the remaining funds cover BOTH `init-*` transactions and
+   any planned `register-oracle` fee** — the deployer always pays the
+   two initialization fees, and pays the oracle-registration fee when
+   `--fee-payer` is supplied (§4).
+5. **If the balance is insufficient, STOP** — do not run `init-*` or
+   `register-oracle` — and request additional owner funding before
+   proceeding. The re-funding transfer is an OWNER-EXECUTED ON-CHAIN
+   WRITE, exactly like every other funding operation in this runbook;
+   only the owner executes it.
+
+There is NO protocol-enforced post-deployment minimum — this is a
+sequence-completion concern, not a rule the chain enforces, and nothing
+on-chain checks it. Do not extrapolate from a previously recorded
+balance: balances move, and only the live lamport read is evidence.
 
 Mode 2 action classification (binding): balance checks and every
 verifier invocation are READ-ONLY; `solana-keygen pubkey` identity
