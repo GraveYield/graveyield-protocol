@@ -15,15 +15,21 @@
 // What the suite pins (mapped to the required coverage list):
 //   ✔ correct Scanner / Vault program + ProgramData accounts → overall PASS
 //   ✔ metadata parsing, payload extraction, 45/13 B structural boundary
-//   ✔ ELF byte span = MAX structure-implied extent (SHT end ∪ section
-//     extents ∪ program-header extents) — adversarial ELFs with section
-//     content or segments beyond the section header table are hashed IN
-//     FULL (never truncated by a table-position assumption); undeclared
-//     tails must be all-zero loader padding; every undeterminable or
-//     out-of-range structure fails closed before anything is hashed
+//   ✔ the digest covers the ENTIRE extracted payload — no structure-implied
+//     truncation and no tail exclusion: genuine trailing zero AND nonzero
+//     artifact bytes are hashed (whole-artifact pins match); undeclared
+//     extra account capacity is DISCLOSED (count + all-zero flag) but
+//     NEVER excluded — the full-payload digest must equal the approved
+//     whole-artifact pin or the verdict FAILS (fail closed; the verifier
+//     never guesses which trailing bytes are loader padding)
+//   ✔ the structure-implied extent (structural gate + diagnostic) INCLUDES
+//     the program-header TABLE's own byte extent — a table beyond the SHT
+//     end and beyond all section/segment extents is validated AND counted,
+//     never omitted; malformed/out-of-range tables fail closed before
+//     anything is hashed
 //   ✔ extended section numbering (e_shnum=0 / SHN_XINDEX / PN_XNUM) is
-//     supported on the FULL path (span + identity + digest) — one rule,
-//     JSON and human output agree
+//     supported on the FULL path (structure + identity + digest) — one
+//     rule, JSON and human output agree
 //   ✔ structure_valid reflects the stages that ACTUALLY ran (no
 //     contradictory fields on any evidence path — regression battery)
 //   ✔ genesis gate order: failed genesis SHORT-CIRCUITS the run (the RPC
@@ -124,16 +130,19 @@ function programDataWithoutAuthority(elf) {
 // ------------------------------------------------- adversarial ELF builders
 //
 // These builders exist to prove the hash-span methodology against layouts
-// a section-header-table-position assumption gets WRONG:
+// a structure-implied-span (or table-position) assumption gets WRONG:
 //   * a section whose CONTENT lives AFTER the section header table (a
 //     valid ELF — linkers may append; an "SHT end = ELF end" rule would
 //     truncate or refuse it);
 //   * a program header whose extent covers bytes beyond the SHT end;
+//   * a program-header TABLE placed beyond the SHT end and beyond every
+//     section-content and segment file extent (Finding A — the table's
+//     own bytes must never be omitted from the artifact digest);
 //   * extended section numbering (e_shnum = 0, real count in SH0.sh_size)
 //     and the PN_XNUM program-count escape (real count in SH0.sh_info).
-// The whole-file SHA-256 is pinned in the injected manifest exactly the
-// way real build artifacts are pinned — the approved-digest comparison is
-// never weakened to let a synthetic layout pass.
+// The whole-artifact SHA-256 is pinned in the injected manifest exactly
+// the way real build artifacts are pinned — the approved-digest
+// comparison is never weakened to let a synthetic layout pass.
 
 const SHT_PROGBITS = 1;
 const SHT_STRTAB = 3;
@@ -151,6 +160,11 @@ const PHENTSIZE = 56;
  *   programHeader   — { offset, filesz }: one PT_LOAD program header
  *   extendedShnum   — e_shnum = 0; real count in SH0.sh_size
  *   extendedPhnum   — e_phnum = PN_XNUM; real count in SH0.sh_info
+ *   phdrAfterSht    — place the program-header TABLE beyond the SHT end
+ *                     AND beyond every section-content and segment file
+ *                     extent (Finding A fixture; the default segment then
+ *                     covers .text + .shstrtab only, so the table is the
+ *                     sole span-setting structure)
  *   extraZeroTail   — zero bytes appended beyond every declared structure
  */
 function buildLayoutedElf({
@@ -161,23 +175,29 @@ function buildLayoutedElf({
   programHeader = null,
   extendedShnum = false,
   extendedPhnum = false,
+  phdrAfterSht = false,
   extraZeroTail = 0,
 }) {
   const idBytes = Buffer.from(new PublicKey(idBase58).toBytes());
   const textData = Buffer.concat([Buffer.alloc(64, 0), idBytes, Buffer.alloc(32, 0)]);
   const strtab = Buffer.from("\0.text\0.shstrtab\0.tail\0", "utf8");
 
-  const hasPhdr = programHeader !== null || extendedPhnum;
+  const hasPhdr = programHeader !== null || extendedPhnum || phdrAfterSht;
   const ehsz = 64;
-  const phoff = hasPhdr ? ehsz : 0;
-  const textOff = hasPhdr ? ehsz + PHENTSIZE : ehsz;
   const shentsz = 64;
   const shnum = 4; // NULL, .text, .shstrtab, .tail
+  const textOff = hasPhdr && !phdrAfterSht ? ehsz + PHENTSIZE : ehsz;
   const strtabOff = textOff + textData.length;
   const shoff = strtabOff + strtab.length;
   const tailOff = shoff + shnum * shentsz; // AFTER the section header table
   const tailData = tailSection ? tailSection.data : null;
-  const total = tailOff + (tailData ? tailData.length : 0) + extraZeroTail;
+  const tailEnd = tailOff + (tailData ? tailData.length : 0);
+  // phdrAfterSht: the TABLE is the last declared structure — beyond the
+  // SHT end, beyond every section-content extent and every segment file
+  // extent (the Finding A adversarial layout).
+  const phoff = !hasPhdr ? 0 : phdrAfterSht ? tailEnd : ehsz;
+  const total =
+    hasPhdr && phdrAfterSht ? tailEnd + PHENTSIZE + extraZeroTail : tailEnd + extraZeroTail;
 
   const buf = Buffer.alloc(total);
   // ---- ELF header
@@ -209,7 +229,11 @@ function buildLayoutedElf({
     buf.writeUInt32LE(PT_LOAD, phoff); // p_type
     buf.writeUInt32LE(5, phoff + 4); // p_flags R+X
     buf.writeBigUInt64LE(BigInt(programHeader?.offset ?? textOff), phoff + 8); // p_offset
-    buf.writeBigUInt64LE(BigInt(programHeader?.filesz ?? total - textOff), phoff + 32); // p_filesz
+    // Default extent: to EOF — EXCEPT phdrAfterSht, where the segment must
+    // end BEFORE the SHT so the TABLE itself is the only structure beyond
+    // every other extent (Finding A).
+    const defaultFilesz = phdrAfterSht ? shoff - textOff : total - textOff;
+    buf.writeBigUInt64LE(BigInt(programHeader?.filesz ?? defaultFilesz), phoff + 32); // p_filesz
   }
 
   // ---- section headers (SH0 doubles as the extended-numbering carrier)
@@ -451,11 +475,14 @@ function assertNoFieldContradictions(p, scenario) {
     assert.notEqual(e.sbpf_valid, true, ctx);
   }
   if (e.observed_sha256 !== null) {
-    // Hashing implies an established span (never a guessed boundary):
+    // Hashing implies an established structure (never a guessed boundary)
+    // AND the hash span is the ENTIRE extracted payload — no truncation:
     assert.equal(e.extraction, "OK", ctx);
     assert.notEqual(e.declared_elf_size, null, ctx);
     assert.notEqual(e.span_basis, null, ctx);
     assert.notEqual(e.structure_valid, null, ctx); // structure was judged true or false
+    assert.equal(e.hash_span_bytes, e.payload_size, ctx); // the FULL payload is hashed
+    assert.ok(e.trailing_bytes_beyond_declared_structure >= 0, ctx);
   }
   if (e.digest_match !== null) {
     assert.notEqual(e.observed_sha256, null, ctx);
@@ -620,6 +647,52 @@ describe("ELF byte span (max structure-implied extent — never a SHT-position a
     const shoff = Number(elf.readBigUInt64LE(40));
     elf.writeBigUInt64LE(BigInt(elf.length + 4096), shoff + 3 * 64 + 32); // .tail size beyond EOF
     assert.throws(() => elfDeclaredSpan(elf), /out of range|beyond the payload/);
+  });
+
+  test("ADVERSARIAL (Finding A): a program-header TABLE beyond the SHT end and beyond ALL section/segment extents sets the span", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      phdrAfterSht: true,
+      tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(32, 0x5a) },
+    });
+    const s = elfDeclaredSpan(elf);
+    // The table is beyond EVERY other declared extent…
+    assert.ok(s.shtEnd < s.phEnd, "table must sit beyond the SHT end");
+    assert.ok(s.sectionMax < s.phEnd, "table must sit beyond all section extents");
+    assert.ok(s.segmentMax < s.phEnd, "table must sit beyond all segment extents");
+    assert.equal(s.phEnd, elf.length); // table ends at EOF
+    // …and the span MUST include it (the table's own bytes count).
+    assert.equal(s.span, elf.length);
+    assert.match(s.basis, /program header table/);
+    // The table bytes are nontrivial, so the pre-fix calculation (which
+    // validated but excluded phEnd) hashed a DIFFERENT byte set:
+    const oldBugSpan = Math.max(s.shtEnd, s.sectionMax, s.segmentMax, 64);
+    assert.ok(oldBugSpan < s.span);
+    assert.notEqual(sha256(elf.subarray(0, oldBugSpan)), sha256(elf));
+  });
+
+  test("program-header TABLE beyond the payload (truncated table) → FAILS CLOSED", () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId });
+    elf.writeUInt16LE(56, 54); // e_phentsize
+    elf.writeBigUInt64LE(BigInt(elf.length - 30), 32); // e_phoff near EOF
+    elf.writeUInt16LE(1, 56); // e_phnum=1 → table end beyond EOF
+    assert.throws(() => elfDeclaredSpan(elf), /program header table out of range/);
+  });
+
+  test("e_phnum > 0 with e_phoff = 0 → inconsistent program header table → FAILS CLOSED", () => {
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId });
+    elf.writeUInt16LE(56, 54);
+    elf.writeUInt16LE(1, 56);
+    assert.throws(() => elfDeclaredSpan(elf), /inconsistent program header table/);
+  });
+
+  test("e_phentsize != 56 → FAILS CLOSED", () => {
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      programHeader: { offset: 64, filesz: 8 },
+    });
+    elf.writeUInt16LE(40, 54);
+    assert.throws(() => elfDeclaredSpan(elf), /unexpected program header entry size 40/);
   });
 
   test("program header extent beyond the payload → FAILS CLOSED", () => {
@@ -1022,40 +1095,177 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     }
   });
 
-  test("20. zero loader padding beyond the declared ELF end is tolerated and excluded from the digest", async () => {
+  test("20. Case 5 + Case 1 — genuine trailing ZERO bytes that are PART of the original artifact are hashed, never stripped", async () => {
     const state = fullState();
     const elf = goodElf(NS3.scannerProgramId);
+    // The original artifact itself ended in 1024 zero bytes (a valid ELF —
+    // ELF structures do not necessarily encode the file length, so those
+    // zeros are unreferenced by any section or segment).
+    const artifact = Buffer.concat([elf, Buffer.alloc(1024, 0)]);
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, artifact), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(artifact); // pin over the WHOLE original artifact
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.hash_span_bytes, artifact.length); // the FULL payload is hashed
+    assert.equal(scanner.elf.observed_sha256, sha256(artifact)); // the zeros are INCLUDED
+    assert.notEqual(scanner.elf.observed_sha256, sha256(elf)); // the old strip-the-tail rule would differ
+    assert.equal(scanner.elf.digest_match, true);
+    assert.equal(scanner.elf.payload_size, artifact.length);
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 1024);
+    assert.equal(scanner.elf.trailing_bytes_all_zero, true); // disclosed — but NOT excluded
+    assert.equal(scanner.elf.declared_elf_size, elf.length);
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.match(checkOf(r, "C2 scanner")[0].detail, /disclosed, NOT excluded/);
+  });
+
+  test("20b. Case 2 — genuine trailing NONZERO bytes unreferenced by any section or segment are hashed, never truncated or rejected", async () => {
+    const state = fullState();
+    const elf = goodElf(NS3.vaultProgramId);
+    const artifact = Buffer.concat([elf, Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x01])]);
+    state.accounts[PD_VAULT] = rpcAccount(programDataWithAuthority(NS3.deployer, artifact), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(goodElf(NS3.scannerProgramId));
+    state.fixtureDigests.vault = sha256(artifact); // pin over the WHOLE original artifact
+    const r = await run(state);
+    assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
+    const vault = r.programs[1];
+    assert.equal(vault.elf.hash_span_bytes, artifact.length);
+    assert.equal(vault.elf.observed_sha256, sha256(artifact)); // unreferenced bytes INCLUDED
+    assert.equal(vault.elf.digest_match, true);
+    assert.equal(vault.elf.trailing_bytes_beyond_declared_structure, 5);
+    assert.equal(vault.elf.trailing_bytes_all_zero, false); // disclosed — but NOT a failure
+    assert.equal(vault.elf.structure_valid, true); // disclosure is a diagnostic, not a structural stage
+    assert.equal(vault.elf.identity_verdict, "structural");
+    assert.match(checkOf(r, "C7 vault")[0].detail, /all zero: NO/);
+  });
+
+  test("20c. Case 3 — extra zero-filled account capacity with NO independent length evidence → FAIL CLOSED (the zero tail is NOT assumed to be padding)", async () => {
+    const state = fullState();
+    const elf = goodElf(NS3.scannerProgramId);
+    // Payload = artifact + allocation capacity (e.g. an explicit larger
+    // --max-len). The pin covers the TRUE artifact only; nothing in the
+    // payload establishes where the artifact ends, so NOTHING may be
+    // excluded — the full payload must match the pin and does not.
     state.accounts[PD_SCANNER] = rpcAccount(
       programDataWithAuthority(NS3.deployer, Buffer.concat([elf, Buffer.alloc(1024, 0)])),
       { owner: LOADER },
     );
-    state.fixtureDigests.scanner = sha256(elf);
+    state.fixtureDigests.scanner = sha256(elf); // the true artifact digest
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.structure_valid, true); // structure is fine — the CONTENT cannot be verified
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 1024);
+    assert.equal(scanner.elf.trailing_bytes_all_zero, true);
+    assert.equal(scanner.elf.hash_span_bytes, elf.length + 1024); // every byte hashed — nothing excluded
+    assert.equal(scanner.elf.observed_sha256, sha256(Buffer.concat([elf, Buffer.alloc(1024, 0)])));
+    assert.notEqual(scanner.elf.observed_sha256, sha256(elf)); // a stripped-tail hash is NOT what was reported
+    assert.equal(scanner.elf.digest_match, false);
+    const c3 = checkOf(r, "C3 scanner");
+    assert.equal(c3[0].status, "FAIL");
+    assert.match(c3[0].detail, /MISMATCH/);
+    // The disclosure names the ambiguity explicitly (JSON + human output).
+    assert.match(checkOf(r, "C2 scanner")[0].detail, /cannot be distinguished/);
+  });
+
+  test("20d. Case 6 — one-byte alteration in the region the previous implementation EXCLUDED (undeclared tail) changes the digest → FAIL", async () => {
+    const state = fullState();
+    const elf = goodElf(NS3.scannerProgramId);
+    const artifact = Buffer.concat([elf, Buffer.alloc(512, 0)]);
+    const altered = Buffer.from(artifact);
+    altered[artifact.length - 1] ^= 0x01; // flip ONE byte inside the undeclared tail
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, altered), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(artifact); // pin over the intact artifact
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const scanner = r.programs[0];
+    assert.equal(scanner.elf.observed_sha256, sha256(altered)); // the altered byte WAS hashed
+    assert.equal(scanner.elf.digest_match, false); // the old exclude-the-tail rule would report a false match
+    assert.equal(checkOf(r, "C3 scanner")[0].status, "FAIL");
+  });
+
+  test("20e. Case 4 (Finding A, end-to-end) — a program-header TABLE beyond the SHT end and beyond all section/segment extents is hashed IN FULL", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({
+      idBase58: NS3.scannerProgramId,
+      phdrAfterSht: true,
+      tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(32, 0x5a) },
+    });
+    // Structural gate: the table is the span-setting structure and the
+    // pre-fix calculation (validate phEnd but exclude it from the max)
+    // would have hashed a DIFFERENT byte set.
+    const spanInfo = elfDeclaredSpan(elf);
+    assert.ok(spanInfo.shtEnd < spanInfo.phEnd);
+    assert.equal(spanInfo.span, elf.length);
+    assert.match(spanInfo.basis, /program header table/);
+    const oldBugSpan = Math.max(spanInfo.shtEnd, spanInfo.sectionMax, spanInfo.segmentMax, 64);
+    assert.ok(oldBugSpan < elf.length);
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
+    state.fixtureDigests.scanner = sha256(elf); // whole-artifact pin (table bytes included)
     const r = await run(state);
     assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
     const scanner = r.programs[0];
-    assert.equal(scanner.elf.trailing_padding_bytes, 1024);
+    assert.equal(scanner.elf.hash_span_bytes, elf.length);
+    assert.equal(scanner.elf.observed_sha256, sha256(elf)); // table bytes INCLUDED in the digest
+    assert.notEqual(scanner.elf.observed_sha256, sha256(elf.subarray(0, oldBugSpan))); // pre-fix digest ≠ reported digest
+    assert.equal(scanner.elf.digest_match, true);
     assert.equal(scanner.elf.declared_elf_size, elf.length);
-    assert.equal(scanner.elf.payload_size, elf.length + 1024);
-    assert.equal(scanner.elf.observed_sha256, sha256(elf)); // padding NOT hashed
-    assert.equal(scanner.elf.structure_valid, true); // all structural stages passed
-    assert.match(checkOf(r, "C2 scanner")[0].detail, /padding excluded from the digest/);
+    assert.match(scanner.elf.span_basis, /program header table/);
+    assert.equal(scanner.elf.identity_verdict, "structural");
+    assert.equal(scanner.elf.structure_valid, true);
   });
 
-  test("21. non-zero bytes beyond the declared ELF end → FAIL (refuses to hash an unexpected layout)", async () => {
+  test("21. non-zero bytes beyond the declared ELF end with a prefix-only pin → digest FAIL (a content-integrity failure, structure still valid)", async () => {
     const state = fullState();
     const elf = goodElf(NS3.scannerProgramId);
     state.accounts[PD_SCANNER] = rpcAccount(
       programDataWithAuthority(NS3.deployer, Buffer.concat([elf, Buffer.from([1, 2, 3, 4])])),
       { owner: LOADER },
     );
+    state.fixtureDigests.scanner = sha256(elf); // pin over the prefix only
+    const r = await run(state);
+    assert.equal(r.overall, "FAIL");
+    const scanner = r.programs[0];
+    // The tail is DISCLOSED (count + all-zero flag), never a structural
+    // stage: the structure passed, the CONTENT (full-payload digest) failed.
+    assert.equal(scanner.elf.structure_valid, true);
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 4);
+    assert.equal(scanner.elf.trailing_bytes_all_zero, false);
+    assert.equal(scanner.elf.hash_span_bytes, elf.length + 4); // FULL payload hashed
+    assert.equal(
+      scanner.elf.observed_sha256,
+      sha256(Buffer.concat([elf, Buffer.from([1, 2, 3, 4])])),
+    );
+    assert.equal(scanner.elf.digest_match, false);
+    assert.equal(checkOf(r, "C2 scanner")[0].status, "PASS"); // disclosure, not a structural failure
+    assert.equal(checkOf(r, "C3 scanner")[0].status, "FAIL");
+  });
+
+  test("21h. malformed program-header TABLE beyond the payload → structural FAIL, nothing hashed, structure_valid=false", async () => {
+    const state = fullState();
+    const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId });
+    elf.writeUInt16LE(56, 54);
+    elf.writeBigUInt64LE(BigInt(elf.length - 30), 32); // e_phoff near EOF
+    elf.writeUInt16LE(1, 56); // table end beyond the payload
+    state.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+      owner: LOADER,
+    });
     state.fixtureDigests.scanner = sha256(elf);
     const r = await run(state);
     assert.equal(r.overall, "FAIL");
     const c2 = checkOf(r, "C2 scanner");
     assert.equal(c2[0].status, "FAIL");
-    assert.match(c2[0].detail, /NOT all zero/);
+    assert.match(c2[0].detail, /program header table out of range/);
+    assert.equal(r.programs[0].elf.observed_sha256, null); // refused to hash
     assert.equal(r.programs[0].elf.digest_match, null);
-    // The tail adjudication is a structural stage: it failed → structure_valid=false.
     assert.equal(r.programs[0].elf.structure_valid, false);
   });
 
@@ -1081,7 +1291,7 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
     const scanner = r.programs[0];
     assert.equal(scanner.elf.declared_elf_size, elf.length);
-    assert.equal(scanner.elf.trailing_padding_bytes, 0);
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 0);
     assert.equal(scanner.elf.observed_sha256, sha256(elf)); // full file hashed
     assert.equal(scanner.elf.digest_match, true);
     assert.equal(scanner.elf.identity_verdict, "structural"); // the identity gate parsed the same layout
@@ -1101,10 +1311,11 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
     const r = await run(state);
     assert.equal(r.overall, "PASS", JSON.stringify(r.checks, null, 2));
     const scanner = r.programs[0];
-    // Contrast with test 20: those zeros are a DECLARED section, so the
-    // span INCLUDES them (trailing_padding_bytes=0) and the whole-file
-    // digest matches. Undeclared zero tails stay excluded (test 20).
-    assert.equal(scanner.elf.trailing_padding_bytes, 0);
+    // Contrast with test 20c: those zeros are a DECLARED section, so the
+    // structure-implied extent INCLUDES them (no trailing bytes) and the
+    // whole-file digest matches. Undeclared zero tails are disclosed and
+    // hashed like every other byte (test 20) — never excluded (test 20c).
+    assert.equal(scanner.elf.trailing_bytes_beyond_declared_structure, 0);
     assert.equal(scanner.elf.declared_elf_size, elf.length);
     assert.equal(scanner.elf.observed_sha256, sha256(elf));
     assert.equal(scanner.elf.digest_match, true);
@@ -1319,6 +1530,50 @@ describe("deployed-ELF digest verification — mock RPC battery", () => {
             idBase58: NS3.scannerProgramId,
             tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.from("tail-beyond-sht") },
           });
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+            owner: LOADER,
+          });
+          s.fixtureDigests.scanner = sha256(elf);
+          return s;
+        })(),
+      ],
+      [
+        "genuine zero tail (whole-artifact pin)",
+        (() => {
+          const s = fullState();
+          const elf = goodElf(NS3.scannerProgramId);
+          const artifact = Buffer.concat([elf, Buffer.alloc(128, 0)]);
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, artifact), {
+            owner: LOADER,
+          });
+          s.fixtureDigests.scanner = sha256(artifact);
+          return s;
+        })(),
+      ],
+      [
+        "program-header table beyond all extents (Finding A)",
+        (() => {
+          const s = fullState();
+          const elf = buildLayoutedElf({
+            idBase58: NS3.scannerProgramId,
+            phdrAfterSht: true,
+            tailSection: { type: SHT_PROGBITS, flags: 0, data: Buffer.alloc(32, 0x5a) },
+          });
+          s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
+            owner: LOADER,
+          });
+          s.fixtureDigests.scanner = sha256(elf);
+          return s;
+        })(),
+      ],
+      [
+        "malformed program-header table (beyond payload)",
+        (() => {
+          const s = fullState();
+          const elf = buildLayoutedElf({ idBase58: NS3.scannerProgramId });
+          elf.writeUInt16LE(56, 54);
+          elf.writeBigUInt64LE(BigInt(elf.length - 30), 32);
+          elf.writeUInt16LE(1, 56);
           s.accounts[PD_SCANNER] = rpcAccount(programDataWithAuthority(NS3.deployer, elf), {
             owner: LOADER,
           });

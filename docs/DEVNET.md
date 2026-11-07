@@ -433,56 +433,82 @@ C6–C10), plus the cluster-identity gate first:
   is reported precisely and REFUSED — the extraction boundary is never
   silently shifted).
 
-  **Hashed-span methodology.** Five different "ELF length" notions
-  exist, and the tool uses exactly one defensible boundary:
+  **Hash-span methodology (what exactly enters the SHA-256).** Five
+  different "ELF length" notions exist:
   1. the ProgramData PAYLOAD length (account bytes after the loader
      metadata) — what is on the wire;
   2. the section-header-table end (`e_shoff + e_shnum·e_shentsize`) —
      a common but NOT universal ELF end;
   3. the MAX byte extent the ELF's own structures imply — the SHT end,
-     every non-NOBITS section extent (`sh_offset + sh_size`), and every
+     the program-header TABLE end (`e_phoff + e_phnum·56`), every
+     non-NOBITS section extent (`sh_offset + sh_size`), and every
      program-header extent (`p_offset + p_filesz`);
   4. the uploaded `.so` file length — the span the approved manifest
      digests were computed over;
-  5. the loader-interpreted span — the whole payload; the loader
-     neither trims nor re-bounds it.
+  5. the loader-interpreted span — the whole payload.
 
-  The tool hashes concept 3 — the **max structure-implied extent** —
-  after validating the ELF64 header with the repository's own SBF
-  validator and deriving the section table through the SAME
-  `parseElf64Sections` the structural-identity gate uses. Evidence
-  basis: the W1 rehearsal (`lifecycle_rehearsal/elf_dump.mjs`,
-  byte-verified against devnet ProgramData accounts on 2026-10-29)
-  proves the upgradeable loader stores the ELF so it "runs to the EXACT
-  END of the account" — the default deploy writes the uploaded file
-  verbatim after the metadata, and zero bytes beyond the ELF can exist
-  only when a larger `--max-len` was explicitly reserved. Hashing the
-  max extent therefore covers EVERY byte the ELF itself declares: a
-  valid ELF whose section contents or segments sit beyond the section
-  header table is hashed IN FULL, never truncated by a table-position
-  assumption (an adversarial-fixture test pins a whole-file digest
-  match for such a layout). If the payload is longer than the extent,
-  the excess is beyond anything the ELF declares and must be all-zero
-  loader padding — excluded from the digest; non-zero excess, any
-  structure implying bytes beyond the payload (truncated account), or a
-  header/section table that cannot be validated FAILS CLOSED before
-  anything is hashed. For every well-formed build output the extent
-  equals the file length, so the observed digest is computed over
-  exactly the span the manifest pin was computed over — the
-  approved-digest comparison is never weakened to accommodate synthetic
-  layouts.
+  **The digest covers the ENTIRE extracted payload (concepts 1 and 5):
+  every byte the account holds after the derived metadata boundary
+  enters the SHA-256.** There is no structure-implied truncation and no
+  tail exclusion — genuine trailing artifact bytes are never silently
+  stripped, and a one-byte alteration anywhere in the payload (including
+  bytes beyond every structure the ELF declares) changes the digest.
+
+  Evidence basis (all in-repository): the documented NS-3 deploy path
+  (`deploy_devnet.sh`) runs `solana program deploy` and never passes
+  `--max-len`, so no extra account capacity is reserved; the W1
+  byte-verification (`lifecycle_rehearsal/elf_dump.mjs`,
+  `matchOnChainProgramData`, byte-verified against devnet ProgramData
+  accounts on 2026-10-29) proves the upgradeable loader stores the ELF
+  so it "runs to the EXACT END of the account"; and the W1/W1.1
+  lifecycle rehearsal REFUSES to run unless the loaded ProgramData
+  payload byte-matches the pinned ELF exactly (the same exact-length
+  helper) — and passed, with digests equal to the approved pins. On the
+  documented path the payload therefore IS the artifact, and the
+  full-payload digest IS the approved whole-artifact digest.
+
+  The structure-implied extent (concept 3 — INCLUDING the
+  program-header table's own extent, so a table positioned beyond the
+  SHT end and beyond all section/segment extents is validated AND
+  counted, never omitted) is still computed — as the STRUCTURAL GATE
+  and an honest diagnostic, never as the hash boundary: the ELF64
+  header, the section table, every section extent, the program-header
+  table and every segment extent must fit inside the payload, and a
+  payload that cannot be structurally established FAILS CLOSED before
+  anything is hashed. When the payload is longer than the extent, the
+  excess is DISCLOSED in both outputs (`trailing_bytes_beyond_declared_structure`
+  plus the all-zero flag) but NOT excluded — extra allocation capacity
+  (e.g. an explicit larger `--max-len`, which the documented deploy
+  path never uses) cannot be distinguished from genuine artifact bytes
+  without independent, trustworthy length evidence, so the verifier
+  does not guess which trailing bytes are loader padding: it excludes
+  nothing, and if the full-payload digest does not match the approved
+  whole-artifact pin the verdict is FAIL. The approved-digest
+  comparison is never weakened to accommodate synthetic layouts.
+
+  **Structural validity vs digest match.** `structure_valid` reflects
+  only the structural stages that actually ran: `null` — no ELF payload
+  was assessed; `false` — a payload was assessed and at least one
+  structural stage failed (ELF64 header validation, structure-implied
+  extent establishment, in-range section/program-header tables, SBPF v0
+  architecture); `true` — all structural stages ran and passed. A
+  digest mismatch is a CONTENT-integrity failure (`digest_match=false`
+  with `structure_valid=true` — "right shape, wrong bytes"), never a
+  structural contradiction, and the JSON and human-readable outputs
+  carry the same information.
 
   **Extended section numbering** (ELF spec: `e_shnum = 0` with the real
   count in `sh_size` of section header 0; `e_shstrndx = SHN_XINDEX`;
   `e_phnum = PN_XNUM` with the real count in `sh_info` of section
-  header 0) is supported on the FULL path — span derivation, structural
-  identity, and digest all resolve it with the same rule; there is no
+  header 0) is supported on the FULL path — structure establishment,
+  structural identity, and digest all resolve it with the same rule; there is no
   partial support, and the JSON and human-readable outputs report the
   same resolution (the `span_basis` field names which structure set the
   maximum, including "extended numbering").
 
   The repository's own provenance gate (`ns3_check_provenance.mjs`)
-  then runs over the EXACT established bytes: SHA-256 against the
+  then runs over the EXACT full extracted payload — the very bytes whose
+  digest was taken: SHA-256 against the
   [`../scripts/devnet/provenance.manifest.json`](../scripts/devnet/provenance.manifest.json)
   pin, the SBPF v0 architecture (e_machine 263 / e_flags 0), and the
   structural NS-3 identity (embedded program ID inside allocated
@@ -500,19 +526,24 @@ takes precedence over INCOMPLETE. `--json` emits the context, a manifest
 summary, and one record per program with identical key sets on every
 evidence path: existence/owner/executable fields, embedded vs derived
 pointer comparison, loader state, upgrade-authority metadata, payload
-offset / payload size / declared ELF size / span basis / trailing
-padding, observed vs expected SHA-256, digest match, SBPF validity, and
-the structural identity verdict.
+offset / payload size / hash span (`hash_span_bytes` — always the full
+payload) / declared ELF size (structure-implied extent, program-header
+table included) / span basis / trailing bytes beyond the declared
+structure with the all-zero flag, observed vs expected SHA-256, digest
+match, SBPF validity, and the structural identity verdict.
 
 The `structure_valid` field reflects the structural stages that
 ACTUALLY ran, and never contradicts the evidence: `null` — no ELF
 payload was ever assessed (extraction failed or was never reached:
 absent accounts, malformed loader metadata, RPC-UNVERIFIED paths);
 `false` — ELF bytes existed and were assessed and at least one
-structural stage FAILED (ELF64 header validation, byte-span
-establishment from the ELF's own metadata, in-range section table,
-zero-only tail adjudication, or the SBPF v0 architecture requirement);
-`true` — all of those stages actually ran and passed. Digest stages are
+structural stage FAILED (ELF64 header validation, structure-implied
+extent establishment from the ELF's own metadata, in-range section
+table, in-range program-header table, or the SBPF v0 architecture
+requirement);
+`true` — all of those stages actually ran and passed. Trailing payload
+bytes beyond the structure-implied extent are a disclosed diagnostic,
+never a structural stage. Digest stages are
 content, not structure: a digest mismatch on a structurally valid ELF
 reports `digest_match: false` with `structure_valid: true` ("right
 shape, wrong bytes") — that is the intended, non-contradictory outcome,
