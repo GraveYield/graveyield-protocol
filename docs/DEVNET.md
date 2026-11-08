@@ -113,11 +113,36 @@ consistency is asserted by `scripts/devnet/test/ns3_sync.test.mjs`.
   `solana-test-validator`) — matches `Anchor.toml`, the provenance
   manifest, and CI.
 - Node ≥ 24 and pnpm 9 (workspace package `@graveyield/devnet-tools`).
-- For mode 2 only: the three owner-custody keypairs (scanner program,
-  vault program, deployer) and a funded deployer (≥ 6 SOL on devnet;
-  cost drivers: rent-exempt storage of the two ELF binaries at ≈ 2.7
-  SOL each, two ProtocolConfig accounts, transaction fees). The deploy
-  script refuses to run below 6 SOL and prints the shortfall.
+- For mode 2 only, the owner-custody keypairs: the scanner program and
+  vault program keypairs, the deployer keypair, AND the governance
+  authority keypair (it signs — and pays — the drill's authority
+  transactions and signs `register-oracle`), plus the two dedicated
+  oracle keys, whose PUBLIC keys are consumed by `register-oracle`.
+  Deriving each pubkey with `solana-keygen pubkey` is a LOCAL-ONLY,
+  owner-executed operation (no network access, no key content leaves
+  the machine).
+- Mode 2 funding — three SEPARATE balances. Funding itself is an
+  OWNER-EXECUTED ON-CHAIN WRITE (a real transfer transaction), never a
+  read-only step; only the balance CHECKS are read-only:
+  - **Deployer** — ≥ 6 SOL on devnet; cost drivers: rent-exempt storage
+    of the two ELF binaries at ≈ 2.7 SOL each, two ProtocolConfig
+    accounts, transaction fees. The deploy script refuses to run below
+    6 SOL, compared lamport-exact against 6 000 000 000, and prints the
+    shortfall. That 6 SOL figure is a PRE-deployment gate only — no
+    post-deployment balance floor is enforced — while the estimated
+    deployment expenditure is ≈ 5.7–6.0 SOL and the deployer also pays
+    the two `init-*` fees and (when `--fee-payer` is supplied) the
+    `register-oracle` fee afterwards. Recheck the live balance
+    immediately before executing: a previously recorded balance is not
+    a guarantee — and passing this gate is not a guarantee that the rest
+    of the sequence can finish (deployer funding sequence in §3).
+  - **Governance authority** — needs its OWN devnet SOL: each drill's
+    authority pause/unpause transactions are signed AND paid by the
+    governance keypair (two landed transactions per program drill). No
+    balance gate exists for governance; fund it before the drills.
+  - **Throwaway intruder** — needs its OWN fee dust (0.01 SOL): the
+    rejected unauthorized attempt is still a submitted transaction and
+    still incurs its transaction fee.
 - Key custody: keypairs live OUTSIDE the repository (owner custody
   directory, never in git; `target/deploy/` copies are gitignored).
 
@@ -261,6 +286,52 @@ upgrade authority) and follow the normal `solana program deploy` re-run;
 the identity, artifact-refusal, and provenance checks all still apply —
 there is no upgrade path that skips the gate.
 
+**Deployer funding sequence (OPERATIONAL, owner-executed — the balance
+checks themselves are READ-ONLY).** The stage [2/7] threshold is a
+PRE-deployment gate only — passing it is NOT a guarantee that the
+subsequent operations are funded. The owner executes ONE sequence, in
+this order:
+
+1. **Verify ≥ 6 SOL immediately before deployment** — the stage [2/7]
+   gate (`MIN_DEPLOY_LAMPORTS = 6 000 000 000`, lamport-exact) refuses
+   to run below it and prints the shortfall; re-read the LIVE balance
+   rather than trusting any previously recorded figure.
+2. **Deploy GraveScanner and GraveVault** — the two `solana program
+   deploy` transactions above; the deployer signs and pays both. The
+   estimated expenditure is ≈ 5.7–6.0 SOL against the 6 SOL gate, so a
+   deployer funded near the minimum can land near zero.
+3. **Recheck the deployer's remaining SOL balance** after BOTH deploy
+   transactions confirm and BEFORE initialization, with the same
+   lamport-exact read the funding gate uses:
+
+   ```bash
+   solana --url https://api.devnet.solana.com balance --lamports /path/to/deployer-keypair.json
+   ```
+
+4. **Confirm the remaining funds cover BOTH `init-*` transactions and
+   any planned `register-oracle` fee** — the deployer always pays the
+   two initialization fees, and pays the oracle-registration fee when
+   `--fee-payer` is supplied (§4).
+5. **If the balance is insufficient, STOP** — do not run `init-*` or
+   `register-oracle` — and request additional owner funding before
+   proceeding. The re-funding transfer is an OWNER-EXECUTED ON-CHAIN
+   WRITE, exactly like every other funding operation in this runbook;
+   only the owner executes it.
+
+There is NO protocol-enforced post-deployment minimum — this is a
+sequence-completion concern, not a rule the chain enforces, and nothing
+on-chain checks it. Do not extrapolate from a previously recorded
+balance: balances move, and only the live lamport read is evidence.
+
+Mode 2 action classification (binding): balance checks and every
+verifier invocation are READ-ONLY; `solana-keygen pubkey` identity
+comparisons, local builds, and the provenance gate are LOCAL-ONLY; and
+ONLY the owner, manually, executes the on-chain writes — the two
+`solana program deploy` transactions, any funding transfer (deployer,
+governance authority, or throwaway intruder), both `init-*`
+transactions, both drills' authority and intruder transactions, and
+`register-oracle`.
+
 ## 4. Initialize, drill, register oracles (owner, governance authority)
 
 ```bash
@@ -273,6 +344,14 @@ node scripts/devnet/protocol_admin.mjs init-vault \
   --deployer /path/to/deployer-keypair.json \
   --authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
 ```
+
+`--authority` MUST be passed explicitly on every `init-*` invocation:
+the CLI silently falls back to the deployer pubkey when the flag is
+omitted (`cmdInit` in `protocol_admin.mjs`), which would store the
+DEPLOYER as the ProtocolConfig authority and break the NS-3 role
+separation. In every `init-*` transaction the deployer keypair is the
+transaction's signer and fee payer; the governance public key is only
+written into the config's `authority` field.
 
 With all-zero params the on-chain defaults land (mirroring
 `constants.rs` in both programs):
@@ -308,13 +387,25 @@ node scripts/devnet/protocol_admin.mjs register-oracle --url https://api.devnet.
   --launch-price-oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee
 ```
 
+`register-oracle` wires two distinct roles into one transaction: the
+GOVERNANCE authority is the only instruction-level signer, while the
+transaction fee is paid by the deployer keypair supplied through
+`--fee-payer` (if the flag is omitted, the governance key pays). When
+the fee payer differs from the authority, BOTH sign the transaction —
+the fee payer as the transaction-level signer, governance as the
+instruction-level signer.
+
 Per program, the drill asserts: fresh-config readback (authority,
 defaults, unpaused) → authority pauses → readback asserts the flip → an
 intruder keypair attempts pause and the transaction MUST revert with the
 program's `Unauthorized` (GraveScanner 6000 / GraveVault 7000) →
 authority unpauses → readback asserts restoration. The intruder keypair
 needs fee dust (0.01 SOL) so its probe reaches the program check rather
-than dying at the system layer.
+than dying at the system layer. Fee responsibility in the drill: the
+GOVERNANCE keypair signs and pays the authority pause/unpause
+transactions; the intruder keypair pays for its own rejected attempt —
+a reverted transaction still charges its fee, which is why the intruder
+needs its own funded keypair.
 
 ## 5. Mode 3 — agent-assisted read-only acceptance verification
 
