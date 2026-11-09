@@ -935,7 +935,10 @@ const COMMANDS = {
   "init-vault": (args, cluster) => cmdInit(args, ["vault"], cluster),
   "init-all": (args, cluster) => cmdInit(args, ["scanner", "vault"], cluster),
   pause: (args, cluster) => cmdPause(args, cluster),
-  check: (args, cluster) => cmdCheck(args, cluster),
+  // `check` is read-only and load-free: cluster identity is already proven
+  // in main() for every command, and it touches no signer — it takes no
+  // cluster (a superfluous one only invites drift).
+  check: (args) => cmdCheck(args),
   "register-oracle": (args, cluster) => cmdRegisterOracle(args, cluster),
   drill: (args, cluster) => cmdDrill(args, cluster),
 };
