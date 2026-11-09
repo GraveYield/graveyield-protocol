@@ -202,3 +202,77 @@ describe("NS-3 local-rehearsal governance authority (one temporary key, whole li
     );
   });
 });
+
+// ============================================================================
+// Cluster-mode + signer independence (this workstream): the rehearsal must
+// explicitly activate the CLI's narrow local-validator exception, keep every
+// RPC target on the loopback validator, never depend on a global default
+// signer, never reference owner custody paths, and keep its cleanup-on-
+// failure behavior. Source-level checks are used for shell-command
+// requirements that cannot be exercised without a live local validator —
+// the behavioral coverage lives in the local rehearsal itself and in
+// protocol_admin_cluster_guard.test.mjs.
+// ============================================================================
+
+describe("NS-3 rehearsal cluster-mode + signer independence (this workstream)", () => {
+  const showCalls = lines.filter((l) => l.includes("program show"));
+
+  test("both `solana program show` commands explicitly use the temporary deployer keypair", () => {
+    assert.equal(showCalls.length, 2, "exactly two program show commands expected");
+    for (const call of showCalls) {
+      assert.match(
+        call,
+        /solana --url "\$URL" --keypair "\$DEPLOYER" program show/,
+        `program show must carry the throwaway deployer keypair (no global default signer): ${call}`,
+      );
+    }
+  });
+
+  test("every protocol_admin invocation explicitly activates the local-only administration mode", () => {
+    assert.ok(adminCalls.length >= 5, "init/drill/oracle invocations expected");
+    for (const call of adminCalls) {
+      assert.match(
+        call,
+        /--allow-local-validator/,
+        `every protocol_admin call must opt in to the loopback local-validator mode explicitly: ${call}`,
+      );
+    }
+  });
+
+  test("the local-mode opt-in is the ONLY cluster-identity relaxation (no bypass flags appear)", () => {
+    const joined = lines.join("\n");
+    assert.doesNotMatch(joined, /--skip-cluster-check|--no-verify|skip-genesis/i);
+  });
+
+  test("the rehearsal never references the owner custody directory or any owner keypair path", () => {
+    const joined = lines.join("\n");
+    // $HOME/graveyield-ns3-keys/ is the owner custody directory — it must
+    // never appear in the rehearsal (or any agent-run script).
+    assert.doesNotMatch(joined, /graveyield-ns3-keys/);
+    // the rehearsal keys all come from the temp dir minted at runtime
+    for (const call of adminCalls) {
+      assert.doesNotMatch(call, /\$HOME/, `no invocation may point at a home-dir key: ${call}`);
+    }
+  });
+
+  test("the rehearsal keeps its cleanup behavior on success AND failure (trap EXIT)", () => {
+    const joined = lines.join("\n");
+    assert.match(
+      joined,
+      /trap cleanup EXIT/,
+      "cleanup must be trapped on EXIT (success and failure)",
+    );
+    assert.match(joined, /kill "\$VALIDATOR_PID"/, "the local validator must be killed on cleanup");
+    assert.match(joined, /rm -rf "\$TMP"/, "the temp keypair dir must be removed on cleanup");
+  });
+
+  test("the permanent NS-3 governance key never enters local validator state (retained)", () => {
+    // GOVERNANCE_PUBKEY (permanent) is only ever PRINTED for contrast and
+    // compared against — never passed to protocol_admin or stored on-chain.
+    const printOnly = lines.filter((l) => l.includes("GOVERNANCE_PUBKEY"));
+    assert.ok(printOnly.length > 0, "the permanent key contrast-print is expected to remain");
+    for (const call of adminCalls) {
+      assert.doesNotMatch(call, /GOVERNANCE_PUBKEY/);
+    }
+  });
+});

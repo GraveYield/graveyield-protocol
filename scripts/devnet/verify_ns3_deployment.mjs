@@ -103,7 +103,13 @@
 // (unverified checks); 2 usage error.
 import { createHash } from "node:crypto";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { NS3, NS3_PDAS, configPdaWithBump, programDataPda } from "./ns3_identities.mjs";
+import {
+  NS3,
+  NS3_PDAS,
+  configPdaWithBump,
+  programDataPda,
+  DEVNET_GENESIS_HASH,
+} from "./ns3_identities.mjs";
 import { NS3_LEGACY_IDS } from "./ns3_verify_elf.mjs";
 
 export const TOOL_NAME = "verify_ns3_deployment";
@@ -114,16 +120,19 @@ export const BPF_LOADER_UPGRADEABLE = "BPFLoaderUpgradeab1e111111111111111111111
 /**
  * Pinned Solana Devnet genesis hash — the cluster-identity anchor (fix G):
  * the RPC endpoint must report exactly this genesis BEFORE any deployment
- * state is interpreted. Independently verified on 2026-11-06 from three
- * sources: (1) live `getGenesisHash` on https://api.devnet.solana.com;
- * (2) the official Anza cluster documentation, whose devnet validator
- * example pins `--expected-genesis-hash` to this exact value
- * (docs.anza.xyz — "Available Solana Clusters"); (3) an independent
- * chain-config reference cross-check. A devnet genesis reset would change
- * the live value — that failure mode is deliberate: the pin is
- * re-verified by a human and re-pinned consciously, never silently.
+ * state is interpreted.
+ *
+ * SINGLE SOURCE: the value lives in ns3_identities.mjs — the same module
+ * the deployment script reads (via node, no text parsing) and the
+ * administration CLI imports — so the deployment gate, the admin CLI and
+ * this acceptance verifier can never silently drift apart. For the full
+ * provenance of the pin (live RPC + Anza docs + independent cross-check,
+ * 2026-11-06) see the DEVNET_GENESIS_HASH comment in ns3_identities.mjs.
+ * A devnet genesis reset would change the live value — that failure mode
+ * is deliberate: the pin is re-verified by a human and re-pinned
+ * consciously, never silently.
  */
-export const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+export { DEVNET_GENESIS_HASH };
 
 /** Anchor account discriminator = first 8 bytes of sha256("account:<Name>"). */
 export function accountDiscriminator(name) {

@@ -34,7 +34,12 @@
 #     the ONE authority for the rehearsal's whole lifecycle);
 #   * everything targets http://127.0.0.1:8899; nothing leaves the machine;
 #     no devnet/mainnet RPC is contacted; no transaction is submitted to
-#     any public cluster.
+#     any public cluster. protocol_admin.mjs is invoked with
+#     --allow-local-validator — the CLI's explicit, narrowly scoped local
+#     rehearsal opt-in (loopback endpoints ONLY; still requires a live
+#     genesis answer; never a bypass for remote RPC endpoints). On any
+#     other cluster — including Devnet — the CLI requires the pinned
+#     Devnet genesis and refuses otherwise.
 #
 # Prerequisites: solana CLI (agave 3.0.x) on PATH; the two ELFs built into
 # target/deploy/ (via `deploy_devnet.sh --build-only` or CI artifacts);
@@ -133,8 +138,13 @@ solana --url "$URL" airdrop 2 "$(solana-keygen pubkey "$GOVERNANCE")" >/dev/null
 solana --url "$URL" airdrop 1 "$(solana-keygen pubkey "$INTRUDER")" >/dev/null
 
 echo "== [3/6] programs loaded at the NS-3 IDs — verify on-chain identity =="
-solana --url "$URL" program show "$EXPECTED_SCANNER"
-solana --url "$URL" program show "$EXPECTED_VAULT"
+# --keypair "$DEPLOYER" (the throwaway rehearsal deployer) keeps these
+# READ-ONLY show commands independent of any global default Solana
+# signer: without it the CLI would demand ~/.config/solana/id.json and
+# fail on machines with no default wallet — and no command in this
+# script may ever depend on a key outside the rehearsal's temp dir.
+solana --url "$URL" --keypair "$DEPLOYER" program show "$EXPECTED_SCANNER"
+solana --url "$URL" --keypair "$DEPLOYER" program show "$EXPECTED_VAULT"
 
 echo "== [4/6] initialize with the TEMPORARY governance authority (deployer pays fees) =="
 # The ProtocolConfig authority stored on-chain is the TEMPORARY governance
@@ -143,17 +153,21 @@ echo "== [4/6] initialize with the TEMPORARY governance authority (deployer pays
 # stored authority equals this key — the same key the drills below sign
 # with. On devnet the owner passes the PERMANENT governance pubkey here
 # instead (docs/DEVNET.md) — this script must not change that.
-node "$DEVNET_DIR/protocol_admin.mjs" init-scanner --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
-node "$DEVNET_DIR/protocol_admin.mjs" init-vault   --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
+# --allow-local-validator: protocol_admin.mjs's explicit local rehearsal
+# opt-in. It is accepted ONLY because $URL is the loopback validator
+# (http://127.0.0.1:8899) and the endpoint answers the genesis RPC; the
+# CLI still verifies the temporary authority on every governance call.
+node "$DEVNET_DIR/protocol_admin.mjs" init-scanner --allow-local-validator --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
+node "$DEVNET_DIR/protocol_admin.mjs" init-vault   --allow-local-validator --url "$URL" --deployer "$DEPLOYER" --authority "$REHEARSAL_GOVERNANCE_PK"
 
 echo "== [5/6] emergency-control drills (governance is the authority) =="
-node "$DEVNET_DIR/protocol_admin.mjs" drill --url "$URL" --program scanner \
+node "$DEVNET_DIR/protocol_admin.mjs" drill --allow-local-validator --url "$URL" --program scanner \
   --authority "$GOVERNANCE" --intruder "$INTRUDER"
-node "$DEVNET_DIR/protocol_admin.mjs" drill --url "$URL" --program vault \
+node "$DEVNET_DIR/protocol_admin.mjs" drill --allow-local-validator --url "$URL" --program vault \
   --authority "$GOVERNANCE" --intruder "$INTRUDER"
 
 echo "== [6/6] register the dedicated oracle signers (governance signs, deployer pays) =="
-node "$DEVNET_DIR/protocol_admin.mjs" register-oracle --url "$URL" \
+node "$DEVNET_DIR/protocol_admin.mjs" register-oracle --allow-local-validator --url "$URL" \
   --authority "$GOVERNANCE" --fee-payer "$DEPLOYER" \
   --activity-oracle "$(solana-keygen pubkey "$TMP/activity_oracle.json")" \
   --launch-price-oracle "$(solana-keygen pubkey "$TMP/launch_price_oracle.json")"

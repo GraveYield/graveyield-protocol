@@ -95,7 +95,7 @@ Hard rules that hold in ALL modes:
 | Item | Value |
 |------|-------|
 | Cluster | Solana devnet — `https://api.devnet.solana.com` (always passed explicitly) |
-| Devnet genesis hash (pinned) | `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` — verified independently (live RPC + Anza cluster docs); the acceptance verifier refuses a different cluster |
+| Devnet genesis hash (pinned) | `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` — single source: `DEVNET_GENESIS_HASH` in `scripts/devnet/ns3_identities.mjs` (consumed by the deploy script, the admin CLI, and the acceptance verifier — they cannot drift apart); verified independently (live RPC + Anza cluster docs); every devnet-writing tool refuses a different or unverifiable cluster |
 | GraveScanner program ID | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
 | GraveVault program ID | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
 | ProtocolConfig PDA seeds | `["protocol_config"]` under each program's ID, bump 255 |
@@ -214,6 +214,17 @@ emergency-control drills, register-oracle with separate signer and fee
 payer. The temporary governance key is the ONE authority for the whole
 rehearsal; the permanent NS-3 keys never enter local validator state.
 
+Because the temporary authority is not the pinned governance key, every
+`protocol_admin.mjs` invocation in the rehearsal passes
+`--allow-local-validator` — the CLI's explicit local-validator opt-in.
+That flag is honored ONLY for loopback endpoints (`http://127.0.0.1:8899`)
+and only after the validator answers the read-only genesis RPC; pointed
+at any remote endpoint it is refused outright, and on Devnet the CLI
+still requires the pinned genesis and the pinned governance authority.
+The rehearsal's two `solana program show` identity checks also pass
+`--keypair "$DEPLOYER"` (the throwaway) so they never depend on a
+global default Solana signer.
+
 > **Constrained containers (memlock):** agave 3.0.x probes io_uring and
 > may fail fatally on `RLIMIT_MEMLOCK` in restricted containers
 > ("unable to set memory lock limit"). Denying the `io_uring_setup`
@@ -247,19 +258,32 @@ Stages, each with a hard refusal on mismatch:
    mechanism is introduced for this; the assurance the version string
    cannot provide comes from the deployment environment, which must be
    trusted (owner-controlled host and PATH).
-1. **Identity check** — each keypair's pubkey must equal the compiled
+1. **Cluster identity (fail-closed genesis guard)** — BEFORE any owner
+   keypair path is touched (existence checks included), the script
+   resolves the endpoint's genesis hash with a READ-ONLY RPC
+   (`solana --url "$URL" genesis-hash`, bounded by `timeout` when
+   available) and requires EXACTLY the pinned Devnet genesis
+   (`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`, single-sourced from
+   `scripts/devnet/ns3_identities.mjs`). A foreign genesis, an RPC
+   failure/timeout, or an empty/malformed answer all REFUSE the
+   deployment: a cluster that cannot prove it is Devnet is never a
+   deployment target, and an unavailable genesis is never interpreted
+   as permission to continue. Nothing is signed or submitted before
+   this gate passes. `--build-only` stays independent of it by design
+   (no keypairs, no RPC).
+2. **Identity check** — each keypair's pubkey must equal the compiled
    `declare_id!` value. An ELF deployed under an address different from
    its declared ID would fail every Anchor owner check at runtime; the
    script refuses instead of shipping a broken program.
-2. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
+3. **Funding check** — deployer balance ≥ 6 SOL, compared lamport-exact
    against 6 000 000 000 (never by digit-stripping the human SOL display,
    which mis-reads decimals).
-3. **Build-toolchain version compatibility** (build paths only) — `cargo-build-sbf --version`
+4. **Build-toolchain version compatibility** (build paths only) — `cargo-build-sbf --version`
    must match the manifest pin (same version-string limits as stage 0).
    The platform-tools archive is re-verified against its manifest digest
    and re-seeded into the platform-tools cache (see §1 check 4). This
    stage does not copy or modify program keypairs.
-4. **Build-output preparation and build** — prepares `target/deploy/`
+5. **Build-output preparation and build** — prepares `target/deploy/`
    for the program ELFs, then runs `cargo build-sbf` separately in
    `programs/grave-scanner` and `programs/grave-vault` (agave 3.0.10's
    `cargo-build-sbf` rejects workspace `-p` selection), with
@@ -268,9 +292,9 @@ Stages, each with a hard refusal on mismatch:
    to the deployment commands. With `--skip-build`, compilation is
    skipped and existing ELFs are reused; the provenance gate still
    applies IN FULL, so unpinned bytes cannot be deployed.
-5. **Provenance gate** — digests + SBPF v0 + structural identity, from
+6. **Provenance gate** — digests + SBPF v0 + structural identity, from
    the shared manifest. No deploy command runs unless it passes.
-6. **Deploy** — `solana program deploy` with the externally supplied
+7. **Deploy** — `solana program deploy` with the externally supplied
    matching `--program-id` keypair; the deployer becomes the upgrade
    authority.
 
@@ -287,12 +311,12 @@ The program-keypair identity and provenance checks still apply — there
 is no upgrade path that skips the gate.
 
 **Deployer funding sequence (OPERATIONAL, owner-executed — the balance
-checks themselves are READ-ONLY).** The stage [2/6] threshold is a
+checks themselves are READ-ONLY).** The stage [3/7] threshold is a
 PRE-deployment gate only — passing it is NOT a guarantee that the
 subsequent operations are funded. The owner executes ONE sequence, in
 this order:
 
-1. **Verify ≥ 6 SOL immediately before deployment** — the stage [2/6]
+1. **Verify ≥ 6 SOL immediately before deployment** — the stage [3/7]
    gate (`MIN_DEPLOY_LAMPORTS = 6 000 000 000`, lamport-exact) refuses
    to run below it and prints the shortfall; re-read the LIVE balance
    rather than trusting any previously recorded figure.
@@ -345,11 +369,32 @@ node scripts/devnet/protocol_admin.mjs init-vault \
   --authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
 ```
 
-`--authority` MUST be passed explicitly on every `init-*` invocation:
-the CLI silently falls back to the deployer pubkey when the flag is
-omitted (`cmdInit` in `protocol_admin.mjs`), which would store the
-DEPLOYER as the ProtocolConfig authority and break the NS-3 role
-separation. In every `init-*` transaction the deployer keypair is the
+`--authority` is REQUIRED and VALIDATED on every governance command —
+the CLI enforces what this runbook demands:
+
+- **No deployer fallback.** An omitted `--authority` on `init-*` is a
+  hard refusal (`missing required --authority`) BEFORE any signer file
+  is loaded. The historical silent fallback to the deployer pubkey is
+  removed: initialization is a one-time operation, and a mistakenly
+  stored deployer authority would be permanent.
+- **Malformed values are refused** before anything is loaded or signed
+  (`malformed --authority '…' is not a valid base58 public key`).
+- **Devnet pins the governance authority.** On any non-local cluster,
+  every governance operation (`init-*`, `pause`, `register-oracle`,
+  `drill`) requires the pinned NS-3 governance key
+  `BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5` — the deployer (fee
+  payer / upgrade authority), the two dedicated oracles, and any other
+  key are REFUSED with an explicit error. Roles are never silently
+  substituted for one another.
+- **The loopback rehearsal exception.** Only
+  `local_rehearsal_ns3.sh`-style LOCAL runs may use a different
+  authority: the CLI accepts its temporary governance keypair solely
+  through `--allow-local-validator`, which is honored ONLY for loopback
+  endpoints (`127.0.0.1` / `localhost` / `[::1]`) and still requires a
+  live genesis answer. Against any remote endpoint the flag is refused
+  outright, and no other cluster-identity bypass exists.
+
+In every `init-*` transaction the deployer keypair is the
 transaction's signer and fee payer; the governance public key is only
 written into the config's `authority` field.
 
