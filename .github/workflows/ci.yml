@@ -158,6 +158,12 @@ jobs:
   anchor-build:
     name: anchor build
     runs-on: ubuntu-latest
+    # CI-hang guard (run 42460376811): the healthy job completes in ~5 min.
+    # Without an explicit cap, a hung process consumed GitHub's default
+    # 360-minute job window before anyone could cancel it. 45 min is ~9x
+    # headroom and still bounds the blast radius of ANY future hang
+    # (command-level or runner-level) to well under an hour.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
@@ -307,30 +313,111 @@ jobs:
       # job then fails, and the new digests must be deliberately re-pinned
       # from a deploy_devnet.sh-flow rebuild before the artifact is trusted
       # for deployment.
-      - name: Verify ELF deployment provenance
+      # CI-hang fix (runs 42460376811 + this PR's first run 42514819410/91):
+      # the four commands below previously ran as ONE step. On 2026-11-08 the
+      # step's process tree never terminated after the provenance checker
+      # printed its success line — 5h56m of silence, then the 6-hour default
+      # job window cancelled the run. Root cause (reproduced locally at the
+      # baseline commit and re-observed on this very PR's first CI run):
+      # node intermittently hangs in process teardown AFTER its final output
+      # and process.exit() — the verification logic itself is synchronous
+      # and completes in ~0.5s. On Linux, node writes stdout to a FILE
+      # synchronously, so the hardening below makes each tool's VERDICT
+      # durable on disk and decides the STEP on the recorded verdict, never
+      # on the process's ability to die:
+      #   1. one command = one step, so a future hang names the exact
+      #      command and every command's completion is separately recorded;
+      #   2. each node tool runs under `timeout --kill-after=10s` with its
+      #      output captured to a per-run log that is printed verbatim; the
+      #      step passes ONLY on the tool's own recorded success verdict
+      #      ("OK <label>: STRUCTURAL" / "PROVENANCE OK") and fails CLOSED
+      #      on anything else — a missing verdict is a failed gate. The
+      #      accepted exit statuses are likewise explicit (PR #95 review):
+      #      rc=0 (clean exit) or rc=124 (the bounded timeout fired), in
+      #      both cases WITH the verdict already recorded — every other
+      #      return code fails closed. A bound breach can therefore never
+      #      mask a failed verification;
+      #   3. the job-level timeout-minutes above caps the worst case.
+      - name: Install devnet-tools for the provenance gate (pnpm, frozen lockfile)
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile --filter @graveyield/devnet-tools
-          node scripts/devnet/ns3_verify_elf.mjs \
-            --scanner-so target/deploy/grave_scanner.so \
-            --vault-so target/deploy/grave_vault.so \
-            --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
-            --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
-          # Shared fail-closed provenance gate (single source of the digests:
-          # scripts/devnet/provenance.manifest.json, the same manifest the
-          # deployment flow enforces in deploy_devnet.sh). Verifies the ELF
-          # digests, the SBPF v0 target architecture (e_machine 263 /
-          # e_flags 0), and — using the tarball this job downloaded and
-          # pre-seeded above — the platform-tools toolchain integrity.
-          # ANY digest/arch/toolchain drift fails the job; digests are
-          # re-pinned only after an independently reviewed rebuild.
-          node scripts/devnet/ns3_check_provenance.mjs \
+      - name: Verify structural ELF identity (ns3_verify_elf)
+        run: |
+          set -euo pipefail
+          set +e
+          timeout --kill-after=10s 300 \
+            node scripts/devnet/ns3_verify_elf.mjs \
             --scanner-so target/deploy/grave_scanner.so \
             --vault-so target/deploy/grave_vault.so \
             --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
             --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya \
-            --platform-tools-tarball /tmp/platform-tools.tar.bz2
-          sha256sum target/deploy/*.so
+            > /tmp/ns3_verify_elf.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/ns3_verify_elf.log
+          # Exit-status rule (PR #95 review tightening): the ONLY accepted
+          # outcomes are rc=0 (clean exit) and rc=124 (GNU timeout fired) —
+          # and for BOTH, the verdicts above must already be recorded. Any
+          # other return code fails closed; rc=0 without both verdicts also
+          # fails closed.
+          if [[ $rc -ne 0 && $rc -ne 124 ]]; then
+            echo "ns3_verify_elf rc=$rc is neither 0 nor the GNU-timeout status 124 — failing closed"
+            exit "$rc"
+          fi
+          if grep -q "^OK scanner: STRUCTURAL" /tmp/ns3_verify_elf.log && \
+             grep -q "^OK vault: STRUCTURAL" /tmp/ns3_verify_elf.log; then
+            if [[ $rc -ne 0 ]]; then
+              echo "NOTE: both structural verdicts were recorded; rc=124 is the bounded timeout terminating the known node teardown hang (PR #95 RCA) — recorded verdicts stand."
+            fi
+            exit 0
+          fi
+          echo "structural identity verdicts not both recorded (rc=$rc) — failing closed"
+          exit 1
+      # Shared fail-closed provenance gate (single source of the digests:
+      # scripts/devnet/provenance.manifest.json, the same manifest the
+      # deployment flow enforces in deploy_devnet.sh). Verifies the ELF
+      # digests, the SBPF v0 target architecture (e_machine 263 /
+      # e_flags 0), and — using the tarball this job downloaded and
+      # pre-seeded above — the platform-tools toolchain integrity.
+      # ANY digest/arch/toolchain drift fails the job; digests are
+      # re-pinned only after an independently reviewed rebuild.
+      - name: Verify ELF deployment provenance (fail-closed gate)
+        run: |
+          set -euo pipefail
+          set +e
+          timeout --kill-after=10s 300 \
+            node scripts/devnet/ns3_check_provenance.mjs \
+            --scanner-so target/deploy/grave_scanner.so \
+            --vault-so target/deploy/grave_vault.so \
+            --scanner-id EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL \
+            --vault-id 7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya \
+            --platform-tools-tarball /tmp/platform-tools.tar.bz2 \
+            > /tmp/ns3_check_provenance.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/ns3_check_provenance.log
+          # Exit-status rule (PR #95 review tightening): the ONLY accepted
+          # outcomes are rc=0 (clean exit) and rc=124 (GNU timeout fired) —
+          # and for BOTH, "PROVENANCE OK" above must already be recorded.
+          # Any other return code fails closed; rc=0 without the verdict
+          # also fails closed.
+          if [[ $rc -ne 0 && $rc -ne 124 ]]; then
+            echo "ns3_check_provenance rc=$rc is neither 0 nor the GNU-timeout status 124 — failing closed"
+            exit "$rc"
+          fi
+          if grep -q "^PROVENANCE OK" /tmp/ns3_check_provenance.log; then
+            if [[ $rc -ne 0 ]]; then
+              echo "NOTE: PROVENANCE OK was recorded; rc=124 is the bounded timeout terminating the known node teardown hang (PR #95 RCA) — the recorded verdict stands."
+            fi
+            exit 0
+          fi
+          echo "provenance gate did not record PROVENANCE OK (rc=$rc) — failing closed"
+          exit 1
+      - name: Print ELF SHA-256 checksums (diagnostic, bounded)
+        run: |
+          set -euo pipefail
+          timeout --kill-after=10s 120 sha256sum target/deploy/*.so
       - name: Upload program ELFs (deployment-provenance artifacts)
         # DR-001/NS-2: the fresh devnet deployment consumes the ELFs built by
         # THIS job, so the deployed bytes come from exactly the CI-pinned
