@@ -44,9 +44,9 @@
 #     host and PATH).
 #   * BUILD-TOOLCHAIN VERSION COMPATIBILITY (fix D, build paths only):
 #     cargo-build-sbf's --version string (same limits as above) and the
-#     platform-tools cache are verified BEFORE the owner keypairs are
-#     seeded into target/ (a toolchain refusal must never leave owner
-#     key material copied into the build tree). Unlike the version
+#     platform-tools cache are verified BEFORE build-output preparation.
+#     Program keypairs remain external and are never copied into target/.
+#     Unlike the version
 #     strings, the platform-tools ARCHIVE itself is content-checked:
 #     SHA-256 against the manifest pin, re-extracted on every build
 #     (fix B).

@@ -725,8 +725,8 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     assert.notEqual(r.code, 0);
     assert.match(`${r.stdout}\n${r.stderr}`, /download failed/);
     assert.equal(deploysInLog(log).length, 0);
-    // The toolchain refusal happens before the build; neither program
-    // keypair is ever copied into the build tree.
+    // The simulated platform-tools download failure aborts before build;
+    // neither program keypair is copied into the build tree.
     const deployDir = path.join(SBX, "repo", "target", "deploy");
     for (const name of ["grave_scanner-keypair.json", "grave_vault-keypair.json"]) {
       assert.equal(
