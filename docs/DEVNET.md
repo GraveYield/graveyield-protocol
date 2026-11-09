@@ -143,8 +143,10 @@ consistency is asserted by `scripts/devnet/test/ns3_sync.test.mjs`.
   - **Throwaway intruder** — needs its OWN fee dust (0.01 SOL): the
     rejected unauthorized attempt is still a submitted transaction and
     still incurs its transaction fee.
-- Key custody: keypairs live OUTSIDE the repository (owner custody
-  directory, never in git; `target/deploy/` copies are gitignored).
+- Key custody: program keypairs live OUTSIDE the repository in the
+  owner-controlled custody directory and are never copied into
+  `target/deploy/`. That directory contains build artifacts, not
+  program keypair files.
 
 ## 1. Deployment provenance (fail-closed, all modes)
 
@@ -253,26 +255,24 @@ Stages, each with a hard refusal on mismatch:
    against 6 000 000 000 (never by digit-stripping the human SOL display,
    which mis-reads decimals).
 3. **Build-toolchain version compatibility** (build paths only) — `cargo-build-sbf --version`
-   must match the manifest pin (same version-string limits as stage 0)
-   and the platform-tools archive is
-   re-verified and re-seeded (see §1 check 4). This runs BEFORE the
-   owner keypairs are seeded into `target/`: a toolchain refusal must
-   never leave owner key material copied into the build tree.
-4. **Artifact seeding** — copies the keypairs into the gitignored
-   `target/deploy/` for `cargo build-sbf`; refuses if that directory
-   already holds a DIFFERENT keypair (stale artifacts would silently
-   deploy under the wrong address).
-5. **Build** — per package directory: `cargo build-sbf` in
-   `programs/grave-scanner` then `programs/grave-vault` (agave 3.0.10's
+   must match the manifest pin (same version-string limits as stage 0).
+   The platform-tools archive is re-verified against its manifest digest
+   and re-seeded into the platform-tools cache (see §1 check 4). This
+   stage does not copy or modify program keypairs.
+4. **Build-output preparation and build** — prepares `target/deploy/`
+   for the program ELFs, then runs `cargo build-sbf` separately in
+   `programs/grave-scanner` and `programs/grave-vault` (agave 3.0.10's
    `cargo-build-sbf` rejects workspace `-p` selection), with
-   platform-tools v1.54 pinned and hash-verified. Skipped entirely with
-   `--skip-build` (CI-produced artifacts), which does not require the
-   SBF toolchain — the provenance gate still applies IN FULL, so
-   `--skip-build` cannot smuggle in bytes the manifest does not pin.
-6. **Provenance gate** — digests + SBPF v0 + structural identity, from
+   platform-tools v1.54 pinned and hash-verified. Program keypairs
+   remain at their externally supplied paths and are passed directly
+   to the deployment commands. With `--skip-build`, compilation is
+   skipped and existing ELFs are reused; the provenance gate still
+   applies IN FULL, so unpinned bytes cannot be deployed.
+5. **Provenance gate** — digests + SBPF v0 + structural identity, from
    the shared manifest. No deploy command runs unless it passes.
-7. **Deploy** — `solana program deploy` with the matching
-   `--program-id` keypair; the deployer becomes the upgrade authority.
+6. **Deploy** — `solana program deploy` with the externally supplied
+   matching `--program-id` keypair; the deployer becomes the upgrade
+   authority.
 
 > **Anchor is not on the deploy path (verified):** this flow builds with
 > `cargo build-sbf` and deploys with `solana program deploy`; anchor
@@ -282,17 +282,17 @@ Stages, each with a hard refusal on mismatch:
 > an accidental anchor invocation can never resolve unverified bytes.
 
 Redeploys after the first deployment are UPGRADES (same address, same
-upgrade authority) and follow the normal `solana program deploy` re-run;
-the identity, artifact-refusal, and provenance checks all still apply —
-there is no upgrade path that skips the gate.
+upgrade authority) and follow the normal `solana program deploy` re-run.
+The program-keypair identity and provenance checks still apply — there
+is no upgrade path that skips the gate.
 
 **Deployer funding sequence (OPERATIONAL, owner-executed — the balance
-checks themselves are READ-ONLY).** The stage [2/7] threshold is a
+checks themselves are READ-ONLY).** The stage [2/6] threshold is a
 PRE-deployment gate only — passing it is NOT a guarantee that the
 subsequent operations are funded. The owner executes ONE sequence, in
 this order:
 
-1. **Verify ≥ 6 SOL immediately before deployment** — the stage [2/7]
+1. **Verify ≥ 6 SOL immediately before deployment** — the stage [2/6]
    gate (`MIN_DEPLOY_LAMPORTS = 6 000 000 000`, lamport-exact) refuses
    to run below it and prints the shortfall; re-read the LIVE balance
    rather than trusting any previously recorded figure.

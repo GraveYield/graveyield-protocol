@@ -456,16 +456,50 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
   test("1+2. happy path: build → gate passes → exactly two deploys, scanner first, correct args", () => {
     const { run, log } = setupScenario();
     const r = run();
+
     assert.equal(r.code, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+
     const deploys = deploysInLog(log);
     assert.equal(deploys.length, 2, `expected 2 deploys, log:\n${readLog(log).join("\n")}`);
     assert.match(deploys[0], /grave_scanner\.so/);
     assert.match(deploys[1], /grave_vault\.so/);
-    assert.match(deploys[0], new RegExp(`--program-id .*scanner-keypair.json`));
-    assert.match(deploys[0], new RegExp(`--keypair .*deployer-keypair.json`));
+
+    const scannerKeypair = path.join(SBX, "keys", "scanner-keypair.json");
+    const vaultKeypair = path.join(SBX, "keys", "vault-keypair.json");
+    const deployerKeypair = path.join(SBX, "keys", "deployer-keypair.json");
+
+    assert.ok(
+      deploys[0].includes(`--program-id ${scannerKeypair}`),
+      "scanner deployment must use the external scanner keypair path",
+    );
+    assert.ok(
+      deploys[1].includes(`--program-id ${vaultKeypair}`),
+      "vault deployment must use the external vault keypair path",
+    );
+    assert.ok(
+      deploys[0].includes(`--keypair ${deployerKeypair}`),
+      "scanner deployment must use the external deployer keypair path",
+    );
+    assert.ok(
+      deploys[1].includes(`--keypair ${deployerKeypair}`),
+      "vault deployment must use the external deployer keypair path",
+    );
+
+    const deployDir = path.join(SBX, "repo", "target", "deploy");
+    assert.equal(
+      existsSync(path.join(deployDir, "grave_scanner-keypair.json")),
+      false,
+      "scanner keypair must remain outside target/deploy",
+    );
+    assert.equal(
+      existsSync(path.join(deployDir, "grave_vault-keypair.json")),
+      false,
+      "vault keypair must remain outside target/deploy",
+    );
+
     assert.match(deploys[0], /--url http:\/\/127\.0\.0\.1:8899/);
     assert.match(r.stdout, /PROVENANCE OK/);
-    // the verified cached archive means NO platform-tools download happened
+    // The verified cached archive means NO platform-tools download happened.
     assert.doesNotMatch(r.stdout, /downloading platform-tools/);
   });
 
@@ -685,19 +719,22 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     );
   });
 
-  test("B5. a download FAILURE aborts BEFORE owner keypairs are seeded into target/", () => {
+  test("B5. a download FAILURE aborts before build; program keypairs remain external", () => {
     const { run, log } = setupScenario({ stampSha: null, seedArchive: false });
     const r = run({ curlFail: true });
     assert.notEqual(r.code, 0);
     assert.match(`${r.stdout}\n${r.stderr}`, /download failed/);
     assert.equal(deploysInLog(log).length, 0);
-    // the toolchain refusal ran BEFORE the seeding step: no owner keypair
-    // copies exist in the build tree (identity pubkey reads via the
-    // verified CLI are allowed; the cp is not)
-    const seeded = existsSync(
-      path.join(SBX, "repo", "target", "deploy", "grave_scanner-keypair.json"),
-    );
-    assert.equal(seeded, false, "owner keypair must NOT be seeded when the toolchain is unproven");
+    // The simulated platform-tools download failure aborts before build;
+    // neither program keypair is copied into the build tree.
+    const deployDir = path.join(SBX, "repo", "target", "deploy");
+    for (const name of ["grave_scanner-keypair.json", "grave_vault-keypair.json"]) {
+      assert.equal(
+        existsSync(path.join(deployDir, name)),
+        false,
+        `${name} must not be copied into target/deploy`,
+      );
+    }
   });
 
   test("B6. the verified archive PERSISTS after a successful run (next run re-verifies offline)", () => {
