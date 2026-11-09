@@ -57,15 +57,10 @@
 #     time. The v1.57 platform-tools cache (anchor 1.2.2's resolution) is
 #     still seeded — from the hash-verified archive only — so that an
 #     accidental anchor invocation can never resolve unverified bytes.
-#   * The program keypairs determine the on-chain addresses; the ELF's
-#     declare_id! (NS-3: EFJpKt… / 7VxUGJ…) must match them. The script refuses
-#     to build if target/deploy already holds a DIFFERENT keypair (stale build
-#     artifacts would silently deploy under the wrong address).
-#   * The compiled ELF's embedded declare_id! is byte-checked against the
-#     EXPECTED_* constants before any deploy (closes the partial-sync window
-#     where keypair == constant but the ELF was built from a stale tree).
-#   * Keypairs never enter git: they live outside the repo (or in an
-#     ignored path) and are seeded into target/ (gitignored) for the build.
+#   * Program keypair identities are checked against EXPECTED_* constants.
+#     The ELF declare_id! values are independently checked by provenance.
+#     Program keypairs remain at their externally supplied paths; this script
+#     never copies them into target/deploy or reads/deletes existing copies.
 #   * The deployer must be funded; deploy cost ≈ rent-exempt storage of the
 #     two ELFs. The script checks the balance and prints the shortfall.
 set -euo pipefail
@@ -297,11 +292,10 @@ fi
 #   [0] deployment-CLI version check (BEFORE any owner keypair path is touched)
 #   [1] keypair existence + identity (the verified CLI reads the pubkeys)
 #   [2] deployer funding
-#   [3] build-toolchain version check + platform-tools archive (BEFORE seeding)
-#   [4] seed owner keypairs into target/deploy
-#   [5] cargo build / --skip-build
-#   [6] fail-closed provenance gate
-#   [7] solana program deploy
+#   [3] build-toolchain version check + platform-tools archive
+#   [4] prepare build output directory; cargo build / --skip-build
+#   [5] fail-closed provenance gate
+#   [6] solana program deploy
 # ------------------------------------------------------------------
 
 for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
@@ -311,14 +305,14 @@ for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
   fi
 done
 
-echo "== [0/7] deployment-CLI version check (before any keypair path is touched) =="
+echo "== [0/6] deployment-CLI version check (before any keypair path is touched) =="
 check_deploy_cli
 
 for kp in "$SCANNER_KP" "$VAULT_KP" "$DEPLOYER_KP"; do
   [[ -f "$kp" ]] || { echo "keypair not found: $kp" >&2; exit 2; }
 done
 
-echo "== [1/7] keypair identity checks =="
+echo "== [1/6] keypair identity checks =="
 SCANNER_ID="$(solana-keygen pubkey "$SCANNER_KP")"
 VAULT_ID="$(solana-keygen pubkey "$VAULT_KP")"
 DEPLOYER="$(solana-keygen pubkey "$DEPLOYER_KP")"
@@ -335,7 +329,7 @@ echo "scanner: $SCANNER_ID"
 echo "vault:   $VAULT_ID"
 echo "deployer: $DEPLOYER"
 
-echo "== [2/7] deployer funding =="
+echo "== [2/6] deployer funding =="
 # Lamport-exact check: digit-stripping the human SOL display mis-reads
 # decimals ("0.5" -> "05"; "5.9" -> "59" would PASS a >= 6 test).
 BAL_LAMPORTS="$(solana --url "$URL" balance --lamports "$DEPLOYER_KP" | tr -dc '0-9')"
@@ -347,15 +341,13 @@ if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
   exit 1
 fi
 
-echo "== [3/7] build-toolchain version check + platform-tools archive (before owner keypairs are seeded) =="
+echo "== [3/6] build-toolchain version check + platform-tools archive (before build output directory preparation) =="
 if (( SKIP_BUILD == 0 )); then
   # The SBF toolchain is only required when this script builds; --skip-build
   # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
   # Both build paths pin platform-tools v1.54 (archive hash-verified EVERY
-  # run) so the bytes are reproducible against the recorded digests. This
-  # verification deliberately runs BEFORE step [4] seeds the owner
-  # keypairs: a toolchain refusal must never leave owner key material
-  # copied into the build tree (fix B).
+  # run) so the bytes are reproducible against the recorded digests.
+  # Verification completes before the build output directory is prepared.
   command -v cargo-build-sbf >/dev/null || { echo "cargo-build-sbf not on PATH" >&2; exit 2; }
   pin_platform_tools
   check_build_toolchain_version
@@ -363,25 +355,9 @@ else
   echo "--skip-build set: no build toolchain resolution (the deployment-CLI version check above still applies in full)"
 fi
 
-echo "== [4/7] seed build keypairs (target/deploy, gitignored) =="
+echo "== [4/6] prepare build output and compile programs =="
 mkdir -p target/deploy
-for pair in "grave_scanner:$SCANNER_KP:$EXPECTED_SCANNER" "grave_vault:$VAULT_KP:$EXPECTED_VAULT"; do
-  name="${pair%%:*}"; rest="${pair#*:}"; kp="${rest%%:*}"; want="${rest##*:}"
-  dest="target/deploy/${name}-keypair.json"
-  if [[ -f "$dest" ]]; then
-    have="$(solana-keygen pubkey "$dest")"
-    if [[ "$have" != "$want" ]]; then
-      echo "REFUSING: $dest exists with a different pubkey ($have != $want)." >&2
-      echo "Remove it or reconcile the keypairs; a stale artifact would deploy under the wrong address." >&2
-      exit 1
-    fi
-  else
-    cp "$kp" "$dest"
-  fi
-  echo "seeded $dest"
-done
 
-echo "== [5/7] cargo build-sbf (scanner, vault) =="
 if (( SKIP_BUILD == 0 )); then
   # Build per package directory (the repo's canonical SBF build pattern,
   # mirroring scripts/build_fork_harness.sh): agave 3.0.10's
@@ -394,7 +370,7 @@ else
   echo "--skip-build set: reusing existing ELFs (the provenance gate below still applies in full)"
 fi
 
-echo "== [6/7] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
+echo "== [5/6] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
 # This gate is the deployment precondition: no `solana program deploy` below
 # runs unless both ELFs match scripts/devnet/provenance.manifest.json byte
 # for byte, are SBPF v0, and carry the NS-3 identities structurally. It
@@ -404,7 +380,7 @@ run_provenance_gate
 # NOTE: the verified platform-tools archive is intentionally KEPT (no rm)
 # so the next run re-verifies the same bytes offline (fix B).
 
-echo "== [7/7] artifact summary + solana program deploy =="
+echo "== [6/6] artifact summary + solana program deploy =="
 ls -la target/deploy/grave_scanner.so target/deploy/grave_vault.so
 
 solana --url "$URL" program deploy target/deploy/grave_scanner.so \
