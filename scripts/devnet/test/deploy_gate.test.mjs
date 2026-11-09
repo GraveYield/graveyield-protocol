@@ -468,14 +468,22 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     const vaultKeypair = path.join(SBX, "keys", "vault-keypair.json");
     const deployerKeypair = path.join(SBX, "keys", "deployer-keypair.json");
 
-    assert.ok(deploys[0].includes(`--program-id ${scannerKeypair}`),
-      "scanner deployment must use the external scanner keypair path");
-    assert.ok(deploys[1].includes(`--program-id ${vaultKeypair}`),
-      "vault deployment must use the external vault keypair path");
-    assert.ok(deploys[0].includes(`--keypair ${deployerKeypair}`),
-      "scanner deployment must use the external deployer keypair path");
-    assert.ok(deploys[1].includes(`--keypair ${deployerKeypair}`),
-      "vault deployment must use the external deployer keypair path");
+    assert.ok(
+      deploys[0].includes(`--program-id ${scannerKeypair}`),
+      "scanner deployment must use the external scanner keypair path",
+    );
+    assert.ok(
+      deploys[1].includes(`--program-id ${vaultKeypair}`),
+      "vault deployment must use the external vault keypair path",
+    );
+    assert.ok(
+      deploys[0].includes(`--keypair ${deployerKeypair}`),
+      "scanner deployment must use the external deployer keypair path",
+    );
+    assert.ok(
+      deploys[1].includes(`--keypair ${deployerKeypair}`),
+      "vault deployment must use the external deployer keypair path",
+    );
 
     const deployDir = path.join(SBX, "repo", "target", "deploy");
     assert.equal(
