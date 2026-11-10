@@ -27,7 +27,7 @@
 //                                            exit 143
 //   +  invalid wrapper arguments / non-executable command -> exit 2 before
 //      anything runs
-import { describe, test } from "node:test";
+import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
@@ -35,6 +35,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -51,6 +52,16 @@ const WRAPPER = path.join(
 const OK_LINE = "PROVENANCE OK — the bytes to deploy are exactly the recorded deployment digests.";
 const HARD_KILL_MS = 60_000; // absolute guard: no scenario may exceed this
 
+// Hermetic TMPDIR root for THIS suite. The wrapper names its log dirs
+// "ns3-check-<random>" under ${TMPDIR:-/tmp}, and node --test runs every test
+// FILE as a concurrent process: the deploy-gate sandbox suites exec the same
+// wrapper (through deploy_devnet.sh) while this suite runs, so scanning the
+// SHARED /tmp for leftovers sees other suites' live log dirs (CI job
+// 130090876332: "leftover temp logs after interrupt: ns3-check-tW5rNucLbc").
+// Directing the wrapper's TMPDIR here keeps the cleanup assertions scoped to
+// dirs only this suite can create.
+let TEST_TMP;
+
 function sh(name, body) {
   const p = path.join(FIXTURES, name);
   writeFileSync(p, `#!/bin/sh\n${body}\n`);
@@ -59,7 +70,7 @@ function sh(name, body) {
 }
 
 function ns3CheckLeftovers() {
-  return readdirSync(tmpdir()).filter((n) => n.startsWith("ns3-check-"));
+  return readdirSync(TEST_TMP).filter((n) => n.startsWith("ns3-check-"));
 }
 
 /** Run the wrapper; resolve { code, stdout, stderr, ms }. */
@@ -68,7 +79,7 @@ function runWrapper(args, { env = {}, timeoutMs = HARD_KILL_MS } = {}) {
     const started = Date.now();
     const child = spawn(WRAPPER, args, {
       cwd: path.dirname(WRAPPER),
-      env: { ...process.env, TMPDIR: tmpdir(), ...env },
+      env: { ...process.env, TMPDIR: TEST_TMP, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -111,6 +122,7 @@ let FIXTURES;
 describe("run_ns3_check_provenance.sh (bounded provenance checker execution)", () => {
   test("fixtures and wrapper exist", () => {
     FIXTURES = mkdtempSync(path.join(tmpdir(), "gy-wrapper-test-"));
+    TEST_TMP = mkdtempSync(path.join(tmpdir(), "gy-wrapper-tmpdir-"));
     sh(
       "mock_ok.sh",
       `
@@ -288,7 +300,7 @@ describe("run_ns3_check_provenance.sh (bounded provenance checker execution)", (
       ["--timeout", "60", "--kill-grace", "1", "--", path.join(FIXTURES, "mock_hang_forever.sh")],
       {
         cwd: path.dirname(WRAPPER),
-        env: { ...process.env, TMPDIR: tmpdir(), MOCK_PIDFILE: pidfile },
+        env: { ...process.env, TMPDIR: TEST_TMP, MOCK_PIDFILE: pidfile },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -356,6 +368,11 @@ describe("run_ns3_check_provenance.sh (bounded provenance checker execution)", (
     const notExecutable = await runWrapper(["--", "/tmp/gy-wrapper-test-does-not-exist"]);
     assert.equal(notExecutable.code, 2);
     assert.match(notExecutable.stderr, /not executable/);
+  });
+
+  after(() => {
+    rmSync(FIXTURES, { recursive: true, force: true });
+    rmSync(TEST_TMP, { recursive: true, force: true });
   });
 });
 
