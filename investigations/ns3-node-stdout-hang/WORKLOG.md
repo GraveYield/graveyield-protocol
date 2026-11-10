@@ -33,3 +33,28 @@ Times are UTC.
 - Next: sandbox reproduction matrix (synthetic manifest/tarball, no repo
   modification), load recipe from PR #95, per-thread /proc capture of any
   hang (the artifact PR #95 could not get).
+
+## Session 1 (continued) — reproduction and capture
+
+- Built out-of-repo repro env: `@solana/web3.js@3.1.1` (+ optional peers
+  per lockfile) in a scratch dir; byte-identical checker copies (sha256
+  recorded); synthetic 4 KB / 256 MB tarballs + schema-valid synthetic
+  manifests. Real manifest pins never used, never modified.
+- Baseline sequential matrix (tiny): 0/100. Under PR #95-style load
+  (6 fresh-process web3.js import loops + file churn): tiny 0/370.
+- **Reproduced:** checker + 256 MB tarball — 21/180 under load (file
+  stdout), and the exact VM invocation shape idle: **/dev/null 40/80,
+  file ≥15/~30, TTY 0/20**. Every hang follows the complete verdict.
+- **Captured the stuck state 11/11 events (22 snapshots):** MainThread
+  futex-join on the `V8Worker` thread (val == worker TID in 20/20
+  snapshots); worker parked on futex, never woken; permanent (t1≡t2).
+- **Bisection:** web3.js-stripped copy 0/120; minimal big-buffer scripts
+  0/240; `--no-concurrent-marking/sweeping` no protection (4/60);
+  `--trace-exit` full protection (0/60, p≈4e-4) → VM evidence F explained
+  as causal timing perturbation.
+- **Root cause (mechanism level): CONFIRMED** — Node v24.22.2 process
+  teardown deadlocks joining a never-woken V8 platform worker after
+  `process.exit(0)`; strictly post-verdict; stdout redirection is
+  correlation (rate modulator), not cause. ROOT_CAUSE_REPORT.md written
+  (sections A–L per assignment §8); VM follow-up plan V1–V3 prepared.
+- Nothing implemented; no repo source file touched; all gates intact.

@@ -1,103 +1,86 @@
-# Hypothesis register
+# Hypothesis register — FINAL (investigation complete)
 
-Statuses: CONFIRMED / STRONGLY-SUPPORTED / PLAUSIBLE / REJECTED / REQUIRES-VM.
-Minimum confirming evidence is stated for every non-confirmed hypothesis.
-This file is updated as evidence lands; superseded hypotheses stay listed
-(rejected ones with the reason).
+Statuses at close: CONFIRMED / STRONGLY-SUPPORTED / REJECTED / REQUIRES-VM.
+Superseded reasoning is kept for the record. Evidence references point to
+EVIDENCE.md and REPRODUCTIONS.md.
 
 ---
 
 ## H1 — "stdout redirection causes the hang" (the assignment's implied frame)
 
-**Status: REJECTED as a *mechanism*, DOWNGRADED to *correlation at best*.**
+**Status: REJECTED as mechanism; CONFIRMED as a conditional *correlation*
+that the VM happened to sample.**
 
-- Node writes stdout to files/`/dev/null`/TTY **synchronously** (TTY wrap /
-  `fs.SyncWriteStream`); `console.log` on those fd types blocks until the
-  bytes are handed to the kernel. VM test C shows the complete output in the
-  file → the writes completed before the hang [VM-E].
-- PR #95 [CI-E]: 200 sequential runs with pipe stdout → 0 hangs; both CI
-  hang occurrences happened with **file-redirected** stdout *and* two other
-  CI runs on the same Node with the same redirection did not hang.
-- Redirection cannot change anything in the exit path: by the time the
-  verdict is printed, the stdout fd type is irrelevant to teardown.
-- The VM's A/B/C/F pattern (n=1 each) is consistent with sampling a
-  low-probability intermittent failure (see H2) — with the caveat that
-  B+C both hanging in two adjacent runs would be a ~p² event unless the VM
-  raises p (e.g., Hermes Agent load → H2/H3) or redirection genuinely
-  correlates with higher p on that VM. **Minimum confirming evidence for
-  any residual redirect effect:** VM follow-up V2 (n≥20 per stdout mode,
-  same load) — see ROOT_CAUSE_REPORT.md §J.
+- Rejected as mechanism: file, `/dev/null` and TTY stdout are all
+  synchronous in Node; every hang occurs after all verdict bytes are
+  durably written; pipe-stdout runs never hung (0/60); the captured
+  deadlock is in thread teardown, unreachable from any stdout code path.
+- Confirmed as correlation: on an **idle** machine the redirected shapes
+  (/dev/null 40/80 ≈ 50%, file ≈50%) hang while TTY does not (0/20) —
+  which is exactly what the owner's single VM runs sampled (A=0, B/C=124).
+  The stdout type is a *rate modulator* (timing of the final writes vs the
+  worker's park cycle), not the cause.
 
 ## H2 — Intermittent Node.js process-teardown hang after `process.exit(0)`
-        (race between exit sequence and live runtime threads)
 
-**Status: STRONGLY-SUPPORTED at the Node level; mechanism unidentified — this
-investigation's primary target.**
+**Status: CONFIRMED — mechanism captured and identified (sandbox, same Node
+version as VM).**
 
-- Supported by [CI-E] (PR #95): complete output → no termination → orphan
-  node killed by runner; intermittent (≈2.5% under load); same Node version
-  healthy in adjacent runs; trivial `-e` script does not hang.
-- Supported by [SRC]: the checker's success path is synchronous and ends in
-  an explicit `process.exit(0)` (L327), so no event-loop handle can keep it
-  alive; only the teardown path itself can stall.
-- **Mechanistic sub-hypotheses to discriminate (all testable in sandbox):
-  H2a** libc `exit()`/atexit-stage deadlock (e.g., OpenSSL `OPENSSL_cleanup`
-  or malloc/NSS atexit racing a still-running libuv threadpool / V8 platform
-  thread — a classic "rare hang at exit under load" shape);
-  **H2b** a thread created during the `@solana/web3.js` import chain is
-  mid-syscall at `process.exit()` time and teardown joins it under a lock;
-  **H2c** V8 platform worker task in flight at exit.
-  Minimum confirming evidence: a captured stuck-process state — per-thread
-  kernel stacks (`/proc/PID/task/*/stack`), `wchan`, `syscall`, `status`,
-  fds — plus a reproduction recipe with a usable hang rate. PR #95 lacked
-  exactly this capture.
+- 11/11 captured hang events, 20/20 `/proc` snapshots: MainThread blocked
+  in `futex(FUTEX_WAIT_BITSET, val=<V8Worker TID>)` (join-style wait on the
+  V8 platform worker thread); `V8Worker` asleep on `futex(..., val=0)`,
+  never woken; t1≡t2 (permanent). CI occurrences (PR #95) match: orphan
+  node process, hours-long hang.
+- Required ingredients (measured): large transient external-memory
+  allocation (256 MB tarball `readFileSync` — 0/470 hangs without it),
+  web3.js 3.1.1 module-graph heap (0/120 without vs 21/180 with),
+  timing/stdout shape (idle file//dev/null ≈50%, TTY 0%, `--trace-exit` 0%).
+- Concurrent-GC flags did not protect (4/60) → the stuck worker is not
+  doing concurrent mark/sweep. Deeper attribution (which V8/Node component
+  owns the missed wakeup) is beyond `/proc` visibility without symbols and
+  is a Node.js/V8 upstream question — the captures are sufficient to file
+  it upstream.
 
 ## H3 — The `@solana/web3.js` 3.1.1 import chain is a required ingredient
 
-**Status: PLAUSIBLE, test prioritized.**
+**Status: STRONGLY SUPPORTED (rate factor), not a clean predicate.**
 
-- Rationale: it is the only npm code the failing invocation executes [SRC],
-  and PR #95's load generator happened to be web3.js import loops [CI-E].
-  The trivial non-web3 control never hung [CI-E].
-- Test: baseline matrix with/without the web3.js import in the process
-  (checker as-is vs import-stripped *copy* — never the repo file), plus a
-  bare `await import("@solana/web3.js")` + `process.exit(0)` loop.
-- Minimum confirming evidence: hang-rate difference attributable to the
-  import under the same load, or a captured stack naming a web3.js-loaded
-  module/thread.
+- web3.js-stripped byte-identical copy: 0/120 under matched conditions vs
+  21/180 with the import (p ≈ 1.3·10⁻⁵).
+- But web3.js import alone does NOT suffice: minimal big-buffer scripts
+  with the import hung 0/120. The import is a heap/graph-size contributor
+  to the race window, not a side-effect handle (none exists — import-only
+  runs exit cleanly).
 
 ## H4 — `--trace-exit` causally "fixes" the hang
 
-**Status: PLAUSIBLE-BUT-UNVERIFIED; single n=1 VM observation [VM-E].**
+**Status: CONFIRMED as a causal timing effect (mechanism: pre-exit stderr
+instrumentation delays exit-initiation past the lost-wakeup window).**
 
-- No mechanism is known by which `--trace-exit` (which only prints a stack
-  trace when `process.exit` is invoked) would prevent a teardown race; a
-  one-off success is fully consistent with intermittency (H2).
-- Minimum confirming evidence: VM or sandbox A/B at n≥20 each under the
-  same load showing a significant rate difference. Until then H4 must not
-  be used in any explanation.
+- Matched-cell A/B: big tarball + load, 0/60 with `--trace-exit` vs 21/180
+  without (p ≈ 4·10⁻⁴). The VM's single F run is thereby *explained*, not
+  anomalous.
+- Semantics unchanged: the trace (captured) shows the same `process.exit`
+  from `main:327:13` via `node:internal/process/per_thread:241`, exit code
+  0.
 
 ## H5 — The deployment script introduces its own failure
 
-**Status: REJECTED as an independent cause; the script *exposes* the CLI
-hang.**
-
-- The stall point [VM-E G] is the checker invocation itself, in the exact
-  CLI shape that hangs standalone [VM-E B/C]. The script's constructs at
-  that point are ordinary (`if node …; then`, stdout→/dev/null, inherited
-  stderr/stdin, `set -euo pipefail`, cwd = repo root). No fd inheritance,
-  no subshell plumbing that changes node's teardown. 900 s ≫ 0.5 s runtime.
+**Status: REJECTED (unchanged from opening assessment; see EVIDENCE §3.5).**
+The script exposes the standalone CLI hang at `deploy_devnet.sh:198` and
+`run_provenance_gate()`; `local_rehearsal_ns3.sh:81` shares the exposure.
 
 ## H6 — Manifest/tarball content or hashing of the large tarball is causal
 
-**Status: REJECTED for *hang location* (it happens after hashing completes —
-verdict lines are printed [VM-E B/C]), UNVERIFIED for *hang probability*.**
-The sandbox matrix uses a synthetic tarball of realistic size to check
-whether pre-exit memory pressure (e.g., the ~hundreds-of-MB `readFileSync`
-buffer + GC) modulates the rate (folds into H2 testing).
+**Status: REVISED — the tarball SIZE is a required ingredient; the manifest
+content is not.** 4 KB tarball: 0/470. 256 MB tarball: reproduces. Synthetic
+manifest/digests reproduce; the real manifest's pins were never needed and
+never touched. The mechanism is the transient 256 MB buffer's effect on
+teardown timing, not the hashing logic.
 
 ## H7 — Environment-level external interference on the VM (Hermes Agent,
         rlimit, cgroup, watchdog, kernel)
 
-**Status: REQUIRES-VM.** Cannot be evaluated from here. V2/V5 follow-up
-tests (ROOT_CAUSE_REPORT.md §J) bound this.
+**Status: REJECTED as a necessary condition** — the hang reproduces on an
+idle machine at ≈50% with the exact VM invocation shape. Residual VM-specific
+rate differences remain possible; V1–V3 (ROOT_CAUSE_REPORT §J) bound them.

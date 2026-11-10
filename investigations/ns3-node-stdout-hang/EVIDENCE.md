@@ -89,3 +89,27 @@ The hang happens **after** `process.exit(0)` at L327 is (or should be)
 executing — i.e., in Node's exit/teardown sequence (exit listeners →
 runtime teardown → libc `exit()`/atexit + thread teardown) — or the
 `--trace-exit` VM result is a sampling accident. Both are testable.
+
+## 5. Sandbox reproduction results (Phase 2/3 — added at investigation close)
+
+Full command records, rates and captures: REPRODUCTIONS.md. Headlines:
+
+- **[REPRO]** The unmodified checker (byte-identical copy, same Node
+  v24.22.2) hangs after printing its complete success verdict — at
+  **≈50%/run idle** with stdout→/dev/null (40/80) or →file (≥15/~30) and a
+  256 MB synthetic tarball; **0%** with TTY stdout (0/20) or
+  `--trace-exit` (0/60); 11.7% under load with file stdout (21/180).
+- **[REPRO]** 4 KB tarball: 0/470 runs (tiny never hangs) → the large
+  transient `readFileSync` buffer is a required ingredient.
+- **[REPRO]** web3.js-import-stripped copy: 0/120 under matched conditions
+  → the web3.js module-graph load is a strong rate factor.
+- **[REPRO]** Minimal two-ingredient scripts (buffer ± web3.js ± dead
+  lifetime): 0/240 — the full checker is the smallest reproducer found.
+- **[REPRO]** Captured stuck state (11 events / 22 snapshots, 100%
+  consistent): MainThread `futex(FUTEX_WAIT_BITSET, val=<V8Worker TID>)`
+  join-wait; `V8Worker` parked on `futex(..., val=0)` never woken; 3
+  threads; RSS ≈ 347 MB; t1≡t2 permanent. This is the artifact PR #95
+  could not obtain.
+- **[REPRO]** `--trace-exit` output format captured; instrumentation
+  writes stderr pre-exit and collapses the hang rate 21/180 → 0/60 — the
+  owner's evidence F is a causal timing effect, now explained.
