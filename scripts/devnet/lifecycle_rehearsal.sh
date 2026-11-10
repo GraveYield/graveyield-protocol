@@ -100,7 +100,13 @@ fi
 # EXACTLY the approved NS-3 deployment digests (sha256), SBPF v0
 # (e_machine 263 / e_flags 0), structurally carrying the NS-3 identities
 # with no NS-1/NS-2 legacy bytes. A mismatch aborts the whole rehearsal.
-node "$REPO_ROOT/scripts/devnet/ns3_check_provenance.mjs" \
+# The checker runs through the bounded wrapper (finite timeout, SIGTERM ->
+# SIGKILL termination grace, verdict validated fail-closed, temp logs
+# cleaned up): Node.js v24.22.2 can hang in process.exit() teardown AFTER
+# the verdict is printed (PR #95 RCA / PR #98) — the recorded verdict
+# stands, but the rehearsal must never wedge.
+"$REPO_ROOT/scripts/devnet/run_ns3_check_provenance.sh" -- \
+  node "$REPO_ROOT/scripts/devnet/ns3_check_provenance.mjs" \
   --scanner-so "$SCANNER_SO" --vault-so "$VAULT_SO" \
   --scanner-id "EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL" \
   --vault-id "7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
