@@ -15,6 +15,29 @@
 # nothing here touches the real devnet keys outside this repo.
 set -euo pipefail
 
+# SUPERSEDED (NS-3 cluster-identity + authority hardening): this legacy
+# rehearsal predates three fail-closed gates that are now mandatory —
+#   1. deploy_devnet.sh verifies the PINNED DEVNET genesis before touching
+#      any keypair, so it refuses a local validator (by design — the
+#      production deploy script is Devnet-only);
+#   2. protocol_admin.mjs verifies cluster identity before loading signers;
+#   3. protocol_admin.mjs requires an explicit --authority and (outside
+#      the loopback rehearsal exception) the pinned NS-3 governance key —
+#      the old deployer-as-authority arrangement is retired (DR-002).
+# The NS-3 rehearsal that exercises the production initialization SHAPE
+# on a local validator is scripts/devnet/local_rehearsal_ns3.sh.
+cat >&2 <<'MSG'
+REFUSING: scripts/devnet/local_rehearsal.sh is the superseded NS-2-era
+rehearsal. Under the NS-3 safety gates it cannot run: deploy_devnet.sh is
+Devnet-only by design (pinned genesis guard), and protocol_admin.mjs now
+requires explicit governance authority and rejects the old
+deployer-as-authority arrangement.
+Use scripts/devnet/local_rehearsal_ns3.sh instead (throwaway identities,
+temporary governance authority, local validator, explicit
+--allow-local-validator opt-in).
+MSG
+exit 2
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 DEVNET_DIR="$REPO_ROOT/scripts/devnet"

@@ -30,7 +30,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PublicKey } from "@solana/web3.js";
 import { buildSbfElf, sha256 } from "./helpers/provenance_fixtures.mjs";
-import { NS3 } from "../ns3_identities.mjs";
+import { NS3, DEVNET_GENESIS_HASH } from "../ns3_identities.mjs";
 
 const DEVNET_DIR = path.dirname(fileURLToPath(import.meta.url)); // scripts/devnet/test
 const SCRIPTS_DEVNET = path.dirname(DEVNET_DIR); // scripts/devnet
@@ -68,6 +68,7 @@ const NEEDED_BINS = [
   "date",
   "true",
   "false",
+  "timeout",
 ];
 
 let SBX;
@@ -131,6 +132,29 @@ case "$1" in
         fi
         ;;
       cluster-version) echo "3.0.10" ;;
+      # CLUSTER IDENTITY GUARD (this workstream): the deploy script resolves
+      # the endpoint's genesis hash (read-only) BEFORE touching any keypair
+      # path. The stub controls the simulated cluster per scenario:
+      #   default                  -> the pinned Devnet genesis, interpolated
+      #                               from ../ns3_identities.mjs (never a
+      #                               second hand-typed copy of the value)
+      #   GY_TEST_GENESIS_HASH=... -> a foreign or malformed genesis
+      #   GY_TEST_GENESIS_EMPTY=1  -> successful RPC but EMPTY response
+      #   GY_TEST_GENESIS_FAIL=1   -> RPC failure (non-zero exit)
+      genesis-hash)
+        if [[ -n "\${GY_TEST_GENESIS_FAIL:-}" ]]; then
+          echo "stub solana: simulated genesis-hash RPC failure" >&2
+          exit 14
+        fi
+        if [[ -n "\${GY_TEST_GENESIS_EMPTY:-}" ]]; then
+          exit 0
+        fi
+        if [[ -n "\${GY_TEST_GENESIS_HASH:-}" ]]; then
+          echo "$GY_TEST_GENESIS_HASH"
+          exit 0
+        fi
+        echo "${DEVNET_GENESIS_HASH}"
+        ;;
     esac
     ;;
   *) echo "stub solana: unsupported invocation $*" >&2; exit 1 ;;
@@ -939,7 +963,109 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     assert.match(`${r.stdout}\n${r.stderr}`, /deployer needs >= 6 SOL/);
     assert.equal(deploysInLog(log).length, 0);
   });
+
+  // ========================================================================
+  // Cluster identity (this workstream): the deployment script verifies the
+  // endpoint's genesis hash against the pinned Devnet genesis BEFORE any
+  // owner keypair path is touched, and fails closed on every uncertainty.
+  // ========================================================================
+
+  test("G1. correct Devnet genesis: the cluster guard passes and the existing gates continue", () => {
+    const { run, log } = setupScenario();
+    const r = run();
+    assert.equal(r.code, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /cluster identity OK: Solana Devnet/);
+    // the guard queried the genesis through the (stubbed) deployment CLI...
+    assert.ok(
+      readLog(log).some((l) => l.includes("genesis-hash")),
+      "the guard must actually resolve the endpoint genesis",
+    );
+    // ...and the run continued through identity, funding, build, provenance to TWO deploys
+    assert.equal(deploysInLog(log).length, 2);
+    assert.match(r.stdout, /PROVENANCE OK/);
+    // the pin came from the shared identities module, not a local copy
+    assert.match(r.stdout, new RegExp(`pinned Devnet genesis: ${DEVNET_GENESIS_HASH}`));
+  });
+
+  test("G2. foreign genesis: deployment aborts BEFORE any owner keypair path is accessed", () => {
+    const { run, log } = setupScenario();
+    const r = runWithEnv(run, { GY_TEST_GENESIS_HASH: REAL_MAINNET_GENESIS });
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /NOT Solana Devnet/);
+    assert.match(`${r.stdout}\n${r.stderr}`, new RegExp(REAL_MAINNET_GENESIS));
+    // no keypair path was read (no solana-keygen pubkey, no balance call)
+    assert.equal(keypairReadsInLog(log).length, 0);
+    assert.equal(readLog(log).filter((l) => l.includes("balance")).length, 0);
+    // and no deployment command was invoked
+    assert.equal(deploysInLog(log).length, 0);
+  });
+
+  test("G3. genesis RPC failure: deployment aborts BEFORE any owner keypair path is accessed", () => {
+    const { run, log } = setupScenario();
+    const r = runWithEnv(run, { GY_TEST_GENESIS_FAIL: "1" });
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /could NOT be verified/);
+    assert.match(`${r.stdout}\n${r.stderr}`, /Nothing was signed or submitted/);
+    assert.equal(keypairReadsInLog(log).length, 0);
+    assert.equal(readLog(log).filter((l) => l.includes("balance")).length, 0);
+    assert.equal(deploysInLog(log).length, 0);
+  });
+
+  test("G4. empty genesis response: deployment aborts (availability is not identity)", () => {
+    const { run, log } = setupScenario();
+    const r = runWithEnv(run, { GY_TEST_GENESIS_EMPTY: "1" });
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /could NOT be verified/);
+    assert.equal(keypairReadsInLog(log).length, 0);
+    assert.equal(deploysInLog(log).length, 0);
+  });
+
+  test("G5. malformed genesis response: deployment aborts", () => {
+    const { run, log } = setupScenario();
+    const r = runWithEnv(run, { GY_TEST_GENESIS_HASH: "error: not a genesis hash at all!" });
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /malformed genesis-hash output/);
+    assert.equal(keypairReadsInLog(log).length, 0);
+    assert.equal(deploysInLog(log).length, 0);
+  });
+
+  test("G6. --skip-build deploy path ALSO runs the cluster guard (every deploy path)", () => {
+    const { run, log } = setupScenario({ prePlace: true });
+    const r = runWithEnv(run, { GY_TEST_GENESIS_HASH: REAL_MAINNET_GENESIS }, {}, [
+      "--url",
+      "http://127.0.0.1:8899",
+      "--scanner-keypair",
+      path.join(SBX, "keys", "scanner-keypair.json"),
+      "--vault-keypair",
+      path.join(SBX, "keys", "vault-keypair.json"),
+      "--deployer",
+      path.join(SBX, "keys", "deployer-keypair.json"),
+      "--skip-build",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /NOT Solana Devnet/);
+    assert.equal(deploysInLog(log).length, 0);
+    assert.equal(keypairReadsInLog(log).length, 0);
+  });
+
+  test("G7. --build-only stays independent of the cluster guard, keypairs and RPC", () => {
+    const { run, log } = setupScenario();
+    // Even with a FOREIGN genesis planted in the environment, build-only
+    // must succeed: it never resolves a cluster and never touches keys.
+    const r = runWithEnv(run, { GY_TEST_GENESIS_HASH: REAL_MAINNET_GENESIS }, {}, ["--build-only"]);
+    assert.equal(r.code, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /provenance-verified/);
+    assert.equal(deploysInLog(log).length, 0);
+    assert.equal(keypairReadsInLog(log).length, 0);
+    // no genesis resolution happened at all on the build-only path
+    assert.equal(readLog(log).filter((l) => l.includes("genesis-hash")).length, 0);
+  });
 });
+
+/** The REAL mainnet genesis hash (read via read-only RPC during this
+ *  workstream) — used as the foreign-cluster fixture: the deployment and
+ *  admin guards must reject it precisely because it is not Devnet. */
+const REAL_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 
 /** Run with a custom env on top of the scenario env. */
 function runWithEnv(run, extraEnv = {}, overrides = {}, args = undefined) {

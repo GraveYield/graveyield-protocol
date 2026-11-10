@@ -13,6 +13,19 @@
 #       # deploys nothing, submits nothing.
 #
 # Safety properties:
+#   * CLUSTER IDENTITY (fail closed, deploy paths): before ANY owner
+#     keypair path is touched — existence checks included — the script
+#     resolves the configured RPC endpoint's genesis hash (read-only
+#     `solana --url "$URL" genesis-hash`) and requires EXACTLY the pinned
+#     Devnet genesis. The pin has ONE home: DEVNET_GENESIS_HASH in
+#     scripts/devnet/ns3_identities.mjs — the same module the acceptance
+#     verifier and the administration CLI consume — read here through the
+#     same robust node bridge as the manifest fields (never text-grep'd,
+#     never duplicated). A foreign genesis, an RPC failure/timeout, or a
+#     malformed/empty answer REFUSES the deployment: a cluster that
+#     cannot prove it is Devnet is never a deployment target. --build-only
+#     stays independent of this guard by design: it touches no keypair,
+#     no RPC, and no transaction.
 #   * PROVENANCE GATE (fail-closed, EVERY path): before any deployment
 #     transaction can be submitted, scripts/devnet/ns3_check_provenance.mjs
 #     must pass against scripts/devnet/provenance.manifest.json — the shared
@@ -76,6 +89,10 @@ EXPECTED_VAULT="7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
 # consumed by CI — never keep a second copy of the hashes here).
 PROVENANCE_MANIFEST="$DEVNET_DIR/provenance.manifest.json"
 PROVENANCE_CHECKER="$DEVNET_DIR/ns3_check_provenance.mjs"
+# The single NS-3 identity module — single source of the pinned Devnet
+# genesis hash (also imported by protocol_admin.mjs and
+# verify_ns3_deployment.mjs; never keep a second copy of the value here).
+NS3_IDENTITIES="$DEVNET_DIR/ns3_identities.mjs"
 
 URL="https://api.devnet.solana.com"
 SCANNER_KP=""
@@ -117,6 +134,21 @@ manifest_field() {
     }
     process.stdout.write(String(v));
   ' "$PROVENANCE_MANIFEST" "$1"
+}
+
+# Read the pinned Devnet genesis hash out of the shared identities module
+# (single source of the value; same robust node-bridge pattern as
+# manifest_field — a real import with type validation, never text parsing).
+expected_genesis() {
+  node --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const m = await import(pathToFileURL(process.argv[1]).href);
+    if (typeof m.DEVNET_GENESIS_HASH !== "string" || m.DEVNET_GENESIS_HASH.length === 0) {
+      console.error("REFUSING: DEVNET_GENESIS_HASH missing in the shared identities module");
+      process.exit(2);
+    }
+    process.stdout.write(m.DEVNET_GENESIS_HASH);
+  ' "$NS3_IDENTITIES"
 }
 
 # The fail-closed provenance gate. Runs on EVERY execution path before any
@@ -264,6 +296,52 @@ check_deploy_cli() {
   echo "deployment CLI version OK: solana + solana-keygen $want"
 }
 
+# Cluster-identity guard (fail closed) — the binary gate that keeps this
+# script pointed at Solana Devnet. Runs on EVERY deploy path BEFORE any
+# owner keypair path is touched (existence checks included), immediately
+# after the deployment-CLI version check (the CLI that performs this RPC
+# is pinned first). Read-only: `solana genesis-hash` submits nothing.
+# FAIL CLOSED on every uncertainty: a non-zero RPC exit, a timeout, an
+# empty or malformed answer, or a foreign genesis all REFUSE — an
+# un-verifiable cluster is never interpreted as permission to continue.
+check_cluster_identity() {
+  require_node
+  local want got rc
+  want="$(expected_genesis)"
+  echo "pinned Devnet genesis: $want"
+  # `timeout` (coreutils) bounds a hung RPC; without it the solana CLI's
+  # own RPC timeouts apply — either way a failed call is a refusal.
+  set +e
+  if command -v timeout >/dev/null 2>&1; then
+    got="$(timeout 30 solana --url "$URL" genesis-hash 2>/dev/null)"
+    rc=$?
+  else
+    got="$(solana --url "$URL" genesis-hash 2>/dev/null)"
+    rc=$?
+  fi
+  set -e
+  got="${got//[[:space:]]/}"
+  if (( rc != 0 )) || [[ -z "$got" ]]; then
+    echo "REFUSING: deployment blocked — the cluster identity of $URL could NOT be verified" >&2
+    echo "(genesis-hash RPC failed, timed out, or returned nothing). A cluster that cannot" >&2
+    echo "prove it is Devnet is never a deployment target. Nothing was signed or submitted." >&2
+    exit 1
+  fi
+  if [[ ! "$got" =~ ^[1-9A-HJ-NP-Za-km-z]{43,44}$ ]]; then
+    echo "REFUSING: deployment blocked — the cluster identity of $URL could NOT be verified" >&2
+    echo "(malformed genesis-hash output: '$got'). Nothing was signed or submitted." >&2
+    exit 1
+  fi
+  if [[ "$got" != "$want" ]]; then
+    echo "REFUSING: deployment blocked — the cluster at $URL is NOT Solana Devnet." >&2
+    echo "  reported genesis:      $got" >&2
+    echo "  pinned Devnet genesis: $want" >&2
+    echo "Wrong cluster; failing closed. Nothing was signed or submitted." >&2
+    exit 1
+  fi
+  echo "cluster identity OK: Solana Devnet (genesis $got)"
+}
+
 if (( BUILD_ONLY == 1 )); then
   # Build-only preparation path: no keypairs, no RPC, no transactions.
   # No deployment-CLI version check here by design: this path never
@@ -288,14 +366,16 @@ if (( BUILD_ONLY == 1 )); then
 fi
 
 # ------------------------------------------------------------------
-# DEPLOY PATH — order is security-mandated (fixes B + D):
+# DEPLOY PATH — order is security-mandated (fixes B + D + E):
 #   [0] deployment-CLI version check (BEFORE any owner keypair path is touched)
-#   [1] keypair existence + identity (the verified CLI reads the pubkeys)
-#   [2] deployer funding
-#   [3] build-toolchain version check + platform-tools archive
-#   [4] prepare build output directory; cargo build / --skip-build
-#   [5] fail-closed provenance gate
-#   [6] solana program deploy
+#   [1] cluster identity: pinned Devnet genesis (BEFORE any owner keypair
+#       path is touched — a wrong/unverifiable cluster never reaches the keys)
+#   [2] keypair existence + identity (the verified CLI reads the pubkeys)
+#   [3] deployer funding
+#   [4] build-toolchain version check + platform-tools archive
+#   [5] prepare build output directory; cargo build / --skip-build
+#   [6] fail-closed provenance gate
+#   [7] solana program deploy
 # ------------------------------------------------------------------
 
 for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
@@ -305,14 +385,17 @@ for req in SCANNER_KP VAULT_KP DEPLOYER_KP; do
   fi
 done
 
-echo "== [0/6] deployment-CLI version check (before any keypair path is touched) =="
+echo "== [0/7] deployment-CLI version check (before any keypair path is touched) =="
 check_deploy_cli
+
+echo "== [1/7] cluster identity check — pinned Devnet genesis (before any keypair path is touched) =="
+check_cluster_identity
 
 for kp in "$SCANNER_KP" "$VAULT_KP" "$DEPLOYER_KP"; do
   [[ -f "$kp" ]] || { echo "keypair not found: $kp" >&2; exit 2; }
 done
 
-echo "== [1/6] keypair identity checks =="
+echo "== [2/7] keypair identity checks =="
 SCANNER_ID="$(solana-keygen pubkey "$SCANNER_KP")"
 VAULT_ID="$(solana-keygen pubkey "$VAULT_KP")"
 DEPLOYER="$(solana-keygen pubkey "$DEPLOYER_KP")"
@@ -329,7 +412,7 @@ echo "scanner: $SCANNER_ID"
 echo "vault:   $VAULT_ID"
 echo "deployer: $DEPLOYER"
 
-echo "== [2/6] deployer funding =="
+echo "== [3/7] deployer funding =="
 # Lamport-exact check: digit-stripping the human SOL display mis-reads
 # decimals ("0.5" -> "05"; "5.9" -> "59" would PASS a >= 6 test).
 BAL_LAMPORTS="$(solana --url "$URL" balance --lamports "$DEPLOYER_KP" | tr -dc '0-9')"
@@ -341,7 +424,7 @@ if (( BAL_LAMPORTS < MIN_DEPLOY_LAMPORTS )); then
   exit 1
 fi
 
-echo "== [3/6] build-toolchain version check + platform-tools archive (before build output directory preparation) =="
+echo "== [4/7] build-toolchain version check + platform-tools archive (before build output directory preparation) =="
 if (( SKIP_BUILD == 0 )); then
   # The SBF toolchain is only required when this script builds; --skip-build
   # runs against pre-built (e.g. CI-produced) ELFs on toolchain-less hosts.
@@ -355,7 +438,7 @@ else
   echo "--skip-build set: no build toolchain resolution (the deployment-CLI version check above still applies in full)"
 fi
 
-echo "== [4/6] prepare build output and compile programs =="
+echo "== [5/7] prepare build output and compile programs =="
 mkdir -p target/deploy
 
 if (( SKIP_BUILD == 0 )); then
@@ -370,17 +453,18 @@ else
   echo "--skip-build set: reusing existing ELFs (the provenance gate below still applies in full)"
 fi
 
-echo "== [5/6] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
+echo "== [6/7] fail-closed provenance gate (digests + SBPF v0 + structural identity) =="
 # This gate is the deployment precondition: no `solana program deploy` below
 # runs unless both ELFs match scripts/devnet/provenance.manifest.json byte
 # for byte, are SBPF v0, and carry the NS-3 identities structurally. It
 # covers the build path AND --skip-build (pre-placed/CI artifacts), and
-# therefore every retry/recovery re-run of this script.
+# therefore every retry/recovery re-run of this script. The CLUSTER
+# identity gate above is the other half: Devnet genesis or no deployment.
 run_provenance_gate
 # NOTE: the verified platform-tools archive is intentionally KEPT (no rm)
 # so the next run re-verifies the same bytes offline (fix B).
 
-echo "== [6/6] artifact summary + solana program deploy =="
+echo "== [7/7] artifact summary + solana program deploy =="
 ls -la target/deploy/grave_scanner.so target/deploy/grave_vault.so
 
 solana --url "$URL" program deploy target/deploy/grave_scanner.so \

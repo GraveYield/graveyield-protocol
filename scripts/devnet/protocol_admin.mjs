@@ -6,14 +6,37 @@
 // this repo — `anchor build` is CI-only) and drives the deployment sequence
 // documented in docs/DEVNET.md:
 //
-//   node protocol_admin.mjs init-scanner --url <U> --deployer <KP> [--authority <PK>]
-//   node protocol_admin.mjs init-vault   --url <U> --deployer <KP> [--authority <PK>]
-//   node protocol_admin.mjs init-all     --url <U> --deployer <KP> [--authority <PK>]
+//   node protocol_admin.mjs init-scanner --url <U> --deployer <KP> --authority <PK>
+//   node protocol_admin.mjs init-vault   --url <U> --deployer <KP> --authority <PK>
+//   node protocol_admin.mjs init-all     --url <U> --deployer <KP> --authority <PK>
 //   node protocol_admin.mjs pause        --url <U> --authority <KP> --program scanner|vault --state true|false
 //   node protocol_admin.mjs check        --url <U> --program scanner|vault
 //   node protocol_admin.mjs drill        --url <U> --authority <KP> --intruder <KP> --program scanner|vault
 //   node protocol_admin.mjs register-oracle --url <U> --authority <KP>
 //        [--fee-payer <KP>] [--activity-oracle <PK>] [--launch-price-oracle <PK>]
+//
+// CLUSTER IDENTITY (fail closed): every command — including read-only
+// `check` — first verifies the target cluster's genesis hash BEFORE any
+// signer file is loaded or any transaction is constructed. Public-cluster
+// operations require the exact pinned Devnet genesis (ns3_identities.mjs,
+// the same single source the deploy script and acceptance verifier use);
+// an unavailable or foreign genesis refuses the command outright. The
+// ONLY exception is the local rehearsal: `--allow-local-validator` is
+// accepted ONLY for loopback endpoints (127.0.0.1 / localhost / ::1) and
+// still requires a live, STRUCTURALLY VALID genesis answer (canonical
+// Base58 of exactly 32 bytes) — it is never a bypass for remote RPC
+// endpoints, and no other bypass exists.
+//
+// GOVERNANCE AUTHORITY (explicit, mandatory): the ProtocolConfig
+// authority is a one-time, permanent choice, so it is NEVER defaulted —
+// not even to the deployer. `init-*` require `--authority <PUBKEY>` and
+// refuse a missing or malformed value before any signer file is loaded.
+// On Devnet every governance operation (init-*, pause, register-oracle,
+// drill) must use the pinned NS-3 governance authority; the deployer is
+// the fee payer / upgrade authority and the oracles are dedicated
+// signers — roles are never silently substituted for one another. The
+// loopback rehearsal exception accepts the rehearsal's TEMPORARY
+// governance keypair (generated per run; never hardcoded here).
 //
 // NS-3 authority arrangement (DR-002): the deployer keypair pays fees and
 // holds the initial upgrade authority; the GOVERNANCE authority is the
@@ -56,6 +79,7 @@ import {
   TransactionInstruction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import { NS3, DEVNET_GENESIS_HASH } from "./ns3_identities.mjs";
 
 // ---------------------------------------------------------------- constants
 
@@ -481,6 +505,250 @@ async function sendInitTx(connection, program, payer, authority) {
   return sendAndConfirmTransaction(connection, tx, [payer]);
 }
 
+// ------------------------------------------------------ cluster identity
+//
+// The CLI performs STATE-CHANGING operations (initialization, pause/
+// unpause, oracle registration). It must never act on an unintended
+// cluster, so EVERY command — including the read-only `check` — verifies
+// the target's cluster identity BEFORE any signer file is loaded, any
+// keypair is parsed, or any transaction is constructed (single guarded
+// entry point in main()). The pinned Devnet genesis hash is the same
+// single-source constant the deployment script and the acceptance
+// verifier use (ns3_identities.mjs) — there is no second copy to drift.
+//
+// The ONLY exception is the local rehearsal against a solana-test-
+// validator: it is explicit (--allow-local-validator), restricted to
+// loopback endpoints by strict hostname equality, and still requires the
+// endpoint to PROVE it is a live Solana cluster by answering the read-
+// only genesis RPC. A remote endpoint is never "local", the opt-in is
+// refused for any non-loopback URL, and no generic bypass flag exists.
+
+// WHATWG URL.hostname keeps IPv6 brackets ("[::1]"), so both spellings
+// are listed — the comparison is exact host equality either way.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const GENESIS_RPC_TIMEOUT_MS = 30_000;
+
+/**
+ * True ONLY for http(s) URLs whose HOST is a loopback address. Strict
+ * equality on the parsed hostname: "localhost.evil.com" is not local,
+ * and neither is any DNS name that merely resolves to 127.0.0.1 — the
+ * URL itself must name the loopback host.
+ */
+export function isLoopbackUrl(rawUrl) {
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  return LOOPBACK_HOSTS.has(u.hostname.toLowerCase());
+}
+
+/** Race a promise against a timeout; the timer is unref'd so a fast
+ *  success never keeps the process alive for the full timeout window.
+ *  Exported ONLY so regression tests can pin the timeout contract on the
+ *  isolated helper; production callers always go through
+ *  rpcGetGenesisHash with the production duration below. */
+export function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The real genesis fetch — a READ-ONLY RPC call (getGenesisHash) raced
+ * against a timeout so a silent endpoint fails closed instead of hanging
+ * the guard. Exported for regression tests, which may inject a SHORTER
+ * duration to make the timeout deterministic without waiting out the
+ * production 30s; the production default is unchanged and there is no
+ * environment override.
+ */
+export async function rpcGetGenesisHash(url, timeoutMs = GENESIS_RPC_TIMEOUT_MS) {
+  const connection = new Connection(url, "confirmed");
+  return withTimeout(connection.getGenesisHash(), timeoutMs, "getGenesisHash");
+}
+
+/**
+ * Structural validation of a genesis hash ANSWER: it must be the canonical
+ * Base58 encoding of exactly 32 bytes (a genesis hash is the same shape as
+ * an ed25519 public key). The PublicKey constructor enforces Base58
+ * decodability and the decoded 32-byte length; the round-trip `toBase58()`
+ * comparison additionally rejects non-canonical spellings. This is what
+ * the local-validator exception checks — it has no pinnable value to
+ * compare against (a local validator mints a fresh genesis per run), so a
+ * structurally impossible answer (empty, non-Base58, wrong length) must
+ * still fail closed. The Devnet path does not need this: its exact
+ * pinned-hash comparison already refuses anything malformed.
+ */
+export function isCanonicalBase58Genesis32(value) {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    return new PublicKey(value).toBase58() === value;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cluster-identity guard — FAILS CLOSED. Returns { mode, genesisHash }
+ * where mode is "devnet" (exact pinned genesis matched) or "local"
+ * (explicit loopback rehearsal opt-in with a live genesis answer).
+ * Any RPC failure, timeout, empty or malformed answer, or foreign
+ * genesis throws — an un-verifiable cluster is never a license to
+ * continue, and nothing has been signed or submitted at this point.
+ *
+ * `getGenesisHash` is injectable for tests; the default performs the
+ * real read-only RPC. Tests that inject a fake are unit tests and are
+ * labeled as such — they never stand in for the real rehearsal.
+ */
+export async function assertClusterIdentity(args, { getGenesisHash = rpcGetGenesisHash } = {}) {
+  const url = requireOpt(args, "url");
+  const localOptIn = args["allow-local-validator"] === true;
+
+  if (localOptIn) {
+    if (!isLoopbackUrl(url)) {
+      throw new Error(
+        `REFUSING: --allow-local-validator was passed for '${url}', which is NOT a loopback endpoint. ` +
+          "The local-validator exception exists only for the local rehearsal " +
+          "(http://127.0.0.1:8899 or http://localhost:8899) and is never a cluster-identity " +
+          "bypass for remote RPC endpoints.",
+      );
+    }
+    // Even in rehearsal mode the endpoint must prove it is a live Solana
+    // cluster: a local validator mints a fresh genesis per run, so there
+    // is no pinnable value — but the answer must still be STRUCTURALLY
+    // possible (canonical Base58, exactly 32 bytes). Silence, garbage
+    // ("not-a-genesis-hash"), a wrong-length Base58 value, or a non-string
+    // response is a refusal, exactly like an unreachable endpoint.
+    let localGenesis;
+    try {
+      localGenesis = await getGenesisHash(url);
+    } catch (err) {
+      throw new Error(
+        `REFUSING: the local validator at ${url} could not be reached for a genesis hash ` +
+          `(${err.message ?? err}) — cluster identity could not be established. ` +
+          "Failing closed; nothing was signed or submitted.",
+      );
+    }
+    if (!isCanonicalBase58Genesis32(localGenesis)) {
+      const shown =
+        typeof localGenesis === "string"
+          ? JSON.stringify(localGenesis.slice(0, 64))
+          : typeof localGenesis;
+      throw new Error(
+        `REFUSING: the local validator at ${url} reported a malformed genesis hash ` +
+          `(expected the canonical Base58 encoding of exactly 32 bytes, got ${shown}) — ` +
+          "cluster identity could not be established. Failing closed; " +
+          "nothing was signed or submitted.",
+      );
+    }
+    console.log(
+      `cluster identity: LOCAL REHEARSAL validator at ${url} (loopback opt-in; genesis ${localGenesis})`,
+    );
+    return { mode: "local", genesisHash: localGenesis };
+  }
+
+  let genesis;
+  try {
+    genesis = await getGenesisHash(url);
+  } catch (err) {
+    throw new Error(
+      `REFUSING: ${url} did not report a genesis hash — cluster identity could NOT be ` +
+        `verified (RPC failure: ${err.message ?? err}; pinned Devnet genesis: ` +
+        `${DEVNET_GENESIS_HASH}). Failing closed; nothing was signed or submitted.`,
+    );
+  }
+  if (typeof genesis !== "string" || genesis.length === 0) {
+    throw new Error(
+      `REFUSING: ${url} did not report a genesis hash — cluster identity could NOT be ` +
+        `verified (pinned Devnet genesis: ${DEVNET_GENESIS_HASH}). Failing closed; ` +
+        "nothing was signed or submitted.",
+    );
+  }
+  if (genesis !== DEVNET_GENESIS_HASH) {
+    throw new Error(
+      `REFUSING: the cluster at ${url} is NOT Solana Devnet — reported genesis ${genesis}, ` +
+        `pinned Devnet genesis ${DEVNET_GENESIS_HASH}. Failing closed; ` +
+        "nothing was signed or submitted.",
+    );
+  }
+  console.log(`cluster identity: Solana Devnet verified (genesis ${DEVNET_GENESIS_HASH})`);
+  return { mode: "devnet", genesisHash: genesis };
+}
+
+// ---------------------------------------------------- governance authority
+//
+// The ProtocolConfig authority is a ONE-TIME, PERMANENT configuration
+// choice: whichever key initializes becomes the only key that can later
+// rotate config fields through the governance flow. The CLI therefore
+// never defaults it (not even to the deployer), never silently
+// substitutes one role for another, and — outside the explicit loopback
+// rehearsal exception — accepts only the pinned NS-3 governance public
+// key for Devnet operations. Roles stay separate: the GOVERNANCE
+// authority signs governance instructions; the DEPLOYER is the fee
+// payer / initial upgrade authority; the two oracles are dedicated
+// signers.
+
+/**
+ * Parse the MANDATORY --authority PUBLIC-key argument (init-* commands).
+ * A missing or malformed authority is a refusal BEFORE any signer file
+ * is loaded — there is no deployer fallback (removed deliberately:
+ * silently initializing with the deployer as authority would break the
+ * NS-3 role separation permanently).
+ */
+export function parseExplicitAuthority(args) {
+  const raw = args.authority;
+  if (typeof raw !== "string" || raw.length === 0) {
+    throw new Error(
+      "missing required --authority <PUBKEY> — the ProtocolConfig authority is a one-time, " +
+        "permanent choice and is NEVER defaulted (not even to the deployer). Pass the " +
+        "governance authority explicitly.",
+    );
+  }
+  try {
+    const pk = new PublicKey(raw);
+    if (pk.toBase58() !== raw) {
+      throw new Error("not canonical base58");
+    }
+    return pk;
+  } catch {
+    throw new Error(
+      `malformed --authority '${raw}' is not a valid base58 public key — ` +
+        "refusing before any signer file is loaded",
+    );
+  }
+}
+
+/**
+ * Governance-authority pin for public-cluster operations: on Devnet the
+ * authority must be EXACTLY the pinned NS-3 governance key
+ * (ns3_identities.mjs NS3.governanceAuthority). The loopback rehearsal
+ * exception (cluster.mode === "local") accepts the rehearsal's TEMPORARY
+ * governance keypair — generated fresh per rehearsal run, never
+ * hardcoded here, and never valid outside local mode.
+ */
+export function assertGovernanceAuthority(
+  cluster,
+  authorityPubkey,
+  { label = "--authority" } = {},
+) {
+  if (cluster.mode === "local") return;
+  const want = NS3.governanceAuthority;
+  const got = authorityPubkey.toBase58();
+  if (got !== want) {
+    throw new Error(
+      `REFUSING: ${label} ${got} is not the pinned NS-3 governance authority ${want}. ` +
+        "On Devnet, governance operations must use the governance key — the deployer " +
+        "(fee payer / upgrade authority) and the oracles are separate roles and are never " +
+        "substituted for it.",
+    );
+  }
+}
+
 // --------------------------------------------------------------------- CLI
 
 function parseArgs(argv) {
@@ -517,11 +785,14 @@ function requireOpt(args, name) {
   return v;
 }
 
-async function cmdInit(args, programs) {
+async function cmdInit(args, programs, cluster) {
   const url = requireOpt(args, "url");
+  // AUTHORITY FIRST — before any signer file is touched: initialization is
+  // one-time, so a wrong authority must fail before anything is loaded,
+  // let alone signed. (The old deployer fallback is removed deliberately.)
+  const authority = parseExplicitAuthority(args);
+  assertGovernanceAuthority(cluster, authority, { label: "--authority" });
   const deployer = await loadKeypair(requireOpt(args, "deployer"));
-  const authority =
-    args.authority !== undefined ? new PublicKey(args.authority) : deployer.publicKey;
   const connection = new Connection(url, "confirmed");
   for (const program of programs) {
     console.log(
@@ -539,9 +810,12 @@ async function cmdInit(args, programs) {
   }
 }
 
-async function cmdPause(args) {
+async function cmdPause(args, cluster) {
   const url = requireOpt(args, "url");
+  // Cluster identity was already verified in main() BEFORE this signer
+  // load; on Devnet the loaded authority must be the pinned governance key.
   const authority = await loadKeypair(requireOpt(args, "authority"));
+  assertGovernanceAuthority(cluster, authority.publicKey, { label: "--authority keypair" });
   const program = requireOpt(args, "program");
   const state = requireOpt(args, "state") === "true";
   const connection = new Connection(url, "confirmed");
@@ -569,9 +843,14 @@ async function cmdCheck(args) {
   }
 }
 
-async function cmdRegisterOracle(args) {
+async function cmdRegisterOracle(args, cluster) {
   const url = requireOpt(args, "url");
+  // Cluster identity was already verified in main() BEFORE this signer
+  // load; on Devnet the loaded authority must be the pinned governance key.
+  // --fee-payer stays INDEPENDENT (defaults to the authority when omitted,
+  // per docs/DEVNET.md §4); it never changes who the authority is.
   const authority = await loadKeypair(requireOpt(args, "authority"));
+  assertGovernanceAuthority(cluster, authority.publicKey, { label: "--authority keypair" });
   const feePayer =
     args["fee-payer"] !== undefined ? await loadKeypair(args["fee-payer"]) : authority;
   const program = "scanner"; // update_protocol_config is a GraveScanner instruction
@@ -620,9 +899,13 @@ async function cmdRegisterOracle(args) {
   await assertConfig(connection, program, expect);
 }
 
-async function cmdDrill(args) {
+async function cmdDrill(args, cluster) {
   const url = requireOpt(args, "url");
+  // Cluster identity was already verified in main() BEFORE these signer
+  // loads; on Devnet the authority must be the pinned governance key. The
+  // intruder is deliberately NEVER pinned — it exists to be rejected.
   const authority = await loadKeypair(requireOpt(args, "authority"));
+  assertGovernanceAuthority(cluster, authority.publicKey, { label: "--authority keypair" });
   const intruder = await loadKeypair(requireOpt(args, "intruder"));
   const program = requireOpt(args, "program");
   const pausedField = program === "scanner" ? "paused" : "emergencyPaused";
@@ -687,30 +970,37 @@ async function cmdDrill(args) {
   void programId;
 }
 
+const COMMANDS = {
+  "init-scanner": (args, cluster) => cmdInit(args, ["scanner"], cluster),
+  "init-vault": (args, cluster) => cmdInit(args, ["vault"], cluster),
+  "init-all": (args, cluster) => cmdInit(args, ["scanner", "vault"], cluster),
+  pause: (args, cluster) => cmdPause(args, cluster),
+  // `check` is read-only and load-free: cluster identity is already proven
+  // in main() for every command, and it touches no signer — it takes no
+  // cluster (a superfluous one only invites drift).
+  check: (args) => cmdCheck(args),
+  "register-oracle": (args, cluster) => cmdRegisterOracle(args, cluster),
+  drill: (args, cluster) => cmdDrill(args, cluster),
+};
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
-  switch (cmd) {
-    case "init-scanner":
-      return cmdInit(args, ["scanner"]);
-    case "init-vault":
-      return cmdInit(args, ["vault"]);
-    case "init-all":
-      return cmdInit(args, ["scanner", "vault"]);
-    case "pause":
-      return cmdPause(args);
-    case "check":
-      return cmdCheck(args);
-    case "register-oracle":
-      return cmdRegisterOracle(args);
-    case "drill":
-      return cmdDrill(args);
-    default:
-      console.error(
-        "usage: protocol_admin.mjs <init-scanner|init-vault|init-all|pause|check|register-oracle|drill> --url <U> ... (see header comment)",
-      );
-      process.exitCode = 2;
+  const handler = COMMANDS[cmd];
+  if (!handler) {
+    console.error(
+      "usage: protocol_admin.mjs <init-scanner|init-vault|init-all|pause|check|register-oracle|drill> --url <U> ... (see header comment)",
+    );
+    process.exitCode = 2;
+    return;
   }
+  // CLUSTER IDENTITY FIRST — the single guarded entry point: this runs
+  // BEFORE any command handler, therefore before any signer file is
+  // loaded or any transaction is constructed, for every command
+  // (including the read-only `check`). A missing --url fails here too —
+  // a command without a named target has no verified cluster to run on.
+  const cluster = await assertClusterIdentity(args);
+  await handler(args, cluster);
 }
 
 // Run the CLI only when this file is the entry point — the module is also

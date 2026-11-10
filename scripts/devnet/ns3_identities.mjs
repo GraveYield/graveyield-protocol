@@ -38,6 +38,27 @@ export const NS3 = {
   launchPriceOracle: "97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee",
 };
 
+/**
+ * Pinned Solana Devnet genesis hash — THE single cluster-identity anchor
+ * for every GraveYield devnet tool (moved here from
+ * verify_ns3_deployment.mjs so the deployment script, the administration
+ * CLI, and the acceptance verifier can never silently drift apart).
+ *
+ * Independently verified on 2026-11-06 from three sources: (1) live
+ * `getGenesisHash` on https://api.devnet.solana.com; (2) the official
+ * Anza cluster documentation, whose devnet validator example pins
+ * `--expected-genesis-hash` to this exact value (docs.anza.xyz —
+ * "Available Solana Clusters"); (3) an independent chain-config
+ * reference cross-check. A devnet genesis reset would change the live
+ * value — that failure mode is deliberate: the pin is re-verified by a
+ * human and re-pinned consciously, never silently.
+ *
+ * This is deliberately a SIBLING export, not a member of the NS3 object:
+ * every NS3 member is a public key (asserted by test/ns3_sync.test.mjs),
+ * while a genesis hash is a cluster identity, not an authority.
+ */
+export const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
 /** Seeds — must mirror the constants.rs files of both programs (asserted by ns3_sync test). */
 export const PROTOCOL_CONFIG_SEED = "protocol_config";
 

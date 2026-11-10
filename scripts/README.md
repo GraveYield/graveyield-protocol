@@ -10,7 +10,7 @@ Operational and development scripts for GraveYield Protocol.
 | `fetch_v4_fork_fixtures.mjs` | Fetch + cross-validate the mainnet Raydium V4 state and program ELFs the fork suites fork against. Invoked by `build_fork_harness.sh`. |
 | `devnet/deploy_devnet.sh` | Build both programs with `cargo build-sbf` and deploy them to devnet under the devnet program IDs (identity + funding gated). Runbook: [`../docs/DEVNET.md`](../docs/DEVNET.md). |
 | `devnet/protocol_admin.mjs` | Devnet/rehearsal administration: ProtocolConfig initialization, emergency pause/unpause, config readback, and the full emergency-control drill (including the intruder-rejection assertion). |
-| `devnet/local_rehearsal.sh` | Rehearse the entire devnet sequence (deploy → initialize → drills) against a local `solana-test-validator` using the production scripts. |
+| `devnet/local_rehearsal.sh` | SUPERSEDED (refuses with guidance): NS-2-era rehearsal predating the Devnet-only deploy gate and the explicit-governance-authority rules. Use `devnet/local_rehearsal_ns3.sh`. |
 
 ## Usage
 
