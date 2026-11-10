@@ -45,8 +45,11 @@
 # target/deploy/ (via `deploy_devnet.sh --build-only` or CI artifacts);
 # Node >= 24; `pnpm install` completed (scripts/devnet workspace deps).
 #
-# The production-keypair variant (owner custody keys) remains
-# scripts/devnet/local_rehearsal.sh — unchanged.
+# The legacy NS-2-era full-deployment rehearsal (scripts/devnet/
+# local_rehearsal.sh) is SUPERSEDED by this script and now REFUSES to
+# run: deploy_devnet.sh is Devnet-only by design (pinned genesis guard)
+# and protocol_admin.mjs rejects the retired deployer-as-authority
+# arrangement. This NS-3 rehearsal is the only local-validator workflow.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

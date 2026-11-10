@@ -23,8 +23,9 @@
 // an unavailable or foreign genesis refuses the command outright. The
 // ONLY exception is the local rehearsal: `--allow-local-validator` is
 // accepted ONLY for loopback endpoints (127.0.0.1 / localhost / ::1) and
-// still requires a live genesis answer — it is never a bypass for remote
-// RPC endpoints, and no other bypass exists.
+// still requires a live, STRUCTURALLY VALID genesis answer (canonical
+// Base58 of exactly 32 bytes) — it is never a bypass for remote RPC
+// endpoints, and no other bypass exists.
 //
 // GOVERNANCE AUTHORITY (explicit, mandatory): the ProtocolConfig
 // authority is a one-time, permanent choice, so it is NEVER defaulted —
@@ -545,8 +546,11 @@ export function isLoopbackUrl(rawUrl) {
 }
 
 /** Race a promise against a timeout; the timer is unref'd so a fast
- *  success never keeps the process alive for the full timeout window. */
-function withTimeout(promise, ms, label) {
+ *  success never keeps the process alive for the full timeout window.
+ *  Exported ONLY so regression tests can pin the timeout contract on the
+ *  isolated helper; production callers always go through
+ *  rpcGetGenesisHash with the production duration below. */
+export function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -555,10 +559,38 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** The real genesis fetch — a READ-ONLY RPC call (getGenesisHash). */
-async function rpcGetGenesisHash(url) {
+/**
+ * The real genesis fetch — a READ-ONLY RPC call (getGenesisHash) raced
+ * against a timeout so a silent endpoint fails closed instead of hanging
+ * the guard. Exported for regression tests, which may inject a SHORTER
+ * duration to make the timeout deterministic without waiting out the
+ * production 30s; the production default is unchanged and there is no
+ * environment override.
+ */
+export async function rpcGetGenesisHash(url, timeoutMs = GENESIS_RPC_TIMEOUT_MS) {
   const connection = new Connection(url, "confirmed");
-  return withTimeout(connection.getGenesisHash(), GENESIS_RPC_TIMEOUT_MS, "getGenesisHash");
+  return withTimeout(connection.getGenesisHash(), timeoutMs, "getGenesisHash");
+}
+
+/**
+ * Structural validation of a genesis hash ANSWER: it must be the canonical
+ * Base58 encoding of exactly 32 bytes (a genesis hash is the same shape as
+ * an ed25519 public key). The PublicKey constructor enforces Base58
+ * decodability and the decoded 32-byte length; the round-trip `toBase58()`
+ * comparison additionally rejects non-canonical spellings. This is what
+ * the local-validator exception checks — it has no pinnable value to
+ * compare against (a local validator mints a fresh genesis per run), so a
+ * structurally impossible answer (empty, non-Base58, wrong length) must
+ * still fail closed. The Devnet path does not need this: its exact
+ * pinned-hash comparison already refuses anything malformed.
+ */
+export function isCanonicalBase58Genesis32(value) {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    return new PublicKey(value).toBase58() === value;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -588,7 +620,10 @@ export async function assertClusterIdentity(args, { getGenesisHash = rpcGetGenes
     }
     // Even in rehearsal mode the endpoint must prove it is a live Solana
     // cluster: a local validator mints a fresh genesis per run, so there
-    // is no pinnable value — but silence is still a refusal.
+    // is no pinnable value — but the answer must still be STRUCTURALLY
+    // possible (canonical Base58, exactly 32 bytes). Silence, garbage
+    // ("not-a-genesis-hash"), a wrong-length Base58 value, or a non-string
+    // response is a refusal, exactly like an unreachable endpoint.
     let localGenesis;
     try {
       localGenesis = await getGenesisHash(url);
@@ -599,9 +634,14 @@ export async function assertClusterIdentity(args, { getGenesisHash = rpcGetGenes
           "Failing closed; nothing was signed or submitted.",
       );
     }
-    if (typeof localGenesis !== "string" || localGenesis.length === 0) {
+    if (!isCanonicalBase58Genesis32(localGenesis)) {
+      const shown =
+        typeof localGenesis === "string"
+          ? JSON.stringify(localGenesis.slice(0, 64))
+          : typeof localGenesis;
       throw new Error(
-        `REFUSING: the local validator at ${url} did not report a genesis hash — ` +
+        `REFUSING: the local validator at ${url} reported a malformed genesis hash ` +
+          `(expected the canonical Base58 encoding of exactly 32 bytes, got ${shown}) — ` +
           "cluster identity could not be established. Failing closed; " +
           "nothing was signed or submitted.",
       );

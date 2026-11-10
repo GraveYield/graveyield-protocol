@@ -29,7 +29,7 @@
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import http from "node:http";
 import path from "node:path";
@@ -39,8 +39,11 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   assertClusterIdentity,
   assertGovernanceAuthority,
+  isCanonicalBase58Genesis32,
   isLoopbackUrl,
   parseExplicitAuthority,
+  rpcGetGenesisHash,
+  withTimeout,
   assembleOracleUpdateTransaction,
   buildScannerUpdateProtocolConfigIx,
   SCANNER_PROGRAM_ID,
@@ -54,6 +57,26 @@ const ADMIN = join(DEVNET_DIR, "protocol_admin.mjs");
 /** The real mainnet genesis (read via read-only RPC during this
  *  workstream) — the canonical FOREIGN-cluster fixture. */
 const REAL_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+
+// Fixtures for the local-validator genesis-STRUCTURE regression battery.
+// A local validator mints a fresh genesis per run, so there is no pinned
+// value to compare against — the ANSWER itself must be the canonical
+// Base58 encoding of exactly 32 bytes. These literals are frozen so the
+// tests are deterministic (provenance noted per fixture).
+
+/** Structurally VALID local-genesis fixture: canonical Base58 of exactly
+ *  32 bytes (an ed25519 pubkey spelling; any such spelling qualifies). */
+const VALID_LOCAL_GENESIS = "Gcrc21NmgSCKsfMcGobHswWBYF7SgmLNZUdvPUzjNTjv";
+
+/** Valid Base58 ALPHABET but only 31 decoded bytes: the leading '1' (zero
+ *  byte) was stripped from a pubkey whose first byte is 0x00. */
+const GENESIS_31_BYTES = "43sLFwrYKoQtbJP2527BnmiSVwS4EEUKE6UUSezRS4C";
+
+/** Valid, CANONICAL Base58 of exactly 33 bytes (one leading zero byte). */
+const GENESIS_33_BYTES = `1${VALID_LOCAL_GENESIS}`;
+
+/** The malformed answer called out by the independent security review. */
+const NOT_BASE58 = "not-a-genesis-hash";
 
 // ------------------------------------------------------------ mock RPC
 
@@ -102,6 +125,30 @@ function startRpcServer({ genesisHash = DEVNET_GENESIS_HASH, failGenesis = false
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
   });
+}
+
+/**
+ * A TCP/HTTP server that ACCEPTS the connection and NEVER answers — the
+ * deterministic "genesis request that never resolves" fixture for the
+ * timeout regression. Nothing but the production timeout may end the
+ * wait; the test injects a SHORT duration instead of waiting out the
+ * production 30s.
+ */
+function startHangingServer() {
+  const server = http.createServer((req, _res) => {
+    req.resume(); // drain the request body; deliberately never respond
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () =>
+      resolve({ server, url: `http://127.0.0.1:${server.address().port}` }),
+    );
+  });
+}
+
+async function closeHangingServer(server) {
+  // the hanging sockets would keep server.close() waiting forever
+  server.closeAllConnections?.();
+  await new Promise((res) => server.close(res));
 }
 
 // ------------------------------------------------------- spawn helpers
@@ -403,6 +450,168 @@ describe("protocol_admin.mjs cluster guard (behavioral, local RPC stub + canary 
 });
 
 // ========================================================================
+// Behavioral layer — local-validator genesis STRUCTURE (this correction).
+// The loopback exception has no pinned value to compare against, so the
+// genesis ANSWER itself must be structurally valid: the canonical Base58
+// encoding of exactly 32 bytes. Every case below drives the REAL CLI
+// entry point against the local JSON-RPC stub over a real socket; every
+// signer path is a CANARY, so a malformed answer that slips past the
+// guard would show up as ENOENT (the canary path being read) instead of
+// the refusal.
+// ========================================================================
+
+describe("protocol_admin.mjs local genesis structure (behavioral, local RPC stub + canary signer paths)", () => {
+  test("L1. a structurally valid local genesis is ACCEPTED — guard passes and the failure is the EXPECTED next stage (canary signer load)", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: VALID_LOCAL_GENESIS }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "local-pause-authority-next-stage.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    // the guard PASSED and logged the local cluster identity
+    assert.match(r.stdout, /cluster identity: LOCAL REHEARSAL validator/);
+    assert.match(r.stdout, new RegExp(VALID_LOCAL_GENESIS));
+    // execution reached the signer stage, which fails on the canary path
+    assert.match(`${r.stdout}\n${r.stderr}`, /ENOENT|no such file or directory/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0, "no transaction was submitted");
+  });
+
+  test("L2. empty genesis over the wire -> refused BEFORE signer loading", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: "" }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "local-empty-authority-never-read.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /malformed genesis hash/);
+    assert.match(`${r.stdout}\n${r.stderr}`, /Failing closed; nothing was signed or submitted/);
+    assert.doesNotMatch(r.stdout, /cluster identity: LOCAL REHEARSAL/);
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /never-read|ENOENT/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0);
+  });
+
+  test("L3. non-Base58 genesis ('not-a-genesis-hash') over the wire -> refused BEFORE signer loading", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: NOT_BASE58 }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "local-garbage-authority-never-read.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /malformed genesis hash/);
+    assert.match(`${r.stdout}\n${r.stderr}`, new RegExp(NOT_BASE58.slice(0, 10)));
+    assert.doesNotMatch(r.stdout, /cluster identity: LOCAL REHEARSAL/);
+    // the canary signer path was never touched: no ENOENT from a signer load
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /never-read|ENOENT/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0);
+  });
+
+  test("L4. valid Base58 with the WRONG decoded length (33 bytes) over the wire -> refused", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: GENESIS_33_BYTES }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "local-length-authority-never-read.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /malformed genesis hash/);
+    assert.doesNotMatch(r.stdout, /cluster identity: LOCAL REHEARSAL/);
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /never-read|ENOENT/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0);
+  });
+
+  test("L5. malformed NON-STRING response (JSON-RPC result null) over the wire -> refused", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: null }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "local-null-authority-never-read.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /malformed genesis hash/);
+    assert.doesNotMatch(r.stdout, /cluster identity: LOCAL REHEARSAL/);
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /never-read|ENOENT/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0);
+  });
+
+  test("L6. --allow-local-validator=false does NOT activate local mode: the loopback stub is still held to the Devnet pin", async () => {
+    await server.close();
+    ({ server, port } = await startRpcServer({ genesisHash: VALID_LOCAL_GENESIS }));
+    url = `http://127.0.0.1:${port}`;
+    const canary = join(SBX, "flag-eq-false-never-read.json");
+    const r = await spawnAdmin([
+      "pause",
+      "--allow-local-validator=false",
+      "--url",
+      url,
+      "--authority",
+      canary,
+      "--program",
+      "scanner",
+      "--state",
+      "true",
+    ]);
+    assert.notEqual(r.code, 0);
+    assert.match(`${r.stdout}\n${r.stderr}`, /NOT Solana Devnet/);
+    assert.doesNotMatch(r.stdout, /cluster identity: LOCAL REHEARSAL/);
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /never-read|ENOENT/i);
+    assert.equal((r.stdout.match(/tx /g) ?? []).length, 0);
+  });
+});
+
+// ========================================================================
 // Unit layer — guard decision table with an INJECTED genesis fetcher
 // (explicitly mocked; no network). Complements the behavioral suite.
 // ========================================================================
@@ -458,7 +667,7 @@ describe("assertClusterIdentity decision table (unit, MOCKED genesis fetch)", ()
   test("U5. approved loopback + explicit local opt-in -> mode local (temporary authority path)", async () => {
     const cluster = await assertClusterIdentity(
       { url: "http://127.0.0.1:8899", "allow-local-validator": true },
-      { getGenesisHash: async () => "LocalValidatorGenesis11111111111111111111111" },
+      { getGenesisHash: async () => VALID_LOCAL_GENESIS },
     );
     assert.equal(cluster.mode, "local");
   });
@@ -477,7 +686,7 @@ describe("assertClusterIdentity decision table (unit, MOCKED genesis fetch)", ()
     await assert.rejects(
       assertClusterIdentity(
         { url: "http://127.0.0.1:8899" },
-        { getGenesisHash: async () => "LocalValidatorGenesis11111111111111111111111" },
+        { getGenesisHash: async () => VALID_LOCAL_GENESIS },
       ),
       /NOT Solana Devnet/,
     );
@@ -498,6 +707,77 @@ describe("assertClusterIdentity decision table (unit, MOCKED genesis fetch)", ()
       assertClusterIdentity({}, { getGenesisHash: okFetch }),
       /missing required --url/,
     );
+  });
+});
+
+// ========================================================================
+// Unit layer — local-validator genesis STRUCTURE with an INJECTED genesis
+// fetcher (explicitly MOCKED; no network). This pins the local branch's
+// structural decision table (canonical Base58 of exactly 32 bytes) — the
+// complement of the behavioral battery above, not a replacement for it.
+// ========================================================================
+
+describe("local-validator genesis structure (unit, MOCKED genesis fetch)", () => {
+  const localArgs = { url: "http://127.0.0.1:8899", "allow-local-validator": true };
+
+  test("U17. structurally valid genesis -> local mode accepted", async () => {
+    const cluster = await assertClusterIdentity(localArgs, {
+      getGenesisHash: async () => VALID_LOCAL_GENESIS,
+    });
+    assert.equal(cluster.mode, "local");
+    assert.equal(cluster.genesisHash, VALID_LOCAL_GENESIS);
+  });
+
+  test("U18. empty genesis -> refused", async () => {
+    await assert.rejects(
+      assertClusterIdentity(localArgs, { getGenesisHash: async () => "" }),
+      /malformed genesis hash/,
+    );
+  });
+
+  test("U19. non-Base58 garbage (the review's 'not-a-genesis-hash') -> refused", async () => {
+    await assert.rejects(
+      assertClusterIdentity(localArgs, { getGenesisHash: async () => NOT_BASE58 }),
+      /malformed genesis hash/,
+    );
+  });
+
+  test("U20. valid Base58 that decodes to 31 bytes -> refused", async () => {
+    await assert.rejects(
+      assertClusterIdentity(localArgs, { getGenesisHash: async () => GENESIS_31_BYTES }),
+      /malformed genesis hash/,
+    );
+  });
+
+  test("U21. valid canonical Base58 that decodes to 33 bytes -> refused", async () => {
+    await assert.rejects(
+      assertClusterIdentity(localArgs, { getGenesisHash: async () => GENESIS_33_BYTES }),
+      /malformed genesis hash/,
+    );
+  });
+
+  test("U22. non-string responses (null / undefined / number) -> refused", async () => {
+    for (const junk of [null, undefined, 12345]) {
+      await assert.rejects(
+        assertClusterIdentity(localArgs, { getGenesisHash: async () => junk }),
+        /malformed genesis hash/,
+      );
+    }
+  });
+
+  test("U23. isCanonicalBase58Genesis32 pure decision table", () => {
+    // structurally valid spellings (canonical Base58, exactly 32 bytes)
+    assert.equal(isCanonicalBase58Genesis32(VALID_LOCAL_GENESIS), true);
+    assert.equal(isCanonicalBase58Genesis32(DEVNET_GENESIS_HASH), true);
+    assert.equal(isCanonicalBase58Genesis32(REAL_MAINNET_GENESIS), true);
+    // structurally impossible answers
+    assert.equal(isCanonicalBase58Genesis32(""), false);
+    assert.equal(isCanonicalBase58Genesis32(NOT_BASE58), false);
+    assert.equal(isCanonicalBase58Genesis32(GENESIS_31_BYTES), false);
+    assert.equal(isCanonicalBase58Genesis32(GENESIS_33_BYTES), false);
+    assert.equal(isCanonicalBase58Genesis32(null), false);
+    assert.equal(isCanonicalBase58Genesis32(undefined), false);
+    assert.equal(isCanonicalBase58Genesis32(12345), false);
   });
 });
 
@@ -565,5 +845,88 @@ describe("governance authority parsing + pinning (unit)", () => {
       () => parseExplicitAuthority({ authority: "0OIl0OIl0OIl0OIl0OIl0OIl0OIl0OIl" }),
       /malformed --authority/,
     );
+  });
+});
+
+// ========================================================================
+// Genesis RPC timeout (this correction): a genesis request that NEVER
+// resolves must fail closed, and the failure must not reach signer
+// loading or transaction construction. Deterministic by construction:
+//
+//   - T0 pins the PRODUCTION duration (30_000 ms) by source inspection —
+//     the suite must not be able to weaken it, and there is no env var
+//     override to bypass it;
+//   - T1/T2 pin the isolated withTimeout helper directly;
+//   - T3/T4 use the REAL rpcGetGenesisHash (real Connection, real HTTP
+//     fetch) against a socket that never answers. The request cannot
+//     settle on its own, so the ONLY way the promise ends is the timeout
+//     firing — a SHORT duration is injected PER CALL to keep the suite
+//     fast (an option the guard's own options bag already supports for
+//     the genesis fetcher); the production default stays 30s.
+//
+// T4 drives the REAL guard end to end in-process: the refusal text must
+// carry the timeout diagnostic and the canary signer path must never be
+// touched. This is a unit-level composition of real production pieces —
+// the full-CLI behavioral coverage of every OTHER refusal is above.
+// ========================================================================
+
+describe("genesis RPC timeout fails closed (real fetch path, injected duration)", () => {
+  test("T0. the production timeout is unchanged: 30_000 ms, no environment override", () => {
+    const src = readFileSync(ADMIN, "utf8");
+    assert.match(src, /const GENESIS_RPC_TIMEOUT_MS = 30_000;/);
+    assert.doesNotMatch(src, /process\.env\.[A-Z_]*TIMEOUT/i);
+  });
+
+  test("T1. withTimeout (isolated helper): a never-resolving promise rejects with the labeled error", async () => {
+    await assert.rejects(
+      withTimeout(new Promise(() => {}), 25, "probe-op"),
+      /probe-op timed out after 25ms/,
+    );
+  });
+
+  test("T2. withTimeout: a fast success passes through without waiting", async () => {
+    const v = await withTimeout(Promise.resolve("genesis-ok"), 60_000, "probe-op");
+    assert.equal(v, "genesis-ok");
+  });
+
+  test("T3. rpcGetGenesisHash: a genesis request that never resolves fails closed at the injected duration", async () => {
+    const { server: hang, url: hangUrl } = await startHangingServer();
+    try {
+      const started = Date.now();
+      await assert.rejects(rpcGetGenesisHash(hangUrl, 50), /getGenesisHash timed out after 50ms/);
+      assert.ok(
+        Date.now() - started < 10_000,
+        "the timeout fired promptly — the suite never waits out the production 30s",
+      );
+    } finally {
+      await closeHangingServer(hang);
+    }
+  });
+
+  test("T4. guard-level: a timed-out genesis is a refusal BEFORE any signer load (canary untouched)", async () => {
+    const { server: hang, url: hangUrl } = await startHangingServer();
+    try {
+      const canary = join(SBX, "timeout-authority-never-read.json");
+      await assert.rejects(
+        assertClusterIdentity(
+          { url: hangUrl, "allow-local-validator": true, authority: canary },
+          // the REAL production genesis fetch; ONLY the duration is
+          // injected so the test stays deterministic and fast
+          { getGenesisHash: (u) => rpcGetGenesisHash(u, 50) },
+        ),
+        (err) => {
+          const m = String(err.message ?? err);
+          assert.match(m, /could not be reached for a genesis hash/);
+          assert.match(m, /getGenesisHash timed out after 50ms/);
+          assert.match(m, /Failing closed; nothing was signed or submitted/);
+          // the refusal came from the guard — the canary signer path was
+          // never read and no signer-loading error surfaced
+          assert.doesNotMatch(m, /never-read|ENOENT/i);
+          return true;
+        },
+      );
+    } finally {
+      await closeHangingServer(hang);
+    }
   });
 });
