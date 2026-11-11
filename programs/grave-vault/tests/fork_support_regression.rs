@@ -20,7 +20,10 @@
 //      error other than NotFound — surfaced with path + underlying error);
 //   5. GRAVEYIELD_FORK_HARNESS=1 flips the skip gate: the same condition
 //      that skips in ordinary workspace mode FAILS the test under the
-//      explicit fork harness (scripts/build_fork_harness.sh).
+//      explicit fork harness (scripts/build_fork_harness.sh);
+//   6. a present-but-unreadable ELF (any filesystem error other than
+//      NotFound) fails loudly for required AND optional registrations —
+//      only genuine absence may take the skip path.
 #![allow(deprecated)] // bpf_loader facade re-export (via fork_support)
 
 use std::path::{Path, PathBuf};
@@ -289,4 +292,85 @@ fn harness_flag_flips_skip_into_failure() {
     let result = std::panic::catch_unwind(|| harness_skip("direct probe"));
     assert!(result.is_err(), "harness_skip must panic under the flag");
     std::env::remove_var(HARNESS_ENV);
+}
+
+// ---------------------------------------------------------------------
+// 6: add_elf_from error classification (absence vs broken fixture)
+// ---------------------------------------------------------------------
+
+/// A deterministic, permission-independent filesystem error, mirroring the
+/// manifest test above: the ELF path exists but is a DIRECTORY, so
+/// `std::fs::read` fails with EISDIR on Linux/macOS (an equivalent
+/// non-NotFound error on Windows). This is the reproducible stand-in for
+/// "the fixture is there but the fixture state is broken" — no chmod, so
+/// it behaves identically when CI runs as root.
+fn assert_unreadable_elf_fails_loudly(required: bool) {
+    let tag = if required {
+        "unreadable-required-elf"
+    } else {
+        "unreadable-optional-elf"
+    };
+    let scratch = ScratchDir::new(tag);
+    std::fs::create_dir(scratch.path().join("broken_program.so"))
+        .expect("elf-as-directory must be creatable");
+
+    let mut pt = solana_program_test::ProgramTest::default();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        add_elf_from(
+            scratch.path(),
+            &mut pt,
+            "broken_program.so",
+            Pubkey::new_unique(),
+            required,
+        )
+    }));
+    match result {
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(
+                msg.contains("FORK-FIXTURE BROKEN"),
+                "an unreadable ELF must fail with the FORK-FIXTURE BROKEN banner, got: {msg}"
+            );
+            assert!(
+                msg.contains("broken_program.so"),
+                "the failure must name the ELF path, got: {msg}"
+            );
+            assert!(
+                msg.contains("cannot be read"),
+                "the failure must surface the filesystem error, got: {msg}"
+            );
+        }
+        Ok(true) => panic!("an unreadable ELF must not be reported as registered"),
+        Ok(false) => panic!(
+            "an unreadable ELF must not masquerade as ABSENT ({}) — only ErrorKind::NotFound \
+             means absence; returning false would hand the caller a legitimate skip",
+            if required {
+                "workspace skip"
+            } else {
+                "silent optional skip"
+            }
+        ),
+    }
+}
+
+#[test]
+fn unreadable_required_elf_fails_loudly_and_is_not_missing() {
+    // The pre-fix ambiguity: ANY read error printed
+    // "FORK-FIXTURE MISSING (required)" and returned false, which the
+    // caller legitimately maps to the documented workspace skip — a broken
+    // fixture state could therefore silence a whole suite. It must panic
+    // instead.
+    assert_unreadable_elf_fails_loudly(true);
+}
+
+#[test]
+fn unreadable_optional_elf_fails_loudly_and_is_not_absent() {
+    // Same principle for optional fixtures: genuine absence may be
+    // skipped, but an existing unreadable fixture must not be silently
+    // treated as absent.
+    assert_unreadable_elf_fails_loudly(false);
 }

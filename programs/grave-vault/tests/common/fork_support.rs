@@ -21,6 +21,10 @@
 //     manifest (present but unparseable) and a present-but-UNREADABLE
 //     manifest (any filesystem error other than NotFound) are broken local
 //     fixture states, not absence — both fail loudly in both workflows.
+//     The same classification applies to program ELFs in `add_elf_from`:
+//     only NotFound means absence there too — an existing-but-unreadable
+//     ELF (EISDIR, EACCES, EIO, ...) is a broken fixture state and fails
+//     loudly for required AND optional registrations alike.
 //
 //   Workflow B — explicit fork-harness testing (`scripts/build_fork_harness.sh`):
 //     The script exports GRAVEYIELD_FORK_HARNESS=1 and verifies every
@@ -140,11 +144,13 @@ pub fn load_manifest_from(dir: &Path) -> Option<Value> {
 
 /// Register a fixture ELF as an executable program account under `id`.
 ///
-/// Returns true IFF the ELF was read and registered. A missing file is
-/// never reported as success: it prints one explicit line per registration
-/// (distinguishing required from optional) and returns false. The CALLER
-/// decides between skip and failure via `skip_or_fail!` — this function
-/// only refuses to fabricate a success.
+/// Returns true IFF the ELF was read and registered. A genuinely ABSENT
+/// file (NotFound) is never reported as success: it prints one explicit
+/// line per registration (distinguishing required from optional) and
+/// returns false. The CALLER decides between skip and failure via
+/// `skip_or_fail!` — this function only refuses to fabricate a success.
+/// A present-but-unreadable file is NOT absence: it fails loudly (see
+/// `add_elf_from`).
 pub fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
     add_elf_from(&fixtures_dir(), pt, file, id, required)
 }
@@ -152,6 +158,14 @@ pub fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> 
 /// `add_elf` against an explicit directory (injection seam for the
 /// regression tests). Same registration shape the suites always used
 /// (bpf_loader-owned executable account).
+///
+/// Error classification (do not weaken — pinned by fork_support_regression):
+///   - `ErrorKind::NotFound` only: the file is genuinely absent — print the
+///     required/optional line and return false (the caller decides skip vs
+///     fail via `skip_or_fail!`);
+///   - any other filesystem error (EISDIR, EACCES, EIO, ...): loud panic
+///     with path + underlying error, for required AND optional fixtures —
+///     a present-but-unreadable fixture must never masquerade as absent.
 pub fn add_elf_from(
     dir: &Path,
     pt: &mut ProgramTest,
@@ -159,29 +173,35 @@ pub fn add_elf_from(
     id: Pubkey,
     required: bool,
 ) -> bool {
-    match std::fs::read(dir.join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
+    let path = dir.join(file);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if required {
                 eprintln!("FORK-FIXTURE MISSING (required): {file} ({e})");
             } else {
                 eprintln!("SKIP: optional fixture {file} absent ({e})");
             }
-            false
+            return false;
         }
-    }
+        Err(e) => panic!(
+            "FORK-FIXTURE BROKEN: {} cannot be read: {e} — a present-but-unreadable fixture \
+             must never masquerade as absent; only ErrorKind::NotFound means absence. Fix the \
+             fixture (its mount, permissions, or the file itself) before running the fork suites",
+            path.display()
+        ),
+    };
+    pt.add_account(
+        id,
+        Account {
+            lamports: 1,
+            data: bytes,
+            owner: bpf_loader::id(),
+            executable: true,
+            rent_epoch: u64::MAX,
+        },
+    );
+    true
 }
 
 /// Registers EVERY required ELF and returns false if ANY of them is
