@@ -107,7 +107,11 @@ const bytes = (n) => Buffer.alloc(n, 1);
       ...Object.fromEntries(BUILT.map((n) => [n, bytes(1024)])),
     });
   });
-  expect("healthy set (0-byte vault signers + orientation) exits 0", code === 0, `code=${code} ${out}`);
+  expect(
+    "healthy set (0-byte vault signers + orientation) exits 0",
+    code === 0,
+    `code=${code} ${out}`,
+  );
   expect("healthy set prints prerequisites OK", out.includes("prerequisites OK"), out);
 }
 
@@ -135,7 +139,11 @@ const bytes = (n) => Buffer.alloc(n, 1);
     });
   });
   expect("size drift exits 1", code === 1, `code=${code} ${out}`);
-  expect("size drift reported with both sizes", out.includes("size 100, manifest data_len 752"), out);
+  expect(
+    "size drift reported with both sizes",
+    out.includes("size 100, manifest data_len 752"),
+    out,
+  );
 }
 
 // ---- scenario d: no data_len recorded + empty file (legacy fallback) -------
@@ -192,7 +200,11 @@ const bytes = (n) => Buffer.alloc(n, 1);
     });
   });
   expect("empty built ELF exits 1", code === 1, `code=${code} ${out}`);
-  expect("empty built ELF reported", out.includes("jupiter_v6_stub.so (empty — no data_len recorded"), out);
+  expect(
+    "empty built ELF reported",
+    out.includes("jupiter_v6_stub.so (empty — no data_len recorded"),
+    out,
+  );
 }
 
 // ---- scenario h: fetcher data_len injection loop (mirrored verbatim) -------
@@ -216,10 +228,26 @@ const bytes = (n) => Buffer.alloc(n, 1);
     }
     manifest.orientation_pool = orientationSection;
   }
-  expect("pool-1 data_len recorded", manifest.accounts.pool.data_len === 752, JSON.stringify(manifest.accounts.pool));
-  expect("pool-1 zero-length vault signer data_len recorded", manifest.accounts.vault_signer.data_len === 0, JSON.stringify(manifest.accounts.vault_signer));
-  expect("orientation data_len recorded", manifest.orientation_pool.accounts.pool.data_len === 752, JSON.stringify(manifest.orientation_pool.accounts.pool));
-  expect("orientation vault signer data_len recorded", manifest.orientation_pool.accounts.vault_signer.data_len === 0, JSON.stringify(manifest.orientation_pool.accounts.vault_signer));
+  expect(
+    "pool-1 data_len recorded",
+    manifest.accounts.pool.data_len === 752,
+    JSON.stringify(manifest.accounts.pool),
+  );
+  expect(
+    "pool-1 zero-length vault signer data_len recorded",
+    manifest.accounts.vault_signer.data_len === 0,
+    JSON.stringify(manifest.accounts.vault_signer),
+  );
+  expect(
+    "orientation data_len recorded",
+    manifest.orientation_pool.accounts.pool.data_len === 752,
+    JSON.stringify(manifest.orientation_pool.accounts.pool),
+  );
+  expect(
+    "orientation vault signer data_len recorded",
+    manifest.orientation_pool.accounts.vault_signer.data_len === 0,
+    JSON.stringify(manifest.orientation_pool.accounts.vault_signer),
+  );
 }
 
 rmSync(base, { recursive: true, force: true });
