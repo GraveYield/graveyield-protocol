@@ -158,12 +158,16 @@ jobs:
   anchor-build:
     name: anchor build
     runs-on: ubuntu-latest
-    # CI-hang guard (run 42460376811): the healthy job completes in ~5 min.
-    # Without an explicit cap, a hung process consumed GitHub's default
-    # 360-minute job window before anyone could cancel it. 45 min is ~9x
-    # headroom and still bounds the blast radius of ANY future hang
-    # (command-level or runner-level) to well under an hour.
-    timeout-minutes: 45
+    # CI-hang guard (run 42460376811): the healthy job completes in ~5 min
+    # warm (4m19s on run 43031593750) and ~20-25 min from a cold toolchain
+    # cache. Without an explicit cap, a hung process consumed GitHub's
+    # default 360-minute job window before anyone could cancel it. The cap
+    # is 75 min: ~3x the cold path, with the window above the old 45
+    # reserved for the bounded 40-min apt DNS-outage retry budget below
+    # (2026-11-11 incidents — see "Install system libraries"). Any hang is
+    # still hard-bounded; the extra ceiling exists so a prolonged
+    # runner-side outage can be waited out instead of failing the job.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
@@ -213,35 +217,60 @@ jobs:
       - name: Install system libraries for anchor-cli build
         run: |
           set -euo pipefail
-          # Two live incidents on 2026-11-11, both runner-side (not repo
+          # Three live incidents on 2026-11-11, all runner-side (not repo
           # failures): run 43036634800 — the runner's default apt mirror
           # (azure.archive.ubuntu.com) failed DNS for ~6 straight minutes,
           # so the single-shot apt-get exited 100; run 43043702834 — the
-          # same mirror stayed unreachable for the ENTIRE 45-minute job
-          # budget while the retry loop kept grinding (attempt banners are
-          # visible in that job's annotations). Strategy, in order:
-          #   1. bounded fail-closed retries of the refresh+install pair
-          #      with escalating backoff + apt's own per-fetch retries;
-          #   2. after the first full attempt fails, retry against the
+          # same mirror stayed unreachable for the ENTIRE old 45-minute job
+          # budget while the retry loop kept grinding; run 43053088751 — a
+          # runner-side DNS outage kept every ubuntu.com hostname
+          # unresolvable for ~31 minutes, outlasting the old 6-attempt
+          # escalation loop in this job AND in fork-harness.yml. Strategy:
+          #   1. attempt 1 uses the runner's default mirror; after it
+          #      loses a full attempt, later attempts go through the
           #      CANONICAL mirrors (archive.ubuntu.com / security.ubuntu.com
           #      — Fastly-CDN backed, independent of the regional mirror)
           #      via a standalone temporary source list; the runner's own
           #      apt configuration is never mutated. The codename comes
           #      from /etc/os-release, so the fallback survives runner
           #      image migrations (e.g. ubuntu-latest -> Ubuntu 26).
-          # Exhaustion still fails the job (fail-closed): a missing
-          # libudev-dev must never be silently masked further down.
+          #   2. between attempts the step waits out dead-DNS windows with
+          #      cheap resolver probes (a failed getent costs seconds; a
+          #      failed apt-get round burns ~5-6 minutes inside its own
+          #      fetch timeouts), so a long outage is outlasted by probing,
+          #      not by grinding apt against a dead resolver.
+          #   3. the whole step runs under a single 40-minute wall-clock
+          #      budget. Exhaustion still fails the job (fail-closed): a
+          #      missing libudev-dev must never be silently masked further
+          #      down.
+          APT_RETRY_BUDGET_SECONDS="${APT_RETRY_BUDGET_SECONDS:-2400}"   # 40 min default; job timeout is 75 min
+          DEADLINE=$((SECONDS + APT_RETRY_BUDGET_SECONDS))
+          # Probe the resolver directly: a failed getent costs seconds,
+          # while a failed apt-get round burns ~5-6 minutes inside its own
+          # fetch timeouts. Returns 0 as soon as any apt mirror hostname
+          # resolves again, 1 if the budget expires while DNS is dead.
+          apt_wait_for_dns() {
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
+              for host in azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com; do
+                if getent hosts "$host" >/dev/null 2>&1; then
+                  echo "::notice::DNS probe: ${host} resolved (t+${SECONDS}s); retrying apt"
+                  return 0
+                fi
+              done
+              sleep 15
+            done
+            return 1
+          }
           APT_SRC_OPTS=()
-          for attempt in 1 2 3 4 5 6; do
-            echo "::notice::apt refresh+install attempt ${attempt}/6"
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            echo "::notice::apt refresh+install attempt ${attempt} (t+${SECONDS}s of ${APT_RETRY_BUDGET_SECONDS}s budget)"
             if sudo apt-get "${APT_SRC_OPTS[@]}" -o Acquire::Retries=3 update \
               && sudo apt-get "${APT_SRC_OPTS[@]}" -o Acquire::Retries=3 install -y --no-install-recommends libudev-dev libhidapi-dev
             then
+              echo "::notice::apt refresh+install succeeded on attempt ${attempt} (t+${SECONDS}s)"
               break
-            fi
-            if [ "$attempt" = 6 ]; then
-              echo "::error::apt refresh+install failed after 6 attempts — Ubuntu mirrors stayed unreachable (DNS/fetch transient); failing the job"
-              exit 1
             fi
             if [ "$attempt" = 1 ]; then
               # The default mirror lost a full attempt: route later
@@ -255,10 +284,21 @@ jobs:
                 > "$CANONICAL_SOURCES"
               APT_SRC_OPTS=(-o "Dir::Etc::sourcelist=$CANONICAL_SOURCES" -o Dir::Etc::sourceparts=-)
               echo "::warning::default apt mirror failed a full attempt; retrying against canonical archive.ubuntu.com (runner apt config untouched)"
-            else
-              echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying in $((attempt * 20))s"
             fi
-            sleep "$((attempt * 20))"
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
+              exit 1
+            fi
+            if ! apt_wait_for_dns; then
+              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — DNS/mirror outage outlasted the ${APT_RETRY_BUDGET_SECONDS}s retry budget; failing the job"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
+              exit 1
+            fi
+            echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying"
+            sleep 20
           done
       # anchor-cli 1.2.2's lockfile pins solana-sbpf 0.23.0, whose
       # aligned_memory.rs uses the UNSTABLE `Layout::dangling_ptr` core API
