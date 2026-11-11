@@ -50,21 +50,35 @@ node scripts/fetch_v4_fork_fixtures.mjs
 
 echo "==> [6/7] verifying harness prerequisites (fail-closed)"
 # The explicit fork workflow must never reach the suites with an incomplete
-# fixture set: every `file` reference in the manifest plus the three locally
-# built ELFs must exist and be non-empty. A missing orientation_pool is a
-# legitimately optional fetcher outcome — warned, not fatal.
+# fixture set. Every `file` reference in the manifest is checked BYTE-EXACTLY
+# against the data_len the fetcher recorded for that account: a zero-length
+# account fixture is legitimate (a vault-signer PDA carries lamports but no
+# on-chain data, and an unfunded PDA is faithfully recorded as an empty
+# system account), but any size drift means a truncated or stale file.
+# Entries without a data_len — and the three locally built ELFs — must be
+# non-empty. A missing orientation_pool is a legitimately optional fetcher
+# outcome — warned, not fatal. Regression scenarios for this verifier:
+# scripts/build_fork_harness_verifier_test.mjs.
 node --input-type=module <<'VERIFY'
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const FIXTURES = "programs/grave-vault/tests/fixtures";
 const BUILT = ["grave_scanner.so", "grave_vault.so", "jupiter_v6_stub.so"];
-const missing = [];
-const check = (name) => {
+const problems = [];
+const check = (name, expectedLen) => {
+  let size = null;
   try {
-    if (statSync(join(FIXTURES, name)).size === 0) missing.push(`${name} (empty)`);
+    size = statSync(join(FIXTURES, name)).size;
   } catch {
-    missing.push(name);
+    problems.push(`${name} (missing)`);
+    return;
+  }
+  if (typeof expectedLen === "number") {
+    if (size !== expectedLen)
+      problems.push(`${name} (size ${size}, manifest data_len ${expectedLen})`);
+  } else if (size === 0) {
+    problems.push(`${name} (empty — no data_len recorded, non-empty required)`);
   }
 };
 
@@ -78,24 +92,26 @@ try {
 }
 
 // Every `file` reference anywhere in the manifest (pool 1, orientation
-// pool, parsed fields) must resolve to a non-empty fixture on disk.
+// pool) must resolve to a fixture on disk whose size matches the recorded
+// data_len byte-for-byte (or be non-empty when no data_len is recorded).
 const walk = (node) => {
   if (Array.isArray(node)) {
     for (const item of node) walk(item);
     return;
   }
   if (node && typeof node === "object") {
-    if (typeof node.file === "string") check(node.file);
+    if (typeof node.file === "string")
+      check(node.file, typeof node.data_len === "number" ? node.data_len : undefined);
     for (const value of Object.values(node)) walk(value);
   }
 };
 walk(manifest);
 for (const name of BUILT) check(name);
 
-if (missing.length > 0) {
+if (problems.length > 0) {
   console.error(
-    `FAIL: fork-harness prerequisites incomplete — missing/empty fixture(s):\n` +
-      missing.map((m) => `  - ${m}`).join("\n") +
+    `FAIL: fork-harness prerequisites incomplete — missing/corrupt fixture(s):\n` +
+      problems.map((m) => `  - ${m}`).join("\n") +
       `\nRe-run this script (or scripts/fetch_v4_fork_fixtures.mjs) before running the suites.`
   );
   process.exit(1);
@@ -108,7 +124,7 @@ if (!manifest.orientation_pool) {
       `inverted-orientation test will SKIP (loudly) and the other suites are unaffected.`
   );
 }
-console.log(`prerequisites OK: every manifest-referenced fixture + ${BUILT.length} built ELFs present`);
+console.log(`prerequisites OK: every manifest-referenced fixture matches its recorded data_len + ${BUILT.length} built ELFs present`);
 VERIFY
 
 echo "==> [7/7] running all seven fork suites (GRAVEYIELD_FORK_HARNESS=1: missing required fixtures FAIL, never skip)"

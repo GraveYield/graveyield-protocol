@@ -724,7 +724,21 @@ async function main() {
     writeFileSync(join(OUT_DIR, name), data);
     console.log(`  wrote ${name} (${data.length} bytes)`);
   }
-  if (orientationSection) manifest.orientation_pool = orientationSection;
+  // Record the exact fetched byte length of every account fixture. The
+  // harness verifier (build_fork_harness.sh step [6/7]) checks each file
+  // against data_len instead of requiring non-empty content: a vault-signer
+  // PDA legitimately carries zero bytes of on-chain data (lamports only),
+  // and an unfunded PDA is faithfully recorded as an empty system account —
+  // while a truncated or stale download must still fail loudly.
+  for (const entry of Object.values(manifest.accounts)) {
+    entry.data_len = files[entry.file].length;
+  }
+  if (orientationSection) {
+    for (const entry of Object.values(orientationSection.accounts)) {
+      entry.data_len = orientationFiles[entry.file].length;
+    }
+    manifest.orientation_pool = orientationSection;
+  }
   writeFileSync(join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
   console.log(`\nmanifest.json written — ${callCount} RPC calls total`);
   console.log(`POOL USED: ${pool.pubkey} (baseIsCoinSide=${parsed.baseIsCoinSide})`);
