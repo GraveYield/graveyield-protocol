@@ -18,8 +18,9 @@
 //     No fork fixtures are required, no network is touched. A suite whose
 //     fork fixtures are genuinely absent SKIPS with a loud `SKIP:` banner
 //     and a normal return (documented fixture-less behavior). A CORRUPT
-//     manifest (present but unparseable) is a broken local fixture state,
-//     not absence — it fails loudly in both workflows.
+//     manifest (present but unparseable) and a present-but-UNREADABLE
+//     manifest (any filesystem error other than NotFound) are broken local
+//     fixture states, not absence — both fail loudly in both workflows.
 //
 //   Workflow B — explicit fork-harness testing (`scripts/build_fork_harness.sh`):
 //     The script exports GRAVEYIELD_FORK_HARNESS=1 and verifies every
@@ -94,23 +95,39 @@ pub fn fixtures_dir() -> PathBuf {
 /// A present-but-unparseable manifest is NEVER mapped to None: a truncated
 /// or hand-edited manifest.json must fail loudly in both workflows instead
 /// of masquerading as "fixtures absent" and silently skipping the suite.
+/// The same holds for a present-but-unreadable manifest: `ErrorKind::
+/// NotFound` alone means absence; any other filesystem error (EISDIR,
+/// EACCES, EIO, ...) is a broken fixture state and panics with the path
+/// and the underlying error.
 pub fn load_manifest() -> Option<Value> {
     load_manifest_from(&fixtures_dir())
 }
 
 /// `load_manifest` against an explicit directory (injection seam for the
 /// regression tests).
+///
+/// Error classification (do not weaken — pinned by fork_support_regression):
+///   - `ErrorKind::NotFound` only: None (genuinely absent fixtures);
+///   - any other filesystem error: loud panic with path + underlying error;
+///   - invalid JSON: loud "is corrupt" panic (never absence);
+///   - valid JSON: Some(manifest).
 pub fn load_manifest_from(dir: &Path) -> Option<Value> {
     let path = dir.join("manifest.json");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        Err(_) => {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             eprintln!(
                 "SKIP: fork fixtures not found at {} — run scripts/build_fork_harness.sh (builds the program ELFs and fetches the mainnet fixtures)",
                 path.display()
             );
             return None;
         }
+        Err(e) => panic!(
+            "FORK-FIXTURE BROKEN: {} cannot be read: {e} — a present-but-unreadable fixture state \
+             must never masquerade as \"fixtures absent\"; fix the manifest (its mount, \
+             permissions, or the file itself) before running the fork suites",
+            path.display()
+        ),
     };
     match serde_json::from_str(&text) {
         Ok(v) => Some(v),

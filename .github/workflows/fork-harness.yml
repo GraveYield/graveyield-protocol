@@ -37,6 +37,13 @@
 # (several MB, intentionally gitignored), then run all seven suites.
 # Fixture fetches hit the public mainnet RPC; override with the
 # FORK_FIXTURES_RPC_URL secret if the default endpoint rate-limits.
+#
+# A cheap regression gate runs BEFORE that heavy work so a broken helper
+# fails early: programs/grave-vault/tests/fork_support_regression.rs pins
+# the suites' skip-integrity contract, and
+# scripts/build_fork_harness_verifier_test.mjs pins the fail-closed
+# fixture-verifier scenarios. A failure in either aborts the job before
+# any build-sbf or fixture fetching is paid for.
 
 name: fork-harness
 
@@ -152,6 +159,16 @@ jobs:
           tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
           "$CACHE_DEST/rust/bin/cargo" --version
           "$CACHE_DEST/rust/bin/rustc" --version
+      # Cheap regression gate before the expensive harness work: the
+      # fork_support skip-integrity contract (host-built, no fixtures or
+      # network needed — absence handling uses isolated temp dirs) and the
+      # harness verifier's fail-closed scenarios. Either failure aborts the
+      # job here, before any cargo-build-sbf or fixture fetching is paid.
+      - name: Regression gate (fork_support helper + harness verifier)
+        run: |
+          set -euo pipefail
+          cargo test -p grave-vault --test fork_support_regression
+          node scripts/build_fork_harness_verifier_test.mjs
       - name: Build harness, fetch fixtures, run all fork suites
         env:
           # Public mainnet RPC by default; point the optional repo secret

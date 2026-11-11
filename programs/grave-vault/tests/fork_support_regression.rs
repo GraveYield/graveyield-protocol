@@ -16,7 +16,8 @@
 //   3. a missing optional ELF stays optional (false, no panic);
 //   4. an ABSENT manifest is None (fixture-less workspace skip decision
 //      stays with the caller), but a CORRUPT manifest fails loudly in
-//      both workflows;
+//      both workflows, and so does an UNREADABLE manifest (any filesystem
+//      error other than NotFound — surfaced with path + underlying error);
 //   5. GRAVEYIELD_FORK_HARNESS=1 flips the skip gate: the same condition
 //      that skips in ordinary workspace mode FAILS the test under the
 //      explicit fork harness (scripts/build_fork_harness.sh).
@@ -179,6 +180,45 @@ fn valid_manifest_parses() {
         manifest.get("pool_address").is_some(),
         "the parsed manifest must carry its fields"
     );
+}
+
+/// A deterministic, permission-independent filesystem error: `manifest.json`
+/// exists but is a DIRECTORY, so `read_to_string` fails with EISDIR on
+/// Linux/macOS (an equivalent non-NotFound error on Windows). This is the
+/// reproducible stand-in for "the manifest is there but the fixture state is
+/// broken" — no chmod, so it behaves identically when CI runs as root.
+#[test]
+fn unreadable_manifest_fails_loudly_and_is_not_absence() {
+    let scratch = ScratchDir::new("unreadable-manifest");
+    std::fs::create_dir(scratch.path().join("manifest.json"))
+        .expect("manifest-as-directory must be creatable");
+
+    let result = std::panic::catch_unwind(|| load_manifest_from(scratch.path()));
+    match result {
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(
+                msg.contains("FORK-FIXTURE BROKEN"),
+                "an unreadable manifest must fail with the FORK-FIXTURE BROKEN banner, got: {msg}"
+            );
+            assert!(
+                msg.contains("manifest.json"),
+                "the failure must name the manifest path, got: {msg}"
+            );
+            assert!(
+                msg.contains("cannot be read"),
+                "the failure must surface the filesystem error, got: {msg}"
+            );
+        }
+        Ok(Some(_)) => panic!("an unreadable manifest must not produce a usable manifest"),
+        Ok(None) => panic!(
+            "an unreadable manifest must not masquerade as ABSENT — only ErrorKind::NotFound means absence"
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------
