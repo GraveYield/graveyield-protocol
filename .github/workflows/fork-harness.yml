@@ -153,8 +153,14 @@ jobs:
           # via a standalone temporary source list — the runner's apt
           # config is never mutated — and the remaining outage is waited
           # out with cheap resolver probes instead of multi-minute apt
-          # rounds. The whole step runs under a single wall-clock budget;
-          # exhaustion still fails the job (fail-closed).
+          # rounds. The whole step runs under a single wall-clock budget
+          # that bounds the WAITING between attempts, never a running apt
+          # round (killing apt-get install mid-flight risks an interrupted
+          # dpkg state — a transient must not become permanent); DNS
+          # observed healthy always earns one more attempt, so the
+          # worst-case step ceiling is budget + 20s settle + one apt round,
+          # sized against this job's 120-minute timeout. Exhaustion still
+          # fails the job (fail-closed).
           APT_RETRY_BUDGET_SECONDS="${APT_RETRY_BUDGET_SECONDS:-2400}"   # 40 min default; job timeout is 120 min
           DEADLINE=$((SECONDS + APT_RETRY_BUDGET_SECONDS))
           # Probe the resolver directly: a failed getent costs seconds,
@@ -195,16 +201,16 @@ jobs:
               APT_SRC_OPTS=(-o "Dir::Etc::sourcelist=$CANONICAL_SOURCES" -o Dir::Etc::sourceparts=-)
               echo "::warning::default apt mirror failed a full attempt; retrying against canonical archive.ubuntu.com (runner apt config untouched)"
             fi
+            # Budget bounds the wait below; a gate success (DNS observed
+            # healthy) ALWAYS takes the next attempt, even in the budget's
+            # final seconds — refusing a usable mirror would fail the job
+            # unnecessarily. See the semantics note in the step header.
             if [ "$SECONDS" -ge "$DEADLINE" ]; then
               echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
               exit 1
             fi
             if ! apt_wait_for_dns; then
               echo "::error::apt refresh+install failed after ${attempt} attempt(s) — DNS/mirror outage outlasted the ${APT_RETRY_BUDGET_SECONDS}s retry budget; failing the job"
-              exit 1
-            fi
-            if [ "$SECONDS" -ge "$DEADLINE" ]; then
-              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
               exit 1
             fi
             echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying"

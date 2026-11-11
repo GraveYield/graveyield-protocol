@@ -164,9 +164,10 @@ jobs:
     # default 360-minute job window before anyone could cancel it. The cap
     # is 75 min: ~3x the cold path, with the window above the old 45
     # reserved for the bounded 40-min apt DNS-outage retry budget below
-    # (2026-11-11 incidents — see "Install system libraries"). Any hang is
-    # still hard-bounded; the extra ceiling exists so a prolonged
-    # runner-side outage can be waited out instead of failing the job.
+    # plus its one-apt-round overshoot (2026-11-11 incidents — see
+    # "Install system libraries"). Any hang is still hard-bounded; the
+    # extra ceiling exists so a prolonged runner-side outage can be
+    # waited out instead of failing the job.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -240,9 +241,19 @@ jobs:
           #      fetch timeouts), so a long outage is outlasted by probing,
           #      not by grinding apt against a dead resolver.
           #   3. the whole step runs under a single 40-minute wall-clock
-          #      budget. Exhaustion still fails the job (fail-closed): a
-          #      missing libudev-dev must never be silently masked further
-          #      down.
+          #      budget that bounds the WAITING between attempts, never a
+          #      running apt round: killing apt-get install mid-flight
+          #      risks an interrupted dpkg state, which would turn a
+          #      transient outage into a permanent failure. Exact exit
+          #      paths: budget exhausted before the next wait; resolver
+          #      still dead when the budget expires while probing. DNS
+          #      observed healthy always earns one more attempt, even in
+          #      the budget's final seconds. The worst-case step ceiling
+          #      is therefore budget + 20s settle + one apt round (~6 min,
+          #      apt's own fetch timeouts), which the job-level
+          #      timeout-minutes is sized against. Exhaustion still fails
+          #      the job (fail-closed): a missing libudev-dev must never
+          #      be silently masked further down.
           APT_RETRY_BUDGET_SECONDS="${APT_RETRY_BUDGET_SECONDS:-2400}"   # 40 min default; job timeout is 75 min
           DEADLINE=$((SECONDS + APT_RETRY_BUDGET_SECONDS))
           # Probe the resolver directly: a failed getent costs seconds,
@@ -285,16 +296,16 @@ jobs:
               APT_SRC_OPTS=(-o "Dir::Etc::sourcelist=$CANONICAL_SOURCES" -o Dir::Etc::sourceparts=-)
               echo "::warning::default apt mirror failed a full attempt; retrying against canonical archive.ubuntu.com (runner apt config untouched)"
             fi
+            # Budget bounds the wait below; a gate success (DNS observed
+            # healthy) ALWAYS takes the next attempt, even in the budget's
+            # final seconds — refusing a usable mirror would fail the job
+            # unnecessarily. See the semantics note in the step header.
             if [ "$SECONDS" -ge "$DEADLINE" ]; then
               echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
               exit 1
             fi
             if ! apt_wait_for_dns; then
               echo "::error::apt refresh+install failed after ${attempt} attempt(s) — DNS/mirror outage outlasted the ${APT_RETRY_BUDGET_SECONDS}s retry budget; failing the job"
-              exit 1
-            fi
-            if [ "$SECONDS" -ge "$DEADLINE" ]; then
-              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
               exit 1
             fi
             echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying"
