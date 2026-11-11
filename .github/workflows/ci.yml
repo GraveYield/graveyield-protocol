@@ -212,8 +212,30 @@ jobs:
       # the hidapi system library) before compiling anchor-cli.
       - name: Install system libraries for anchor-cli build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
+          set -euo pipefail
+          # Run 43036634800 (2026-11-11): the runner's apt mirror DNS
+          # (azure.archive.ubuntu.com) failed to resolve for ~6 straight
+          # minutes, so the single-shot apt-get exited 100 — a runner-side
+          # mirror/network transient, not a repo failure. These blips are
+          # self-healing, so retry the refresh+install pair a bounded
+          # number of times with escalating backoff, plus apt's own
+          # per-fetch retries inside each attempt. Exhaustion still fails
+          # the job (fail-closed): a missing libudev-dev must never be
+          # silently masked further down the build.
+          for attempt in 1 2 3 4 5 6; do
+            echo "::notice::apt refresh+install attempt ${attempt}/6"
+            if sudo apt-get -o Acquire::Retries=3 update \
+              && sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends libudev-dev libhidapi-dev
+            then
+              break
+            fi
+            if [ "$attempt" = 6 ]; then
+              echo "::error::apt refresh+install failed after 6 attempts — Ubuntu mirror stayed unreachable (DNS/fetch transient); failing the job"
+              exit 1
+            fi
+            echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying in $((attempt * 20))s"
+            sleep "$((attempt * 20))"
+          done
       # anchor-cli 1.2.2's lockfile pins solana-sbpf 0.23.0, whose
       # aligned_memory.rs uses the UNSTABLE `Layout::dangling_ptr` core API
       # (feature `layout_for_ptr`). The pinned stable host toolchain
