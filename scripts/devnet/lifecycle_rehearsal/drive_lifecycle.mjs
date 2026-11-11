@@ -1905,6 +1905,7 @@ await stage(16, "emergency-control drills via protocol_admin.mjs (scanner + vaul
       [
         adminScript,
         "drill",
+        "--allow-local-validator",
         "--url",
         url,
         "--authority",
