@@ -5,12 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DRIVER = join(
-  HERE,
-  "..",
-  "lifecycle_rehearsal",
-  "drive_lifecycle.mjs",
-);
+const DRIVER = join(HERE, "..", "lifecycle_rehearsal", "drive_lifecycle.mjs");
 
 const source = readFileSync(DRIVER, "utf8");
 const start = source.indexOf("// --- [stage 16]");
