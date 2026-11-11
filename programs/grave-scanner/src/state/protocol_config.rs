@@ -74,3 +74,72 @@ pub struct ProtocolConfig {
 impl ProtocolConfig {
     pub const SEED: &'static [u8] = b"protocol_config";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_layout_is_stable() {
+        let expected_space = 8
+            + 32 // authority
+            + 32 // pending_authority
+            + 8 // pending_authority_eta
+            + 8 // inactivity_seconds
+            + 2 // price_collapse_bps
+            + 8 // min_tvl_lamports
+            + 8 // anchor_staleness_seconds
+            + 8 // lp_burn_dust_threshold
+            + 8 // cert_ttl_seconds
+            + 1 // paused
+            + 32 // activity_oracle
+            + 32 // launch_price_oracle
+            + 1 // bump
+            + 64; // _reserved
+
+        assert_eq!(8 + ProtocolConfig::INIT_SPACE, expected_space);
+        assert_eq!(expected_space, 252);
+    }
+
+    #[test]
+    fn borsh_roundtrip_preserves_config_state() {
+        let cfg = ProtocolConfig {
+            authority: Pubkey::new_from_array([0xA1; 32]),
+            pending_authority: Pubkey::new_from_array([0xA2; 32]),
+            pending_authority_eta: 1_700_000_000,
+            inactivity_seconds: 7_776_000,
+            price_collapse_bps: 9_900,
+            min_tvl_lamports: 500_000_000,
+            anchor_staleness_seconds: 1_209_600,
+            lp_burn_dust_threshold: 1_000,
+            cert_ttl_seconds: 3_600,
+            paused: true,
+            activity_oracle: Pubkey::new_from_array([0xA3; 32]),
+            launch_price_oracle: Pubkey::new_from_array([0xA4; 32]),
+            bump: 254,
+            _reserved: [0xA5; 64],
+        };
+
+        let bytes = borsh::to_vec(&cfg).expect("borsh serialize");
+        let decoded = ProtocolConfig::try_from_slice(&bytes).expect("borsh deserialize");
+
+        assert_eq!(decoded.authority, cfg.authority);
+        assert_eq!(decoded.pending_authority, cfg.pending_authority);
+        assert_eq!(decoded.pending_authority_eta, cfg.pending_authority_eta);
+        assert_eq!(decoded.inactivity_seconds, cfg.inactivity_seconds);
+        assert_eq!(decoded.price_collapse_bps, cfg.price_collapse_bps);
+        assert_eq!(decoded.min_tvl_lamports, cfg.min_tvl_lamports);
+        assert_eq!(
+            decoded.anchor_staleness_seconds,
+            cfg.anchor_staleness_seconds
+        );
+        assert_eq!(decoded.lp_burn_dust_threshold, cfg.lp_burn_dust_threshold);
+        assert_eq!(decoded.cert_ttl_seconds, cfg.cert_ttl_seconds);
+        assert_eq!(decoded.paused, cfg.paused);
+        assert_eq!(decoded.activity_oracle, cfg.activity_oracle);
+        assert_eq!(decoded.launch_price_oracle, cfg.launch_price_oracle);
+        assert_eq!(decoded.bump, cfg.bump);
+        assert_eq!(decoded._reserved, cfg._reserved);
+        assert_eq!(bytes.len(), ProtocolConfig::INIT_SPACE);
+    }
+}
