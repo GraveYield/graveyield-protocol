@@ -70,6 +70,22 @@
 #     time. The v1.57 platform-tools cache (anchor 1.2.2's resolution) is
 #     still seeded — from the hash-verified archive only — so that an
 #     accidental anchor invocation can never resolve unverified bytes.
+#   * BOUNDED CHECKER EXECUTION (fix, PR #95 RCA + PR #98 investigation):
+#     every spawn of the provenance checker runs through
+#     run_ns3_check_provenance.sh — a bounded wrapper that enforces a finite
+#     timeout (300s default) with an explicit termination grace period
+#     (SIGTERM, then SIGKILL after 10s), captures the checker's output to
+#     private temp logs, validates the recorded verdict, and cleans up the
+#     logs on every exit path. Node.js v24.22.2 can deadlock in
+#     process.exit() teardown AFTER the checker has printed its complete
+#     verdict (main thread joins a never-woken V8 platform worker) — an
+#     intermittent process-exit defect, never a provenance-integrity
+#     failure. The wrapper therefore accepts a run whose complete
+#     "PROVENANCE OK" verdict was recorded before bounded termination
+#     fired, and fails closed on: timeout without a verdict, missing or
+#     truncated verdict, explicit verification failure ("^FAIL [" /
+#     "^PROVENANCE FAILED"), and abnormal checker exit. This is the same
+#     "verdict stands" rule CI has enforced since PR #95.
 #   * Program keypair identities are checked against EXPECTED_* constants.
 #     The ELF declare_id! values are independently checked by provenance.
 #     Program keypairs remain at their externally supplied paths; this script
@@ -89,6 +105,10 @@ EXPECTED_VAULT="7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya"
 # consumed by CI — never keep a second copy of the hashes here).
 PROVENANCE_MANIFEST="$DEVNET_DIR/provenance.manifest.json"
 PROVENANCE_CHECKER="$DEVNET_DIR/ns3_check_provenance.mjs"
+# Bounded, fail-closed execution wrapper for the checker (timeout +
+# termination grace + verdict validation + temp-log cleanup — see its
+# header and the BOUNDED CHECKER EXECUTION bullet above).
+PROVENANCE_WRAPPER="$DEVNET_DIR/run_ns3_check_provenance.sh"
 # The single NS-3 identity module — single source of the pinned Devnet
 # genesis hash (also imported by protocol_admin.mjs and
 # verify_ns3_deployment.mjs; never keep a second copy of the value here).
@@ -151,6 +171,17 @@ expected_genesis() {
   ' "$NS3_IDENTITIES"
 }
 
+# Bounded execution of the provenance checker: finite timeout, bounded
+# termination grace (SIGTERM -> SIGKILL), output captured to temp logs that
+# are always cleaned up, verdict validated fail-closed ("PROVENANCE OK"
+# recorded and no failure markers — anything else exits non-zero). The
+# wrapper never changes WHAT is verified; it only guarantees the checker's
+# known teardown hang (Node v24.22.2, PR #95 RCA / PR #98) cannot wedge the
+# deployment flow, without letting a missing verdict pass.
+run_bounded_provenance_check() {
+  "$PROVENANCE_WRAPPER" -- node "$PROVENANCE_CHECKER" "$@"
+}
+
 # The fail-closed provenance gate. Runs on EVERY execution path before any
 # deployment transaction; a non-zero exit aborts the whole script (set -e).
 run_provenance_gate() {
@@ -166,7 +197,7 @@ run_provenance_gate() {
     gate_args+=(--platform-tools-tarball "$PLATFORM_TOOLS_TARBALL")
   fi
   echo "== provenance gate (scripts/devnet/provenance.manifest.json) =="
-  node "$PROVENANCE_CHECKER" "${gate_args[@]}"
+  run_bounded_provenance_check "${gate_args[@]}"
 }
 
 # Pin platform-tools (build paths only) — THE ARCHIVE IS THE ONLY TRUST
@@ -195,7 +226,7 @@ pin_platform_tools() {
   # Pass 1 — a hash-verified archive, one way or another.
   if [[ -f "$archive" ]]; then
     echo "== platform-tools archive re-verification: $archive =="
-    if node "$PROVENANCE_CHECKER" --manifest "$PROVENANCE_MANIFEST" \
+    if run_bounded_provenance_check --manifest "$PROVENANCE_MANIFEST" \
       --platform-tools-tarball "$archive" >/dev/null; then
       echo "platform-tools v$pt_ver archive OK (sha256 $pt_sha)"
     else
@@ -217,7 +248,7 @@ pin_platform_tools() {
       exit 1
     }
     echo "== platform-tools archive verification (against the shared manifest) =="
-    if ! node "$PROVENANCE_CHECKER" --manifest "$PROVENANCE_MANIFEST" \
+    if ! run_bounded_provenance_check --manifest "$PROVENANCE_MANIFEST" \
       --platform-tools-tarball "$tmp"; then
       echo "REFUSING: platform-tools tarball failed the manifest digest check - NOTHING was" >&2
       echo "extracted and nothing will be built; the build toolchain is unproven." >&2

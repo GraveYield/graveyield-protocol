@@ -20,6 +20,7 @@ import {
   mkdirSync,
   writeFileSync,
   copyFileSync,
+  chmodSync,
   symlinkSync,
   rmSync,
   existsSync,
@@ -318,6 +319,10 @@ function makeRepo(sbx) {
   const repo = path.join(sbx, "repo");
   for (const f of [
     "deploy_devnet.sh",
+    // deploy_devnet.sh execs this wrapper DIRECTLY (line: "$PROVENANCE_WRAPPER"
+    // -- node ...), so the sandbox repo must carry it too — and it must be
+    // executable (chmod below) or the deploy gate dies on launch.
+    "run_ns3_check_provenance.sh",
     "ns3_check_provenance.mjs",
     "ns3_verify_elf.mjs",
     "ns3_identities.mjs",
@@ -326,6 +331,14 @@ function makeRepo(sbx) {
     const dest = path.join(repo, "scripts", "devnet", f);
     mkdirSync(path.dirname(dest), { recursive: true });
     copyFileSync(path.join(SCRIPTS_DEVNET, f), dest);
+    // copyFileSync preserves the source mode, but a local checkout may have
+    // lost the exec bit (mode drift). The wrapper is the ONLY file here that
+    // is exec'd directly ("$PROVENANCE_WRAPPER" -- node ...) — make its
+    // direct-exec contract explicit so the sandbox matches a fresh CI
+    // checkout of a 100755 file. Everything else keeps its normal 0644 mode:
+    // deploy_devnet.sh runs under `bash`, and the .mjs modules / package.json
+    // are read by node — none of them gains an exec bit.
+    if (f === "run_ns3_check_provenance.sh") chmodSync(dest, 0o755);
   }
   symlinkSync(
     path.join(SCRIPTS_DEVNET, "node_modules"),
