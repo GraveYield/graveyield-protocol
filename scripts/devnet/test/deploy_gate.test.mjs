@@ -332,9 +332,13 @@ function makeRepo(sbx) {
     mkdirSync(path.dirname(dest), { recursive: true });
     copyFileSync(path.join(SCRIPTS_DEVNET, f), dest);
     // copyFileSync preserves the source mode, but a local checkout may have
-    // lost the exec bit (mode drift); make the direct-exec contract explicit
-    // so the sandbox behavior matches a fresh CI checkout of a 100755 file.
-    chmodSync(dest, 0o755);
+    // lost the exec bit (mode drift). The wrapper is the ONLY file here that
+    // is exec'd directly ("$PROVENANCE_WRAPPER" -- node ...) — make its
+    // direct-exec contract explicit so the sandbox matches a fresh CI
+    // checkout of a 100755 file. Everything else keeps its normal 0644 mode:
+    // deploy_devnet.sh runs under `bash`, and the .mjs modules / package.json
+    // are read by node — none of them gains an exec bit.
+    if (f === "run_ns3_check_provenance.sh") chmodSync(dest, 0o755);
   }
   symlinkSync(
     path.join(SCRIPTS_DEVNET, "node_modules"),
