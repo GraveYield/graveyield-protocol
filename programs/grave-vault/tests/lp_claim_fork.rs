@@ -79,7 +79,6 @@
 // `bpf_loader` remains on the facade but deprecated — hence the allow.
 #![allow(deprecated)] // bpf_loader facade re-export
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountDeserialize;
@@ -98,7 +97,6 @@ use serde_json::Value;
 use solana_program_test::{BanksClient, BanksClientError, ProgramTest};
 use solana_sdk::{
     account::Account,
-    bpf_loader,
     hash::hash,
     instruction::{AccountMeta, Instruction, InstructionError},
     native_token::LAMPORTS_PER_SOL,
@@ -109,6 +107,13 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -152,29 +157,8 @@ const FEE: u64 = 5_000;
 const R_LP: usize = 72;
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn pk(s: &str) -> Pubkey {
     Pubkey::from_str(s).unwrap()
@@ -193,32 +177,6 @@ fn load_real_account(section: &Value, name: &str) -> (Pubkey, Account) {
         rent_epoch: u64::MAX,
     };
     (pk(entry["pubkey"].as_str().unwrap()), account)
-}
-
-/// Register a fixture ELF as an executable program account under `id`.
-/// Returns false (after printing a SKIP reason) when the file is absent.
-fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
-    match std::fs::read(fixtures_dir().join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
-            if required {
-                eprintln!("SKIP: required fixture {file} missing ({e})");
-            }
-            required
-        }
-    }
 }
 
 fn read_u64(data: &[u8], off: usize) -> u64 {
@@ -575,16 +533,21 @@ fn build_genesis(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair) -> O
     pt.set_compute_max_units(1_400_000);
     pt.set_transaction_account_lock_limit(64);
 
-    if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
+    // EVERY required ELF is checked; a genesis with a program silently
+    // absent is never booted (it would fail later with misleading errors).
+    if !fork_support::required_elfs_registered(
+        &mut pt,
+        &[
+            ("grave_vault.so", vault_id()),
+            ("jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID),
+            ("raydium_v4.so", RAYDIUM_V4_PROGRAM_ID),
+            ("spl_token.so", spl_token_id()),
+            ("spl_ata.so", spl_ata_id()),
+            ("serum_dex.so", env1.market_program),
+        ],
+    ) {
         return None;
     }
-    if !add_elf(&mut pt, "jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID, true) {
-        return None;
-    }
-    add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
-    add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
-    add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
-    add_elf(&mut pt, "serum_dex.so", env1.market_program, true);
 
     for name in POOL_ACCOUNTS {
         let (k, a) = load_real_account(&manifest["accounts"], name);
@@ -868,11 +831,12 @@ fn memecoin_reserve(env: &PoolEnv) -> u64 {
 /// Exact dry-run of the withdraw leg (conversion disabled): boots a fresh VM
 /// and reads the post-withdraw pool reserves. The VM is deterministic, so the
 /// real test's withdraw produces byte-identical deltas.
-/// Returns (memecoin_received, wsol_reserve_after, memecoin_reserve_after).
-async fn dry_run_withdraw() -> (u64, u64, u64) {
-    let Some(boot) = build_genesis(u64::MAX, vec![], Keypair::new()) else {
-        return (0, 0, 0);
-    };
+/// Returns None when the fork fixtures are absent — NEVER fabricated
+/// zeroes (a (0, 0, 0) fallback would turn a setup failure into a fake
+/// zero-value measurement downstream).
+/// Returns Some((memecoin_received, wsol_reserve_after, memecoin_reserve_after)).
+async fn dry_run_withdraw() -> Option<(u64, u64, u64)> {
+    let boot = build_genesis(u64::MAX, vec![], Keypair::new())?;
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
     let opts = SalvageOpts {
@@ -899,7 +863,7 @@ async fn dry_run_withdraw() -> (u64, u64, u64) {
     };
     let p_mem = memecoin_reserve(env) - mem_after;
     assert!(p_mem > 0, "dry-run withdraw paid zero memecoin");
-    (p_mem, wsol_after, mem_after)
+    Some((p_mem, wsol_after, mem_after))
 }
 
 /// The pool-implied WSOL conversion of `memecoin_in` at the post-withdraw
@@ -1018,7 +982,9 @@ async fn boot_claim_lifecycle() -> Option<ClaimFork> {
     let custody_account = Pubkey::new_unique();
 
     // ---- full-pipeline salvage economics (dry-run on a disposable VM) ----
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await;
+    // Propagated, not fabricated: a (0, 0, 0) fallback would fake the
+    // measurement and corrupt the submitted floor below.
+    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await?;
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
 
     // ---- genesis: real pool state + the seeded claim side ----
@@ -1198,7 +1164,7 @@ async fn boot_oversubscribed(mut claimants: Vec<(Keypair, u64)>) -> Option<Overs
     let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
     let supply = mint_supply(&lp_mint_acct);
 
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await;
+    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await?;
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
 
     // funded claimant wallets only — no honest snapshot, so no LP ledger
@@ -1262,7 +1228,9 @@ struct OversubFork {
 #[tokio::test]
 async fn claim_journey_wallet_proof_claim_sol() {
     let Some(fork) = boot_claim_lifecycle().await else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let ClaimFork {
         mut client,
@@ -1368,7 +1336,9 @@ fn vault_pause_ix(authority: &Pubkey, paused: bool) -> Instruction {
 #[tokio::test]
 async fn claims_remain_live_during_emergency_pause() {
     let Some(fork) = boot_claim_lifecycle().await else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let ClaimFork {
         mut client,
@@ -1481,9 +1451,10 @@ async fn claims_remain_live_during_emergency_pause() {
 /// which sum to an integer).
 #[tokio::test]
 async fn claim_rounding_residual_dust_within_n_minus_1() {
-    let manifest = match load_manifest() {
-        Some(m) => m,
-        None => return, // fixtures absent: SKIP (same contract as the boot fns)
+    let Some(manifest) = load_manifest() else {
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
     let supply = mint_supply(&lp_mint_acct);
@@ -1496,7 +1467,7 @@ async fn claim_rounding_residual_dust_within_n_minus_1() {
     let whale = Keypair::new(); //  b = S−3
     let claimants = vec![(dust_holder, 1u64), (two_holder, 2u64), (whale, supply - 3)];
     let Some(fork) = boot_oversubscribed(claimants).await else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let OversubFork {
         mut client,
@@ -1602,7 +1573,9 @@ async fn claim_rounding_residual_dust_within_n_minus_1() {
 #[tokio::test]
 async fn invalid_proofs_rejected_with_zero_state_movement() {
     let Some(fork) = boot_claim_lifecycle().await else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let ClaimFork {
         mut client,
@@ -1784,7 +1757,9 @@ async fn invalid_proofs_rejected_with_zero_state_movement() {
 #[tokio::test]
 async fn duplicate_claim_rejected_with_zero_movement() {
     let Some(fork) = boot_claim_lifecycle().await else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let ClaimFork {
         mut client,
@@ -1867,7 +1842,9 @@ async fn overclaim_rejected_at_both_layers() {
     // ---- layer 1: the proof binds the balance ----
     {
         let Some(fork) = boot_claim_lifecycle().await else {
-            return;
+            skip_or_fail!(
+                "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+            );
         };
         let ClaimFork {
             mut client,
@@ -1913,11 +1890,18 @@ async fn overclaim_rejected_at_both_layers() {
     }
 
     // ---- layer 2a: a single holder proven at TWICE the supply ----
-    let manifest = load_manifest().unwrap();
+    // The manifest's existence was already established by layer 1's boot
+    // (which cannot get past a missing manifest), but the load stays honest
+    // instead of `unwrap()`-ing: a missing manifest here skips — loudly in
+    // workspace mode, as a failure under the fork harness — instead of
+    // panicking on an implementation detail.
+    let Some(manifest) = load_manifest() else {
+        skip_or_fail!("fork fixture manifest missing — cannot run oversubscription layers");
+    };
     let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
     let supply = mint_supply(&lp_mint_acct);
     let Some(mut fork) = boot_oversubscribed(vec![(Keypair::new(), 2 * supply)]).await else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let (holder, balance) = {
         let (h, b) = &fork.claimants[0];
@@ -1968,7 +1952,7 @@ async fn overclaim_rejected_at_both_layers() {
     ])
     .await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let (h1, b1) = {
         let (h, b) = &fork.claimants[0];
@@ -2037,7 +2021,9 @@ async fn overclaim_rejected_at_both_layers() {
 #[tokio::test]
 async fn cumulative_accounting_closes_exactly() {
     let Some(fork) = boot_claim_lifecycle().await else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let ClaimFork {
         mut client,

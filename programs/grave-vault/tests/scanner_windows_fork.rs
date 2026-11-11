@@ -57,7 +57,6 @@
 // `bpf_loader` remains on the facade but deprecated — hence the allow.
 #![allow(deprecated)] // bpf_loader facade re-export
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountDeserialize;
@@ -66,7 +65,6 @@ use grave_vault::constants::RAYDIUM_V4_PROGRAM_ID;
 use solana_program_test::{BanksClient, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
     account::Account,
-    bpf_loader,
     hash::hash,
     instruction::{AccountMeta, Instruction, InstructionError},
     native_token::LAMPORTS_PER_SOL,
@@ -79,6 +77,14 @@ use solana_sdk::{
 };
 use solana_sdk_ids::system_program;
 use solana_sdk_ids::sysvar::instructions;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
+
 fn scanner_id() -> Pubkey {
     Pubkey::from_str("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL").unwrap()
 }
@@ -119,29 +125,8 @@ const FEE: u64 = 5_000;
 const INACTIVITY_MARGIN_SECONDS: i64 = 3_600;
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<serde_json::Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn pk(s: &str) -> Pubkey {
     Pubkey::from_str(s).unwrap()
@@ -159,30 +144,6 @@ fn load_real_account(section: &serde_json::Value, name: &str) -> (Pubkey, Accoun
         rent_epoch: u64::MAX,
     };
     (pk(entry["pubkey"].as_str().unwrap()), account)
-}
-
-fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
-    match std::fs::read(fixtures_dir().join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
-            if required {
-                eprintln!("SKIP: required fixture {file} missing ({e})");
-            }
-            required
-        }
-    }
 }
 
 fn read_u64(data: &[u8], off: usize) -> u64 {
@@ -307,7 +268,10 @@ fn build_genesis(salvor: Keypair, oracle: Keypair) -> Option<Boot> {
     pt.set_compute_max_units(1_400_000);
     pt.set_transaction_account_lock_limit(64);
 
-    if !add_elf(&mut pt, "grave_scanner.so", scanner_id(), true) {
+    // The scanner ELF is this suite's only required program: every
+    // registration is checked, so genesis is never built with the scanner
+    // silently absent (it would fail later with misleading errors).
+    if !fork_support::required_elfs_registered(&mut pt, &[("grave_scanner.so", scanner_id())]) {
         return None;
     }
 
@@ -716,7 +680,9 @@ async fn record_c2(ctx: &mut ProgramTestContext, boot: &Boot) {
 #[tokio::test]
 async fn attestation_oracle_rotation_enforced() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let old_oracle = boot.oracle.pubkey();
@@ -839,7 +805,9 @@ async fn attestation_oracle_rotation_enforced() {
 #[tokio::test]
 async fn cert_reissue_gate_rejects_while_valid() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let anchor_epoch = {
@@ -922,7 +890,9 @@ async fn cert_reissue_gate_rejects_while_valid() {
 #[tokio::test]
 async fn attestation_freshness_matrix() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1044,7 +1014,9 @@ async fn attestation_freshness_matrix() {
 #[tokio::test]
 async fn record_launch_price_is_oneshot() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1107,7 +1079,9 @@ async fn record_launch_price_is_oneshot() {
 async fn scanner_pause_gates_evaluation_not_governance() {
     let attacker = Keypair::new();
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1228,7 +1202,9 @@ async fn scanner_pause_gates_evaluation_not_governance() {
 #[tokio::test]
 async fn phase2_epoch_confirmation_boundary() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1402,7 +1378,9 @@ async fn run_phase1(client: &mut BanksClient, boot: &Boot) -> u64 {
 #[tokio::test]
 async fn scanner_config_bounds_reject_and_preserve_state() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1477,7 +1455,9 @@ async fn scanner_config_bounds_reject_and_preserve_state() {
 #[tokio::test]
 async fn sweep_stale_anchor_window_writer_and_pdas_enforced() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
@@ -1685,7 +1665,9 @@ async fn sweep_stale_anchor_window_writer_and_pdas_enforced() {
 #[tokio::test]
 async fn scanner_noop_pause_toggles_revert_refuses_first() {
     let Some(boot) = build_genesis(Keypair::new(), Keypair::new()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture grave_scanner.so missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut ctx, boot) = start(boot).await;
     let slot0 = read_clock(&mut ctx.banks_client).await.0;
