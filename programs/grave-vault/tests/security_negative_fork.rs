@@ -58,7 +58,6 @@
 // `bpf_loader` remains on the facade but deprecated — hence the allow.
 #![allow(deprecated)] // bpf_loader facade re-export
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountDeserialize;
@@ -70,7 +69,6 @@ use grave_vault::constants::{
 use solana_program_test::{BanksClient, BanksClientError, ProgramTest};
 use solana_sdk::{
     account::Account,
-    bpf_loader,
     hash::hash,
     instruction::{AccountMeta, Instruction, InstructionError},
     native_token::LAMPORTS_PER_SOL,
@@ -81,6 +79,13 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -135,29 +140,8 @@ fn funded_wallet(lamports: u64) -> (Keypair, (Pubkey, Account)) {
 }
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<serde_json::Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn pk(s: &str) -> Pubkey {
     Pubkey::from_str(s).unwrap()
@@ -176,32 +160,6 @@ fn load_real_account(section: &serde_json::Value, name: &str) -> (Pubkey, Accoun
         rent_epoch: u64::MAX,
     };
     (pk(entry["pubkey"].as_str().unwrap()), account)
-}
-
-/// Register a fixture ELF as an executable program account under `id`.
-/// Returns false (after printing a SKIP reason) when the file is absent.
-fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
-    match std::fs::read(fixtures_dir().join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
-            if required {
-                eprintln!("SKIP: required fixture {file} missing ({e})");
-            }
-            required
-        }
-    }
 }
 
 fn read_u64(data: &[u8], off: usize) -> u64 {
@@ -478,19 +436,23 @@ fn build_genesis(
     pt.set_compute_max_units(1_400_000);
     pt.set_transaction_account_lock_limit(64);
 
-    if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
+    // EVERY required ELF is checked; a genesis with a program silently
+    // absent is never booted (it would fail later with misleading errors).
+    // (adv_fk02 drives GraveScanner's `initialize` directly, so the scanner
+    // ELF is required too — build_fork_harness.sh always builds it first.)
+    if !fork_support::required_elfs_registered(
+        &mut pt,
+        &[
+            ("grave_vault.so", vault_id()),
+            ("grave_scanner.so", scanner_id()),
+            ("raydium_v4.so", RAYDIUM_V4_PROGRAM_ID),
+            ("spl_token.so", spl_token_id()),
+            ("spl_ata.so", spl_ata_id()),
+            ("serum_dex.so", env1.market_program),
+        ],
+    ) {
         return None;
     }
-    // adv_fk02 drives GraveScanner's `initialize` directly, so the scanner
-    // ELF must be deployed too (same loader pattern as scanner_windows_fork;
-    // build_fork_harness.sh always builds it first).
-    if !add_elf(&mut pt, "grave_scanner.so", scanner_id(), true) {
-        return None;
-    }
-    add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
-    add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
-    add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
-    add_elf(&mut pt, "serum_dex.so", env1.market_program, true);
 
     for name in POOL_ACCOUNTS {
         let (k, a) = load_real_account(&manifest["accounts"], name);
@@ -761,7 +723,9 @@ fn claim_record_pda(pool: &Pubkey, holder: &Pubkey) -> Pubkey {
 async fn unauthorized_authority_signers_revert() {
     let attacker = funded_wallet(LAMPORTS_PER_SOL);
     let Some(boot) = build_genesis(vec![attacker.1], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let attacker = attacker.0;
@@ -821,7 +785,9 @@ async fn unauthorized_authority_signers_revert() {
 #[tokio::test]
 async fn pause_gates_salvage_atomically_and_salvage_is_oneshot() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -897,7 +863,9 @@ async fn vault_paused_flag(client: &mut BanksClient, config: &Pubkey) -> bool {
 #[tokio::test]
 async fn vault_noop_pause_toggles_revert_refuses_first_7022() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let config = protocol_config_pda();
@@ -960,7 +928,9 @@ async fn vault_noop_pause_toggles_revert_refuses_first_7022() {
 #[tokio::test]
 async fn cpi_authority_substitution_rejected() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -999,7 +969,9 @@ async fn cpi_authority_substitution_rejected() {
 async fn fake_cert_ownership_rejected() {
     let attacker = Keypair::new();
     let Some(boot) = build_genesis(vec![], Keypair::new(), &attacker.pubkey()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1035,7 +1007,9 @@ async fn fake_cert_ownership_rejected() {
 async fn initialize_takeover_repelled() {
     let attacker = funded_wallet(LAMPORTS_PER_SOL);
     let Some(boot) = build_genesis(vec![attacker.1], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let attacker = attacker.0;
@@ -1083,7 +1057,9 @@ async fn initialize_takeover_repelled() {
 async fn claim_pda_collisions_rejected() {
     let holder = funded_wallet(LAMPORTS_PER_SOL);
     let Some(boot) = build_genesis(vec![holder.1], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1174,7 +1150,9 @@ const ERR_CERT_TTL_BELOW_MIN: u32 = 6019;
 #[tokio::test]
 async fn adv_fk01_forged_snapshot_supply_rejected_7018() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1222,7 +1200,9 @@ async fn adv_fk01_forged_snapshot_supply_rejected_7018() {
 #[tokio::test]
 async fn adv_fk02_scanner_cert_ttl_below_floor_rejected_6019() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let payer = boot.salvor.pubkey();
     let mut boot = boot;
@@ -1277,7 +1257,9 @@ async fn adv_fk02_scanner_cert_ttl_below_floor_rejected_6019() {
 #[tokio::test]
 async fn adv_fk03_vault_share_config_violations_rejected_7004_7005() {
     let Some(boot) = build_genesis(vec![], Keypair::new(), &scanner_id()) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let payer = boot.salvor.pubkey();
     let mut boot = boot;

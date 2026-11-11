@@ -56,7 +56,6 @@
 // `bpf_loader` remains on the facade but deprecated — hence the allow.
 #![allow(deprecated)] // bpf_loader facade re-export
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountSerialize;
@@ -69,7 +68,6 @@ use serde_json::Value;
 use solana_program_test::{BanksClient, BanksClientError, ProgramTest};
 use solana_sdk::{
     account::Account,
-    bpf_loader,
     hash::hash,
     instruction::{AccountMeta, Instruction, InstructionError},
     native_token::LAMPORTS_PER_SOL,
@@ -80,6 +78,13 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -117,29 +122,8 @@ const HARNESS_CAP_BPS: u128 = 300;
 const BPS_DEN: u128 = 10_000;
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn pk(s: &str) -> Pubkey {
     Pubkey::from_str(s).unwrap()
@@ -158,32 +142,6 @@ fn load_real_account(section: &Value, name: &str) -> (Pubkey, Account) {
         rent_epoch: u64::MAX,
     };
     (pk(entry["pubkey"].as_str().unwrap()), account)
-}
-
-/// Register a fixture ELF as an executable program account under `id`.
-/// Returns false (after printing a SKIP reason) when the file is absent.
-fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
-    match std::fs::read(fixtures_dir().join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
-            if required {
-                eprintln!("SKIP: required fixture {file} missing ({e})");
-            }
-            required
-        }
-    }
 }
 
 fn read_u64(data: &[u8], off: usize) -> u64 {
@@ -493,16 +451,21 @@ fn build_genesis_with(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair)
     pt.set_compute_max_units(1_400_000);
     pt.set_transaction_account_lock_limit(64);
 
-    if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
+    // EVERY required ELF is checked; a genesis with a program silently
+    // absent is never booted (it would fail later with misleading errors).
+    if !fork_support::required_elfs_registered(
+        &mut pt,
+        &[
+            ("grave_vault.so", vault_id()),
+            ("jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID),
+            ("raydium_v4.so", RAYDIUM_V4_PROGRAM_ID),
+            ("spl_token.so", spl_token_id()),
+            ("spl_ata.so", spl_ata_id()),
+            ("serum_dex.so", env1.market_program),
+        ],
+    ) {
         return None;
     }
-    if !add_elf(&mut pt, "jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID, true) {
-        return None;
-    }
-    add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
-    add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
-    add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
-    add_elf(&mut pt, "serum_dex.so", env1.market_program, true);
 
     for name in POOL_ACCOUNTS {
         let (k, a) = load_real_account(&manifest["accounts"], name);
@@ -511,10 +474,17 @@ fn build_genesis_with(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair)
     let (wsol_key, wsol_acct) = load_real_account(&manifest["accounts"], "wsol_mint");
     pt.add_account(wsol_key, wsol_acct);
     add_forged_pool_side(&mut pt, &env1, &salvor);
-    // Optional orientation pool (pc = WSOL).
+    // Optional orientation pool (pc = WSOL). The SECTION is optional (the
+    // fetcher writes it only when an inverted-orientation pool could be
+    // loaded from mainnet), but when the section exists its market ELF is
+    // required — a half-loaded orientation pool is a broken fixture state,
+    // not a valid partial configuration.
+    let mut orientation_elf_missing = false;
     let env2 = manifest.get("orientation_pool").map(|section| {
         let env = PoolEnv::load(section, &salvor);
-        add_elf(&mut pt, "serum_dex2.so", env.market_program, true);
+        if !fork_support::add_elf(&mut pt, "serum_dex2.so", env.market_program, true) {
+            orientation_elf_missing = true;
+        }
         for name in POOL_ACCOUNTS {
             let (k, a) = load_real_account(&section["accounts"], name);
             pt.add_account(k, a);
@@ -522,6 +492,9 @@ fn build_genesis_with(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair)
         add_forged_pool_side(&mut pt, &env, &salvor);
         env
     });
+    if orientation_elf_missing {
+        return None;
+    }
 
     // Forged: shared salvor lamports (fees + rents for both pools' PDAs).
     pt.add_account(
@@ -786,13 +759,12 @@ fn memecoin_reserve(env: &PoolEnv) -> u64 {
 /// reads the post-withdraw pool reserves. The VM is deterministic, so the
 /// real test's withdraw produces byte-identical deltas; the salvor's
 /// off-chain quote (in_amount + floor) is derived from the same numbers.
-/// Returns (memecoin_received, wsol_reserve_after, memecoin_reserve_after).
-async fn dry_run_withdraw(env: &PoolEnv, salvor: &Keypair) -> (u64, u64, u64) {
-    let Some(boot) = build_genesis(u64::MAX, vec![]) else {
-        // build_genesis prints its own SKIP reason; the caller's test body
-        // is unreachable in that case, so returning zeroes keeps the types.
-        return (0, 0, 0);
-    };
+/// Returns None when the fork fixtures are absent — NEVER fabricated
+/// zeroes (a (0, 0, 0) fallback would turn a setup failure into a fake
+/// zero-value measurement downstream).
+/// Returns Some((memecoin_received, wsol_reserve_after, memecoin_reserve_after)).
+async fn dry_run_withdraw(env: &PoolEnv, salvor: &Keypair) -> Option<(u64, u64, u64)> {
+    let boot = build_genesis(u64::MAX, vec![])?;
     // The dry-run must target the SAME pool: rebuild a boot limited to it.
     // (Genesis contains both pools; only the env under test is exercised.)
     let _ = salvor;
@@ -829,7 +801,7 @@ async fn dry_run_withdraw(env: &PoolEnv, salvor: &Keypair) -> (u64, u64, u64) {
     };
     let p_mem = memecoin_reserve(env) - mem_after;
     assert!(p_mem > 0, "dry-run withdraw paid zero memecoin");
-    (p_mem, wsol_after, mem_after)
+    Some((p_mem, wsol_after, mem_after))
 }
 
 /// The pool-implied WSOL conversion of `memecoin_in` at the post-withdraw
@@ -853,11 +825,17 @@ fn harness_floor(implied: u128) -> u64 {
 /// pool state, for BOTH pool orientations. Asserts exact conservation.
 async fn run_full_pipeline(env_sel: &PoolEnv) {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     // Salvor's off-chain quote: exact withdraw output + post-withdraw
     // reserves from a deterministic dry-run.
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(env_sel, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(env_sel, &boot.salvor).await else {
+        skip_or_fail!(
+            "withdraw-leg measurement rig unavailable (fork fixtures missing) — run scripts/build_fork_harness.sh"
+        );
+    };
     let implied = implied_wsol(p_mem, wsol_after, mem_after);
     let floor = harness_floor(implied);
 
@@ -997,7 +975,9 @@ async fn run_full_pipeline(env_sel: &PoolEnv) {
 #[tokio::test]
 async fn full_pipeline_converts_memecoin_to_sol() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     run_full_pipeline(&boot.env1).await;
 }
@@ -1005,10 +985,18 @@ async fn full_pipeline_converts_memecoin_to_sol() {
 #[tokio::test]
 async fn inverted_orientation_pool_converts_memecoin() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixture ELF(s) missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let Some(env2) = &boot.env2 else {
-        eprintln!("SKIP: orientation pool fixtures missing (manifest has no orientation_pool)");
+        // The orientation pool is a legitimately OPTIONAL fixture
+        // configuration (the fetcher writes it only when an inverted
+        // pool could be loaded from mainnet) — skippable in BOTH
+        // workflows, but always loudly.
+        eprintln!(
+            "SKIP (optional): orientation pool absent from manifest — inverted-orientation pipeline NOT exercised this run"
+        );
         return;
     };
     run_full_pipeline(env2).await;
@@ -1025,13 +1013,15 @@ async fn pool_without_wsol_side_rejected_before_any_cpi() {
     // panic) when the fork fixtures are absent — the documented
     // fixture-less behavior (tests/README.md).
     let Some(manifest) = load_manifest() else {
-        return;
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (pool_key, mut pool_acct) = load_real_account(&manifest["accounts"], "pool");
     let bogus = Pubkey::new_unique();
     pool_acct.data[400..432].copy_from_slice(bogus.as_ref());
     let Some(boot) = build_genesis(0, vec![(pool_key, pool_acct)]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1072,7 +1062,7 @@ async fn foreign_memecoin_mint_rejected() {
     // HANDLER's binding check is what fires.
     let fake_mint = Pubkey::new_unique();
     let Some(boot) = build_genesis(0, vec![(fake_mint, forged_mint(6))]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1136,7 +1126,7 @@ async fn foreign_lp_mint_rejected() {
         ],
         salvor,
     ) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1171,9 +1161,12 @@ async fn foreign_lp_mint_rejected() {
 #[tokio::test]
 async fn zero_floor_rejected_by_slippage_ceiling() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
     let route = jupiter_route(env, p_mem, 0, 0, None, vec![]);
@@ -1215,9 +1208,12 @@ async fn zero_floor_rejected_by_slippage_ceiling() {
 #[tokio::test]
 async fn override_tightens_slippage_ceiling() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let implied = implied_wsol(p_mem, wsol_after, mem_after);
     // A floor that satisfies the default 300 bps cap exactly.
     let floor = harness_floor(implied);
@@ -1257,9 +1253,12 @@ async fn override_tightens_slippage_ceiling() {
 #[tokio::test]
 async fn insufficient_output_reverts_atomically() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let implied = implied_wsol(p_mem, wsol_after, mem_after);
     // The ceiling accepts any floor ABOVE the implied conversion minus the
     // cap — so an impossible 10x floor passes the ceiling but must fail the
@@ -1325,9 +1324,12 @@ async fn hijacked_route_destination_rejected() {
             forged_token_account(&WSOL_MINT, &attacker.pubkey(), 0),
         )],
     ) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
 
     let (mut client, boot) = start(boot).await;
@@ -1366,9 +1368,12 @@ async fn hijacked_route_destination_rejected() {
 #[tokio::test]
 async fn bad_route_data_rejected() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1397,9 +1402,12 @@ async fn bad_route_data_rejected() {
 #[tokio::test]
 async fn failed_jupiter_transaction_rejected() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
@@ -1436,9 +1444,12 @@ async fn failed_jupiter_transaction_rejected() {
 #[tokio::test]
 async fn route_referencing_protected_accounts_rejected() {
     let Some(boot) = build_genesis(0, vec![]) else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw(&boot.env1, &boot.salvor).await;
+    let Some((p_mem, wsol_after, mem_after)) = dry_run_withdraw(&boot.env1, &boot.salvor).await
+    else {
+        skip_or_fail!("withdraw-leg measurement rig unavailable (fork fixtures missing)");
+    };
     let floor = harness_floor(implied_wsol(p_mem, wsol_after, mem_after));
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;

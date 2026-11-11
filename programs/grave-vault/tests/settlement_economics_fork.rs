@@ -51,7 +51,6 @@
 // `bpf_loader` remains on the facade but deprecated — hence the allow.
 #![allow(deprecated)] // bpf_loader facade re-export
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountDeserialize;
@@ -66,7 +65,6 @@ use serde_json::Value;
 use solana_program_test::{BanksClient, BanksClientError, ProgramTest};
 use solana_sdk::{
     account::Account,
-    bpf_loader,
     hash::hash,
     instruction::{AccountMeta, Instruction, InstructionError},
     native_token::LAMPORTS_PER_SOL,
@@ -77,6 +75,13 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -127,29 +132,8 @@ const R_DUST: usize = 152;
 const R_SWEPT: usize = 160;
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn pk(s: &str) -> Pubkey {
     Pubkey::from_str(s).unwrap()
@@ -168,32 +152,6 @@ fn load_real_account(section: &Value, name: &str) -> (Pubkey, Account) {
         rent_epoch: u64::MAX,
     };
     (pk(entry["pubkey"].as_str().unwrap()), account)
-}
-
-/// Register a fixture ELF as an executable program account under `id`.
-/// Returns false (after printing a SKIP reason) when the file is absent.
-fn add_elf(pt: &mut ProgramTest, file: &str, id: Pubkey, required: bool) -> bool {
-    match std::fs::read(fixtures_dir().join(file)) {
-        Ok(bytes) => {
-            pt.add_account(
-                id,
-                Account {
-                    lamports: 1,
-                    data: bytes,
-                    owner: bpf_loader::id(),
-                    executable: true,
-                    rent_epoch: u64::MAX,
-                },
-            );
-            true
-        }
-        Err(e) => {
-            if required {
-                eprintln!("SKIP: required fixture {file} missing ({e})");
-            }
-            required
-        }
-    }
 }
 
 fn read_u64(data: &[u8], off: usize) -> u64 {
@@ -487,16 +445,21 @@ fn build_genesis_with(
     pt.set_compute_max_units(1_400_000);
     pt.set_transaction_account_lock_limit(64);
 
-    if !add_elf(&mut pt, "grave_vault.so", vault_id(), true) {
+    // EVERY required ELF is checked; a genesis with a program silently
+    // absent is never booted (it would fail later with misleading errors).
+    if !fork_support::required_elfs_registered(
+        &mut pt,
+        &[
+            ("grave_vault.so", vault_id()),
+            ("jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID),
+            ("raydium_v4.so", RAYDIUM_V4_PROGRAM_ID),
+            ("spl_token.so", spl_token_id()),
+            ("spl_ata.so", spl_ata_id()),
+            ("serum_dex.so", env1.market_program),
+        ],
+    ) {
         return None;
     }
-    if !add_elf(&mut pt, "jupiter_v6_stub.so", JUPITER_V6_PROGRAM_ID, true) {
-        return None;
-    }
-    add_elf(&mut pt, "raydium_v4.so", RAYDIUM_V4_PROGRAM_ID, true);
-    add_elf(&mut pt, "spl_token.so", spl_token_id(), true);
-    add_elf(&mut pt, "spl_ata.so", spl_ata_id(), true);
-    add_elf(&mut pt, "serum_dex.so", env1.market_program, true);
 
     for name in POOL_ACCOUNTS {
         let (k, a) = load_real_account(&manifest["accounts"], name);
@@ -850,11 +813,12 @@ fn memecoin_reserve(env: &PoolEnv) -> u64 {
 /// Exact dry-run of the withdraw leg (conversion disabled): boots a fresh VM
 /// and reads the post-withdraw pool reserves. The VM is deterministic, so the
 /// real test's withdraw produces byte-identical deltas.
-/// Returns (memecoin_received, wsol_reserve_after, memecoin_reserve_after).
-async fn dry_run_withdraw() -> (u64, u64, u64) {
-    let Some(boot) = build_genesis(u64::MAX, vec![]) else {
-        return (0, 0, 0);
-    };
+/// Returns None when the fork fixtures are absent — NEVER fabricated
+/// zeroes (a (0, 0, 0) fallback would turn a setup failure into a fake
+/// zero-value measurement downstream).
+/// Returns Some((memecoin_received, wsol_reserve_after, memecoin_reserve_after)).
+async fn dry_run_withdraw() -> Option<(u64, u64, u64)> {
+    let boot = build_genesis(u64::MAX, vec![])?;
     let (mut client, boot) = start(boot).await;
     let env = &boot.env1;
     let opts = SalvageOpts {
@@ -883,7 +847,7 @@ async fn dry_run_withdraw() -> (u64, u64, u64) {
     };
     let p_mem = memecoin_reserve(env) - mem_after;
     assert!(p_mem > 0, "dry-run withdraw paid zero memecoin");
-    (p_mem, wsol_after, mem_after)
+    Some((p_mem, wsol_after, mem_after))
 }
 
 /// The pool-implied WSOL conversion of `memecoin_in` at the post-withdraw
@@ -911,7 +875,9 @@ async fn run_dust_skip_salvage(
     extra: Vec<(Pubkey, Account)>,
     sweeper: &Keypair,
 ) -> Option<(BanksClient, PoolEnv, u64, u64)> {
-    let (p_mem, wsol_after, _mem_after) = dry_run_withdraw().await;
+    // Propagated, not fabricated: a (0, 0, 0) fallback here would both
+    // fake the measurement and corrupt the dust threshold below.
+    let (p_mem, wsol_after, _mem_after) = dry_run_withdraw().await?;
 
     let salvor = Keypair::new();
     let boot = build_genesis_with(
@@ -982,7 +948,7 @@ async fn run_full_pipeline_custom(
     extra: Vec<(Pubkey, Account)>,
 ) -> Option<(BanksClient, Keypair, PoolEnv, u64, u64, u64, u64)> {
     let boot = build_genesis_with(0, shares, extra, Keypair::new())?;
-    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await;
+    let (p_mem, wsol_after, mem_after) = dry_run_withdraw().await?;
     let implied = implied_wsol(p_mem, wsol_after, mem_after);
     let floor = harness_floor(implied);
 
@@ -1075,7 +1041,7 @@ fn build_three_leaf_tree(
 async fn dust_skip_records_dust_and_settles_withdraw_only() {
     let sweeper = Keypair::new();
     let Some((mut client, env, p_mem, w)) = run_dust_skip_salvage(vec![], &sweeper).await else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let rent0 = Rent::default().minimum_balance(0);
     let rent_ta = Rent::default().minimum_balance(165);
@@ -1140,7 +1106,9 @@ async fn sweep_moves_dust_to_treasury_and_closes_ata() {
     // Graceful skip (documented intent): the fixtures are gitignored;
     // without them the suite must SKIP, not panic.
     let Some(manifest) = load_manifest() else {
-        return;
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (memecoin_mint, _) = if manifest["base_is_coin_side"].as_bool().unwrap() {
         load_real_account(&manifest["accounts"], "pc_mint")
@@ -1166,7 +1134,7 @@ async fn sweep_moves_dust_to_treasury_and_closes_ata() {
     )
     .await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     assert_eq!(env.memecoin_mint, memecoin_mint);
 
@@ -1218,7 +1186,9 @@ async fn second_sweep_reverts_dust_already_swept() {
     // Graceful skip (documented intent): the fixtures are gitignored;
     // without them the suite must SKIP, not panic.
     let Some(manifest) = load_manifest() else {
-        return;
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let mint = env_memecoin_mint(&manifest);
     let treasury_ata = Pubkey::find_program_address(
@@ -1240,7 +1210,7 @@ async fn second_sweep_reverts_dust_already_swept() {
     )
     .await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     send(
         &mut client,
@@ -1308,7 +1278,7 @@ async fn sweep_on_fully_converted_pool_reverts_nothing_to_sweep() {
     let Some((mut client, _salvor, env, total, salvor_amt, lp_amt, protocol_amt)) =
         run_full_pipeline_custom((0, 0, 0), [7u8; 32], funded).await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     // Sanity: full conversion settled.
     assert_eq!(
@@ -1356,7 +1326,9 @@ async fn sweep_destination_cannot_be_hijacked() {
     // Graceful skip (documented intent): the fixtures are gitignored;
     // without them the suite must SKIP, not panic.
     let Some(manifest) = load_manifest() else {
-        return;
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let mint = env_memecoin_mint(&manifest);
     let treasury_ata = Pubkey::find_program_address(
@@ -1394,7 +1366,7 @@ async fn sweep_destination_cannot_be_hijacked() {
     )
     .await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
 
     // Hijack attempt: the attacker's ATA stands in for the treasury ATA.
@@ -1445,7 +1417,7 @@ async fn settlement_shares_follow_custom_config_and_rounding() {
     let Some((mut client, _salvor, env, total, salvor_amt, lp_amt, protocol_amt)) =
         run_full_pipeline_custom((4_001, 4_000, 1_999), [7u8; 32], vec![]).await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     let exp_salvor = (total as u128 * 4_000 / BPS_DEN) as u64;
     let exp_lp = (total as u128 * 4_001 / BPS_DEN) as u64;
@@ -1502,7 +1474,9 @@ async fn claims_drain_lp_holder_pool_exactly() {
     // Graceful skip (documented intent): the fixtures are gitignored;
     // without them the suite must SKIP, not panic.
     let Some(manifest) = load_manifest() else {
-        return;
+        skip_or_fail!(
+            "fork fixture manifest missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (_, lp_mint_acct) = load_real_account(&manifest["accounts"], "lp_mint");
     let supply = mint_supply(&lp_mint_acct);
@@ -1538,7 +1512,7 @@ async fn claims_drain_lp_holder_pool_exactly() {
     let Some((mut client, salvor, env, _total, _s, lp_amt, _p)) =
         run_full_pipeline_custom((0, 0, 0), root, funded).await
     else {
-        return;
+        skip_or_fail!("required fork fixture ELF(s) missing");
     };
     assert_eq!(env.pool, pool);
     let rent0 = Rent::default().minimum_balance(0);

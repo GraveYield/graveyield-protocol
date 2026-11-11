@@ -45,7 +45,6 @@
 // agave split-crate era is `solana_sdk_ids::system_program` (same 3.1.x
 // instance the rest of the graph uses).
 
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use anchor_lang::AccountSerialize;
@@ -66,6 +65,13 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+
+// Shared fixture-loading + skip-integrity plumbing (see common/fork_support.rs
+// for the Workflow A vs Workflow B contract).
+#[macro_use]
+#[path = "common/fork_support.rs"]
+mod fork_support;
+use fork_support::{fixtures_dir, load_manifest};
 
 // GraveVault / GraveScanner placeholder program IDs (KEYS-003; same values as
 // Anchor.toml). The vault ID also comes from `declare_id!`.
@@ -103,29 +109,8 @@ const TA_AMOUNT: usize = 64;
 const MINT_SUPPLY: usize = 36;
 
 // =====================================================================
-// Fixture loading
+// Fixture loading (shared plumbing in common/fork_support.rs)
 // =====================================================================
-
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-}
-
-fn load_manifest() -> Option<Value> {
-    let path = fixtures_dir().join("manifest.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => {
-            eprintln!(
-                "SKIP: fork fixtures not found at {} — run scripts/fetch_v4_fork_fixtures.mjs (see tests/README.md)",
-                path.display()
-            );
-            return None;
-        }
-    };
-    serde_json::from_str(&text).ok()
-}
 
 fn b58encode_pubkey(bytes: &[u8]) -> String {
     const B58: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -343,12 +328,23 @@ impl ForkHarness {
         pt.set_compute_max_units(1_400_000);
         pt.set_transaction_account_lock_limit(64);
 
-        // Programs: real mainnet ELFs, located by name in tests/fixtures/.
-        pt.add_program("grave_vault", vault_id(), None);
-        pt.add_program("raydium_v4", amm_program, None);
-        pt.add_program("serum_dex", market_program, None);
-        pt.add_program("spl_token", spl_token_id(), None);
-        pt.add_program("spl_ata", spl_ata_id(), None);
+        // Programs: real mainnet ELFs from tests/fixtures/. EVERY required
+        // registration is checked — the old `add_program(name, id, None)`
+        // path panicked deep inside program-test with a generic message when
+        // an ELF was absent, bypassing both the skip contract and the
+        // fixture-dir source of truth the other six suites use.
+        if !fork_support::required_elfs_registered(
+            &mut pt,
+            &[
+                ("grave_vault.so", vault_id()),
+                ("raydium_v4.so", amm_program),
+                ("serum_dex.so", market_program),
+                ("spl_token.so", spl_token_id()),
+                ("spl_ata.so", spl_ata_id()),
+            ],
+        ) {
+            return None;
+        }
 
         // Real mainnet state.
         pt.add_account(pool_addr, pool_acct);
@@ -655,7 +651,9 @@ async fn setup(mut h: ForkHarness) -> (BanksClient, ForkHarness) {
 #[tokio::test]
 async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
 
@@ -812,7 +810,9 @@ async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
 #[tokio::test]
 async fn wrong_amm_program_rejected_by_vault_preflight() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     // A real, executable program account that is NOT the pool's owner.
@@ -831,7 +831,9 @@ async fn wrong_amm_program_rejected_by_vault_preflight() {
 #[tokio::test]
 async fn scrambled_open_orders_vs_target_rejected_by_real_v4() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
@@ -853,7 +855,9 @@ async fn scrambled_open_orders_vs_target_rejected_by_real_v4() {
 #[tokio::test]
 async fn scrambled_coin_vs_pc_vaults_rejected_by_real_v4() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
@@ -886,7 +890,9 @@ async fn unbound_pool_account_rejected_by_preflight() {
         rent_epoch: u64::MAX,
     };
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![(fake_pool, fake_acct)]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let mut opts = default_salvage_opts(&h, h.lp_burn_plan);
@@ -904,7 +910,9 @@ async fn unbound_pool_account_rejected_by_preflight() {
 #[tokio::test]
 async fn insufficient_lp_rejected_by_token_program() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let opts = default_salvage_opts(&h, h.lp_burn_plan + 1); // one more than owned
@@ -921,7 +929,9 @@ async fn insufficient_lp_rejected_by_token_program() {
 #[tokio::test]
 async fn zero_lp_rejected_by_preflight() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let opts = default_salvage_opts(&h, 0);
@@ -938,7 +948,9 @@ async fn zero_lp_rejected_by_preflight() {
 #[tokio::test]
 async fn extra_remaining_accounts_rejected_by_preflight() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
@@ -959,7 +971,9 @@ async fn extra_remaining_accounts_rejected_by_preflight() {
 #[tokio::test]
 async fn fake_target_orders_rejected_by_real_v4() {
     let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
@@ -979,7 +993,9 @@ async fn fake_target_orders_rejected_by_real_v4() {
 #[tokio::test]
 async fn expired_cert_rejected_by_vault() {
     let Some(h) = ForkHarness::try_new(TS_LONG_PAST, vec![]) else {
-        return;
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
     };
     let (mut client, h) = setup(h).await;
     let opts = default_salvage_opts(&h, h.lp_burn_plan);
