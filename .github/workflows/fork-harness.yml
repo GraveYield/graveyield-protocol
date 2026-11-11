@@ -139,8 +139,83 @@ jobs:
       # parts of the Solana stack natively.
       - name: Install system libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libudev-dev libhidapi-dev
+          set -euo pipefail
+          # Same deadline+probe-gate retry discipline as ci.yml's "Install
+          # system libraries for anchor-cli build" (incidents: run
+          # 43036634800 — ~6 min of azure.archive.ubuntu.com DNS failure,
+          # exit 100 on a single-shot apt-get; run 43043702834 — the same
+          # mirror unreachable for the whole 45-minute job budget while
+          # retries kept running; run 43053088888 — a runner-side DNS
+          # outage kept every ubuntu.com hostname unresolvable for ~31
+          # minutes, outlasting the old 6-attempt escalation loop). After
+          # the first full attempt fails, later attempts go through the
+          # canonical mirrors (archive.ubuntu.com / security.ubuntu.com)
+          # via a standalone temporary source list — the runner's apt
+          # config is never mutated — and the remaining outage is waited
+          # out with cheap resolver probes instead of multi-minute apt
+          # rounds. The whole step runs under a single wall-clock budget
+          # that bounds the WAITING between attempts, never a running apt
+          # round (killing apt-get install mid-flight risks an interrupted
+          # dpkg state — a transient must not become permanent); DNS
+          # observed healthy always earns one more attempt, so the
+          # worst-case step ceiling is budget + 20s settle + one apt round,
+          # sized against this job's 120-minute timeout. Exhaustion still
+          # fails the job (fail-closed).
+          APT_RETRY_BUDGET_SECONDS="${APT_RETRY_BUDGET_SECONDS:-2400}"   # 40 min default; job timeout is 120 min
+          DEADLINE=$((SECONDS + APT_RETRY_BUDGET_SECONDS))
+          # Probe the resolver directly: a failed getent costs seconds,
+          # while a failed apt-get round burns ~5-6 minutes inside its own
+          # fetch timeouts. Returns 0 as soon as any apt mirror hostname
+          # resolves again, 1 if the budget expires while DNS is dead.
+          apt_wait_for_dns() {
+            while [ "$SECONDS" -lt "$DEADLINE" ]; do
+              for host in azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com; do
+                if getent hosts "$host" >/dev/null 2>&1; then
+                  echo "::notice::DNS probe: ${host} resolved (t+${SECONDS}s); retrying apt"
+                  return 0
+                fi
+              done
+              sleep 15
+            done
+            return 1
+          }
+          APT_SRC_OPTS=()
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            echo "::notice::apt refresh+install attempt ${attempt} (t+${SECONDS}s of ${APT_RETRY_BUDGET_SECONDS}s budget)"
+            if sudo apt-get "${APT_SRC_OPTS[@]}" -o Acquire::Retries=3 update \
+              && sudo apt-get "${APT_SRC_OPTS[@]}" -o Acquire::Retries=3 install -y --no-install-recommends libudev-dev libhidapi-dev
+            then
+              echo "::notice::apt refresh+install succeeded on attempt ${attempt} (t+${SECONDS}s)"
+              break
+            fi
+            if [ "$attempt" = 1 ]; then
+              . /etc/os-release
+              CANONICAL_SOURCES="$(mktemp)"
+              printf '%s\n' \
+                "deb http://archive.ubuntu.com/ubuntu/ ${VERSION_CODENAME} main restricted universe multiverse" \
+                "deb http://archive.ubuntu.com/ubuntu/ ${VERSION_CODENAME}-updates main restricted universe multiverse" \
+                "deb http://security.ubuntu.com/ubuntu/ ${VERSION_CODENAME}-security main restricted universe multiverse" \
+                > "$CANONICAL_SOURCES"
+              APT_SRC_OPTS=(-o "Dir::Etc::sourcelist=$CANONICAL_SOURCES" -o Dir::Etc::sourceparts=-)
+              echo "::warning::default apt mirror failed a full attempt; retrying against canonical archive.ubuntu.com (runner apt config untouched)"
+            fi
+            # Budget bounds the wait below; a gate success (DNS observed
+            # healthy) ALWAYS takes the next attempt, even in the budget's
+            # final seconds — refusing a usable mirror would fail the job
+            # unnecessarily. See the semantics note in the step header.
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — ${APT_RETRY_BUDGET_SECONDS}s retry budget exhausted; failing the job"
+              exit 1
+            fi
+            if ! apt_wait_for_dns; then
+              echo "::error::apt refresh+install failed after ${attempt} attempt(s) — DNS/mirror outage outlasted the ${APT_RETRY_BUDGET_SECONDS}s retry budget; failing the job"
+              exit 1
+            fi
+            echo "::warning::apt attempt ${attempt} failed (transient mirror/DNS failure); retrying"
+            sleep 20
+          done
       # Solana 3.0.10's bundled platform-tools v1.51 ships cargo 1.84,
       # which can't parse edition2024 manifests (blake3 0.12 et al.).
       # Replace the cached platform-tools with v1.54 contents exactly as
