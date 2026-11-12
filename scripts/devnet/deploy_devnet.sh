@@ -208,11 +208,10 @@ run_provenance_gate() {
 #      SHA-256 re-verifies against the shared manifest, otherwise
 #      downloading it fresh; a download whose digest mismatches the pin
 #      aborts the run BEFORE anything is extracted (fail closed);
-#   2. re-seeds EVERY cache directory this flow may resolve (v1.51 =
-#      cargo-build-sbf 3.0.10's default; v1.57 = anchor 1.2.2's override —
-#      anchor itself is NOT required on the deploy path, but the cache is
-#      seeded so an accidental resolution can never pick unverified bytes)
-#      from the VERIFIED archive, overwriting whatever was there before;
+#   2. re-seeds the v1.51, v1.54 and v1.57 cache directories from the
+#      VERIFIED archive. This covers cargo-build-sbf 3.0.10's v1.51
+#      default, the workspace-declared v1.54 version, and Anchor 1.2.2's
+#      v1.57 override. Anchor is not required on the deploy path.
 #   3. writes the stamp last — informational, never load-bearing.
 pin_platform_tools() {
   require_node
@@ -262,7 +261,7 @@ pin_platform_tools() {
   # Pass 2 — seed every resolvable version dir FROM THE VERIFIED ARCHIVE
   # ONLY (the rm -rf means a foreign or tampered cache cannot survive).
   local v dest
-  for v in v1.51 v1.57; do
+  for v in v1.51 v1.54 v1.57; do
     dest="$cache_root/$v/platform-tools"
     rm -rf "$dest"
     mkdir -p "$dest"

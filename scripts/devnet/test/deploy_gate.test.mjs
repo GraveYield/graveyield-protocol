@@ -293,7 +293,7 @@ function writeManifest(
  * stamp and, optionally, the (possibly corrupt) archive cache file.
  */
 function seedCache(sbx, { stampSha = null, archivePath = null, canary = false } = {}) {
-  for (const v of ["v1.51", "v1.57"]) {
+  for (const v of ["v1.51", "v1.54", "v1.57"]) {
     const dest = path.join(sbx, "home", ".cache", "solana", v, "platform-tools");
     mkdirSync(path.join(dest, "rust", "bin"), { recursive: true });
     writeFileSync(path.join(dest, "rust", "bin", "cargo"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -715,6 +715,9 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
       ),
       false,
     );
+    const v154 = path.join(SBX, "home", ".cache", "solana", "v1.54", "platform-tools");
+    assert.equal(readFileSync(path.join(v154, ".graveyield-pinned-sha256"), "utf8").trim(), pt.sha);
+    assert.equal(existsSync(path.join(v154, "FOREIGN-CANARY")), false);
   });
 
   test("B2. a cache directory with NO stamp at all is re-seeded the same way", () => {
@@ -722,12 +725,15 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     const r = run();
     assert.equal(r.code, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.equal(deploysInLog(log).length, 2);
-    assert.equal(
-      existsSync(
-        path.join(SBX, "home", ".cache", "solana", "v1.57", "platform-tools", "FOREIGN-CANARY"),
-      ),
-      false,
-    );
+    for (const v of ["v1.54", "v1.57"]) {
+      assert.equal(
+        existsSync(
+          path.join(SBX, "home", ".cache", "solana", v, "platform-tools", "FOREIGN-CANARY"),
+        ),
+        false,
+        `${v} cache must be re-seeded`,
+      );
+    }
   });
 
   test("B3. a CORRUPTED cached archive is deleted and re-downloaded (fail-closed re-download)", () => {
@@ -810,6 +816,12 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
       ),
       false,
     );
+    assert.equal(
+      existsSync(
+        path.join(SBX, "home", ".cache", "solana", "v1.54", "platform-tools", "FOREIGN-CANARY"),
+      ),
+      false,
+    );
   });
 
   test("B9. a tampered tool BINARY under a VALID stamp is replaced from the authenticated archive", () => {
@@ -820,7 +832,7 @@ describe("deploy_devnet.sh fail-closed provenance gate", () => {
     // hash-verified archive and the tampered compiler must not survive.
     const { run, log, pt } = setupScenario({ stampSha: "manifest" });
     const tampered = "#!/bin/sh\necho TAMPERED-COMPILER; exit 0\n";
-    const cargoPaths = ["v1.51", "v1.57"].map((v) =>
+    const cargoPaths = ["v1.51", "v1.54", "v1.57"].map((v) =>
       path.join(SBX, "home", ".cache", "solana", v, "platform-tools", "rust", "bin", "cargo"),
     );
     for (const p of cargoPaths) writeFileSync(p, tampered, { mode: 0o755 });
