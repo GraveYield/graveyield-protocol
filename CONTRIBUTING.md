@@ -39,7 +39,7 @@ status checks. See [`docs/glossary.md`](docs/glossary.md) for the full canonical
 ## Development environment
 
 ```bash
-./scripts/check-toolchain.sh       # verify pinned versions
+bash scripts/check-toolchain.sh    # verify pinned versions
 pnpm install                       # JS workspace deps
 anchor build                       # build Anchor programs
 pnpm -r typecheck                  # TypeScript typecheck

@@ -128,6 +128,6 @@ after the PR lands so the row can be tagged to its exact post-merge SHA.
 ## Audit handoff
 
 When handing this checklist to OtterSec / Neodyme, run
-`scripts/list-pre-mainnet-todos.sh > pre-mainnet-todos.txt` and attach
+`bash scripts/list-pre-mainnet-todos.sh > pre-mainnet-todos.txt` and attach
 it alongside this file. Auditors should treat any 🟥 row as a hard
 blocker for the audit's "Production Readiness" section.
