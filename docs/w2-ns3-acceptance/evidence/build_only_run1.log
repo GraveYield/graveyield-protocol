@@ -1,0 +1,211 @@
+== platform-tools archive re-verification: /home/z/.cache/solana/.graveyield-platform-tools-v1.54.tar.bz2 ==
+bounded-provenance-check: checker exited 0 with the recorded 'PROVENANCE OK' verdict — exit 0
+platform-tools v1.54 archive OK (sha256 fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e)
+platform-tools v1.54 cache seeded from the verified archive: /home/z/.cache/solana/v1.51/platform-tools
+platform-tools v1.54 cache seeded from the verified archive: /home/z/.cache/solana/v1.54/platform-tools
+platform-tools v1.54 cache seeded from the verified archive: /home/z/.cache/solana/v1.57/platform-tools
+cargo-build-sbf version OK: solana-cargo-build-sbf 3.0.10
+platform-tools v1.51
+rustc 1.89.0
+== build-only: cargo build-sbf (scanner, vault) — no keypairs needed ==
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling syn v3.0.9
+   Compiling serde_derive v1.0.229
+   Compiling winnow v1.0.4
+   Compiling equivalent v1.0.3
+   Compiling hashbrown v0.17.1
+   Compiling indexmap v2.14.2
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+   Compiling toml_edit v0.25.17+spec-1.1.0
+   Compiling proc-macro-crate v3.5.0
+   Compiling serde_core v1.0.229
+   Compiling cfg_aliases v0.2.2
+   Compiling borsh v1.8.1
+   Compiling serde v1.0.229
+   Compiling once_cell v1.21.4
+   Compiling borsh-derive v1.8.1
+   Compiling bytemuck_derive v1.12.1
+   Compiling bytemuck v1.25.2
+   Compiling five8_core v1.0.0
+   Compiling five8 v1.0.0
+   Compiling solana-program-error v3.0.1
+   Compiling solana-define-syscall v4.0.1
+   Compiling solana-hash v4.7.0
+   Compiling solana-sha256-hasher v3.1.0
+   Compiling solana-define-syscall v5.3.0
+   Compiling sha2-const-stable v0.1.0
+   Compiling five8_const v1.0.0
+   Compiling solana-nullable v1.3.0
+   Compiling solana-sanitize v3.0.1
+   Compiling solana-atomic-u64 v3.0.1
+   Compiling solana-address v2.9.0
+   Compiling syn v2.0.119
+   Compiling typenum v1.20.1
+   Compiling autocfg v1.5.1
+   Compiling num-traits v0.2.19
+   Compiling solana-pubkey v4.4.0
+   Compiling solana-sdk-ids v3.1.0
+   Compiling bincode v1.3.3
+   Compiling solana-instruction-error v2.5.0
+   Compiling thiserror v1.0.69
+   Compiling solana-instruction v4.0.0
+   Compiling cfg-if v1.0.5
+   Compiling solana-instruction v3.5.1
+   Compiling thiserror-impl v1.0.69
+   Compiling bs58 v0.5.1
+   Compiling version_check v0.9.5
+   Compiling generic-array v0.14.7
+   Compiling solana-sysvar-id v3.1.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling hybrid-array v0.4.15
+   Compiling solana-address v1.1.0
+   Compiling solana-program-memory v3.1.0
+   Compiling solana-account-info v3.1.1
+   Compiling solana-pubkey v3.0.0
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling thiserror v2.0.21
+   Compiling sha2 v0.10.9
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling solana-get-sysvar v1.0.0
+   Compiling thiserror-impl v2.0.21
+   Compiling const-oid v0.10.2
+   Compiling rustversion v1.0.23
+   Compiling digest v0.11.3
+   Compiling solana-sdk-macro v3.0.1
+   Compiling cpufeatures v0.3.1
+   Compiling sha2 v0.11.1
+   Compiling num_enum_derive v0.7.6
+   Compiling num-derive v0.4.2
+   Compiling solana-msg v3.1.0
+   Compiling heck v0.5.0
+   Compiling anchor-syn v1.2.2
+   Compiling num_enum v0.7.6
+   Compiling feature-probe v0.1.1
+   Compiling bv v0.11.1
+   Compiling spl-discriminator-syn v0.2.1
+   Compiling solana-zero-copy v1.3.0
+   Compiling zmij v1.0.23
+   Compiling solana-program-option v3.1.0
+   Compiling anyhow v1.0.104
+   Compiling spl-discriminator-derive v0.2.0
+   Compiling solana-define-syscall v3.0.0
+   Compiling serde_json v1.0.154
+   Compiling base64 v0.22.1
+   Compiling solana-zk-sdk v4.0.0
+   Compiling spl-discriminator v0.5.2
+   Compiling solana-clock v4.0.0
+   Compiling solana-program-entrypoint v3.1.1
+   Compiling solana-stable-layout v3.0.1
+   Compiling solana-serialize-utils v3.1.2
+   Compiling itoa v1.0.18
+   Compiling log v0.4.34
+   Compiling unicode-segmentation v1.13.3
+   Compiling memchr v2.8.3
+   Compiling heck v0.3.3
+   Compiling solana-fee-calculator v3.4.0
+   Compiling solana-instructions-sysvar v3.0.1
+   Compiling solana-clock v3.2.1
+   Compiling anchor-lang-idl-spec v0.1.0
+   Compiling solana-slot-history v3.2.0
+   Compiling spl-pod v0.7.4
+   Compiling solana-rent v3.1.0
+   Compiling solana-epoch-rewards v3.2.0
+   Compiling solana-epoch-schedule v3.4.0
+   Compiling solana-last-restart-slot v3.2.0
+   Compiling solana-slot-hashes v3.2.0
+   Compiling solana-program-pack v3.1.0
+   Compiling lazy_static v1.5.1
+   Compiling subtle v2.6.1
+   Compiling solana-curve25519 v3.1.12
+   Compiling solana-sysvar v3.1.1
+   Compiling anchor-lang-idl v0.1.4
+   Compiling solana-cpi v3.1.0
+   Compiling spl-type-length-value v0.9.1
+   Compiling anchor-attribute-error v1.2.2
+   Compiling solana-system-interface v3.3.0
+   Compiling solana-system-interface v2.0.0
+   Compiling solana-borsh v3.0.2
+   Compiling serde_bytes v0.11.19
+   Compiling keccak-const v0.2.0
+   Compiling arrayref v0.3.9
+   Compiling const-crypto v0.3.0
+   Compiling solana-loader-v3-interface v6.1.1
+   Compiling spl-token-metadata-interface v0.8.0
+   Compiling solana-stake-interface v2.0.2
+   Compiling anchor-lang-error v1.2.2
+   Compiling anchor-attribute-program v1.2.2
+   Compiling spl-token-confidential-transfer-proof-extraction v0.5.1
+   Compiling solana-invoke v0.5.1
+   Compiling spl-token-group-interface v0.7.2
+   Compiling anchor-derive-accounts v1.2.2
+   Compiling anchor-attribute-account v1.2.2
+   Compiling anchor-attribute-event v1.2.2
+   Compiling solana-feature-gate-interface v3.1.0
+   Compiling anchor-attribute-access-control v1.2.2
+   Compiling anchor-derive-space v1.2.2
+   Compiling anchor-derive-serde v1.2.2
+   Compiling anchor-attribute-constant v1.2.2
+   Compiling base64 v0.21.7
+   Compiling anchor-lang v1.2.2
+   Compiling spl-token-2022-interface v2.1.0
+   Compiling spl-token-interface v2.0.0
+   Compiling spl-associated-token-account-interface v2.0.0
+   Compiling anchor-spl v1.2.2
+   Compiling grave-scanner v0.1.0 (/home/z/my-project/graveyield-protocol/programs/grave-scanner)
+    Finished `release` profile [optimized] target(s) in 3m 29s
++ wget https://github.com/Snaipe/Criterion/releases/download/v2.3.3/criterion-v2.3.3-linux-x86_64.tar.bz2 -O criterion-v2.3.3-linux-x86_64.tar.bz2 --progress=dot:giga --retry-connrefused --read-timeout=30
+--2026-11-12 02:47:48--  https://github.com/Snaipe/Criterion/releases/download/v2.3.3/criterion-v2.3.3-linux-x86_64.tar.bz2
+Resolving github.com (github.com)... 20.205.243.166
+Connecting to github.com (github.com)|20.205.243.166|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://release-assets.githubusercontent.com/github-production-release-asset/30111969/98b27400-e1f1-11e8-8f10-e43f4ef84b92?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-11-12T03%3A33%3A17Z&rscd=attachment%3B+filename%3Dcriterion-v2.3.3-linux-x86_64.tar.bz2&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-11-12T02%3A32%3A27Z&ske=2026-11-12T03%3A33%3A17Z&sks=b&skv=2018-11-09&sig=88GXQ8QRn4FtsaUuY37qVXjGVfAtF5DSWfSqFp4lJoo%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc5NDQ1MTk2OCwibmJmIjoxNzk0NDUxNjY4LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.0pDy9pQh_wlQ_-VO7e7vnO87A5L0iqYA_cKefwPFzSg&response-content-disposition=attachment%3B%20filename%3Dcriterion-v2.3.3-linux-x86_64.tar.bz2&response-content-type=application%2Foctet-stream [following]
+--2026-11-12 02:47:49--  https://release-assets.githubusercontent.com/github-production-release-asset/30111969/98b27400-e1f1-11e8-8f10-e43f4ef84b92?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-11-12T03%3A33%3A17Z&rscd=attachment%3B+filename%3Dcriterion-v2.3.3-linux-x86_64.tar.bz2&rsct=application%2Foctet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-11-12T02%3A32%3A27Z&ske=2026-11-12T03%3A33%3A17Z&sks=b&skv=2018-11-09&sig=88GXQ8QRn4FtsaUuY37qVXjGVfAtF5DSWfSqFp4lJoo%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc5NDQ1MTk2OCwibmJmIjoxNzk0NDUxNjY4LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.0pDy9pQh_wlQ_-VO7e7vnO87A5L0iqYA_cKefwPFzSg&response-content-disposition=attachment%3B%20filename%3Dcriterion-v2.3.3-linux-x86_64.tar.bz2&response-content-type=application%2Foctet-stream
+Resolving release-assets.githubusercontent.com (release-assets.githubusercontent.com)... 185.199.108.133, 185.199.109.133, 185.199.110.133, ...
+Connecting to release-assets.githubusercontent.com (release-assets.githubusercontent.com)|185.199.108.133|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 677858 (662K) [application/octet-stream]
+Saving to: ‘criterion-v2.3.3-linux-x86_64.tar.bz2’
+
+     0K                                    100% 32.4M=0.02s
+
+2026-11-12 02:47:49 (32.4 MB/s) - ‘criterion-v2.3.3-linux-x86_64.tar.bz2’ saved [677858/677858]
+
++ tar --strip-components 1 -jxf criterion-v2.3.3-linux-x86_64.tar.bz2
++ ./platform-tools/rust/bin/rustc --version
++ ./platform-tools/rust/bin/rustc --print sysroot
++ [[ 5 -lt 4 ]]
++ mapfile -t toolchains
+++ rustup toolchain list
++ set +e
++ for item in "${toolchains[@]}"
++ [[ 1.89.0-sbpf-solana-v1.54 == *\s\o\l\a\n\a* ]]
++ rustup toolchain uninstall 1.89.0-sbpf-solana-v1.54
+info: uninstalling toolchain 1.89.0-sbpf-solana-v1.54
+info: toolchain 1.89.0-sbpf-solana-v1.54 uninstalled
++ for item in "${toolchains[@]}"
++ [[ 1.91.1-x86_64-unknown-linux-gnu (active, default) == *\s\o\l\a\n\a* ]]
++ set -e
++ rustup toolchain link 1.84.1-sbpf-solana-v1.51 platform-tools/rust
++ exit 0
+info: uninstalling toolchain 1.84.1-sbpf-solana-v1.51
+info: toolchain 1.84.1-sbpf-solana-v1.51 uninstalled
+   Compiling grave-scanner v0.1.0 (/home/z/my-project/graveyield-protocol/programs/grave-scanner)
+   Compiling grave-vault v0.1.0 (/home/z/my-project/graveyield-protocol/programs/grave-vault)
+    Finished `release` profile [optimized] target(s) in 5.73s
+== provenance gate (scripts/devnet/provenance.manifest.json) ==
+PASS [digest-scanner] sha256 e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98 matches the scripts/devnet/provenance.manifest.json pin
+PASS [arch-scanner] SBPF v0 confirmed (e_machine 263, e_flags 0)
+PASS [identity-scanner] structural NS-3 identity OK (1 occurrence(s) inside allocated sections)
+PASS [digest-vault] sha256 8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83 matches the scripts/devnet/provenance.manifest.json pin
+PASS [arch-vault] SBPF v0 confirmed (e_machine 263, e_flags 0)
+PASS [identity-vault] structural NS-3 identity OK (1 occurrence(s) inside allocated sections)
+PASS [platform-tools] platform-tools v1.54 tarball sha256 matches the manifest pin
+PROVENANCE OK — the bytes to deploy are exactly the recorded deployment digests.
+bounded-provenance-check: checker exited 0 with the recorded 'PROVENANCE OK' verdict — exit 0
+== build-only complete — ELFs in target/deploy/ are provenance-verified (gitignored). Nothing was deployed. ==
