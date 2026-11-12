@@ -1,0 +1,95 @@
+=== NS-3 deployment acceptance — STRICTLY READ-ONLY ===
+overall: PASS (pass 29 / fail 0 / unverified 0 / info 6)
+context: slot 521557300 epoch 1207 commitment finalized
+cluster: genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG — pinned Devnet EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+identities: deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831 [pinned], governance BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5 [pinned], activity oracle 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o [pinned], launch-price oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee [pinned]
+
+Section G — cluster identity (pinned Solana Devnet genesis hash; runs before any deployment state)
+  PASS       [G1 devnet] RPC endpoint reports the pinned Solana Devnet genesis hash
+             genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG matches the pinned Devnet identity
+
+Section A — program accounts, ProgramData relationship, upgrade authority
+  PASS       [A1 scanner] program account exists
+             EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, 36 B data, 833120 lamports
+  PASS       [A2 scanner] program account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [A3 scanner] program account is executable
+             executable=true
+  PASS       [A4 scanner] ProgramData account decodes from the program account pointer
+             program account -> ProgramData FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG (owner loader, tag 3, slot 521526224; pointer == independently derived loader PDA)
+  PASS       [A5 scanner] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             ProgramData FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG upgrade authority = cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+  PASS       [A6 vault] program account exists
+             7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, 36 B data, 833120 lamports
+  PASS       [A7 vault] program account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [A8 vault] program account is executable
+             executable=true
+  PASS       [A9 vault] ProgramData account decodes from the program account pointer
+             program account -> ProgramData 9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4 (owner loader, tag 3, slot 521526300; pointer == independently derived loader PDA)
+  PASS       [A10 vault] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             ProgramData 9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4 upgrade authority = cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+
+Section B — ProtocolConfig PDA, schema decode, governance authority, approved defaults
+  PASS       [B1 scanner] ['protocol_config'] PDA derived independently and matches the pinned derivation
+             derived 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe (bump 255) == pinned 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe
+  PASS       [B2 scanner] config account exists
+             5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe — 252 B, 1930400 lamports
+  PASS       [B3 scanner] config account owner is its own program
+             EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL
+  PASS       [B4 scanner] config carries the Anchor account:ProtocolConfig discriminator
+             sha256("account:ProtocolConfig")[0..8] = cf5bfa1c98b3d7d1
+  PASS       [B5 scanner] config decodes per the current on-chain schema
+             all fields decoded (bump 255, pending_authority 11111111111111111111111111111111, pending_authority_eta 0)
+  PASS       [B6 scanner] config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+             authority = BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+  PASS       [B7 scanner] config values match the approved spec defaults
+             inactivitySeconds=7776000, priceCollapseBps=9900, minTvlLamports=500000000, anchorStalenessSeconds=1209600, lpBurnDustThreshold=1000, certTtlSeconds=3600
+
+Report-only observations
+  INFO       [INFO pending-authority scanner] pending-authority fields reported verbatim (reserved write-only state — not an enforced timelock)
+             pending_authority=11111111111111111111111111111111 pending_authority_eta=0
+
+Section B — ProtocolConfig PDA, schema decode, governance authority, approved defaults
+  PASS       [B8 vault] ['protocol_config'] PDA derived independently and matches the pinned derivation
+             derived 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda (bump 255) == pinned 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda
+  PASS       [B9 vault] config account exists
+             5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda — 210 B, 1717040 lamports
+  PASS       [B10 vault] config account owner is its own program
+             7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya
+  PASS       [B11 vault] config carries the Anchor account:ProtocolConfig discriminator
+             sha256("account:ProtocolConfig")[0..8] = cf5bfa1c98b3d7d1
+  PASS       [B12 vault] config decodes per the current on-chain schema
+             all fields decoded (bump 255, pending_authority 11111111111111111111111111111111, pending_authority_eta 0)
+  PASS       [B13 vault] config authority is the governance authority BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+             authority = BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5
+  PASS       [B14 vault] config values match the approved spec defaults
+             lpHolderShareBps=4000, salvorShareBps=4000, protocolShareBps=2000, maxPriorityFeeCeilingLamports=1000000000, maxSlippageBps=300, jupiterDustThresholdLamports=666666, timelockSeconds=259200
+
+Report-only observations
+  INFO       [INFO pending-authority vault] pending-authority fields reported verbatim (reserved write-only state — not an enforced timelock)
+             pending_authority=11111111111111111111111111111111 pending_authority_eta=0
+
+Section C — dedicated oracle signers
+  PASS       [C1 scanner] activity Oracle is the dedicated NS-3 key 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o (scanner)
+             activityOracle = 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o (dedicated signer, NOT the initialization authority)
+  PASS       [C2 scanner] launch Price Oracle is the dedicated NS-3 key 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee (scanner)
+             launchPriceOracle = 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee (dedicated signer, NOT the initialization authority)
+
+Section D — emergency (paused) state, reported verbatim
+  PASS       [D1 scanner] scanner emergency state reported and unpaused
+             paused=false — both programs must be unpaused at acceptance
+  PASS       [D2 vault] vault emergency state reported and unpaused
+             emergency_paused=false — both programs must be unpaused at acceptance
+
+Section E — NS-1/NS-2 residual identities (report only)
+  INFO       [E NS-1 scanner] legacy NS-1 scanner (5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-1 vault] legacy NS-1 vault (HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority GCCuhCXd5qWVUik38Qv3maoRUoe2upiyJByo2Qyb68yk — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-2 scanner] legacy NS-2 scanner (CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict
+  INFO       [E NS-2 vault] legacy NS-2 vault (Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg) residual status
+             PRESENT — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, ProgramData upgrade authority AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa — historical residue; does not affect the NS-3 verdict
+
+OVERALL RESULT: PASS

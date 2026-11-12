@@ -1,0 +1,76 @@
+=== NS-3 deployed-ELF digest verification — STRICTLY READ-ONLY ===
+overall: PASS (pass 27 / fail 0 / unverified 0 / info 0)
+context: slot 521557485 epoch 1207 commitment finalized
+cluster: genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG — pinned Devnet EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+manifest: scripts/devnet/provenance.manifest.json — schema graveyield.provenance/1, SBPF v0 (e_machine 263 / e_flags 0)
+identities: deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831 [pinned], upgradeable loader BPFLoaderUpgradeab1e11111111111111111111111 [pinned]
+
+Section G — cluster identity (pinned Solana Devnet genesis hash; runs before any deployed bytes are interpreted)
+  PASS       [G1 devnet] RPC endpoint reports the pinned Solana Devnet genesis hash
+             genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG matches the pinned Devnet identity
+
+Section A GraveScanner — program account & ProgramData pointer
+  PASS       [A1 scanner] program account exists
+             EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, 36 B data
+  PASS       [A2 scanner] program account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [A3 scanner] program account is executable
+             executable=true
+  PASS       [A4 scanner] embedded ProgramData pointer equals the independently derived loader PDA
+             program account -> ProgramData FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG (== independently derived loader PDA)
+
+Section B GraveScanner — ProgramData state & upgrade authority
+  PASS       [B1 scanner] ProgramData account exists (fetched at the embedded pointer address)
+             FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG — owner BPFLoaderUpgradeab1e11111111111111111111111, 321101 B data
+  PASS       [B2 scanner] ProgramData account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [B3 scanner] ProgramData loader state decodes (tag 3, slot, upgrade-authority metadata)
+             tag 3, slot 521526224, authority present — 45 B metadata, payload starts at offset 45
+  PASS       [B4 scanner] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             ProgramData FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG upgrade authority = cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+
+Section C GraveScanner — deployed ELF payload, SBPF v0 architecture & digest provenance
+  PASS       [C1 scanner] ELF payload extracted at the structural metadata boundary
+             ELF magic at structural offset 45; 321056 B payload after 45 B loader metadata
+  PASS       [C2 scanner] ELF structure established from the ELF's own metadata (header, section table, sections, program-header table) — the FULL extracted payload is hashed
+             ELF structure established over the full payload: 321056 B exact fit (span basis: section header table end) — every payload byte enters the digest
+  PASS       [C3 scanner] observed SHA-256 equals the approved provenance manifest digest
+             observed sha256 e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98 == approved pin (scripts/devnet/provenance.manifest.json)
+  PASS       [C4 scanner] SBPF v0 architecture (e_machine 263 / e_flags 0)
+             SBPF v0 confirmed (e_machine 263, e_flags 0)
+  PASS       [C5 scanner] structural NS-3 identity (embedded ID in allocated sections; no legacy IDs)
+             structural NS-3 identity OK (1 occurrence(s) inside allocated sections)
+
+Section A GraveVault — program account & ProgramData pointer
+  PASS       [A6 vault] program account exists
+             7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya — owner BPFLoaderUpgradeab1e11111111111111111111111, executable=true, 36 B data
+  PASS       [A7 vault] program account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [A8 vault] program account is executable
+             executable=true
+  PASS       [A9 vault] embedded ProgramData pointer equals the independently derived loader PDA
+             program account -> ProgramData 9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4 (== independently derived loader PDA)
+
+Section B GraveVault — ProgramData state & upgrade authority
+  PASS       [B6 vault] ProgramData account exists (fetched at the embedded pointer address)
+             9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4 — owner BPFLoaderUpgradeab1e11111111111111111111111, 361573 B data
+  PASS       [B7 vault] ProgramData account owner is the BPF upgradeable loader
+             BPFLoaderUpgradeab1e11111111111111111111111
+  PASS       [B8 vault] ProgramData loader state decodes (tag 3, slot, upgrade-authority metadata)
+             tag 3, slot 521526300, authority present — 45 B metadata, payload starts at offset 45
+  PASS       [B9 vault] upgrade authority (real ProgramData) is the deployer cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+             ProgramData 9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4 upgrade authority = cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831
+
+Section C GraveVault — deployed ELF payload, SBPF v0 architecture & digest provenance
+  PASS       [C6 vault] ELF payload extracted at the structural metadata boundary
+             ELF magic at structural offset 45; 361528 B payload after 45 B loader metadata
+  PASS       [C7 vault] ELF structure established from the ELF's own metadata (header, section table, sections, program-header table) — the FULL extracted payload is hashed
+             ELF structure established over the full payload: 361528 B exact fit (span basis: section header table end) — every payload byte enters the digest
+  PASS       [C8 vault] observed SHA-256 equals the approved provenance manifest digest
+             observed sha256 8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83 == approved pin (scripts/devnet/provenance.manifest.json)
+  PASS       [C9 vault] SBPF v0 architecture (e_machine 263 / e_flags 0)
+             SBPF v0 confirmed (e_machine 263, e_flags 0)
+  PASS       [C10 vault] structural NS-3 identity (embedded ID in allocated sections; no legacy IDs)
+             structural NS-3 identity OK (1 occurrence(s) inside allocated sections)
+
+OVERALL RESULT: PASS
