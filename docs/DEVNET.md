@@ -73,7 +73,7 @@ to prevent.
 | Mode | Who executes | Keys touched | Cluster | Entry point |
 |---|---|---|---|---|
 | **1. Agent-assisted local rehearsal** | agent, with owner review | throwaway keys minted into a `mktemp` dir and discarded | `solana-test-validator` on 127.0.0.1 only | `scripts/devnet/local_rehearsal_ns3.sh` |
-| **2. Owner-executed devnet deployment** | the owner, manually, step by step | owner custody keypairs only (never agents, never git) | devnet via explicit `--url` | `scripts/devnet/deploy_devnet.sh` |
+| **2. Owner-executed devnet deployment** | the owner, manually, step by step | owner custody keypairs only (never agents, never git) | devnet via explicit `--url` | `bash scripts/devnet/deploy_devnet.sh` |
 | **3. Agent-assisted read-only verification** | agent, read-only | none — public keys only | any explicitly named RPC endpoint | `scripts/devnet/verify_ns3_deployment.mjs` |
 
 Hard rules that hold in ALL modes:
@@ -201,7 +201,7 @@ update a digest merely to make a red build green.
 
 ```bash
 bash scripts/check-toolchain.sh                # (informational) toolchain pins
-scripts/devnet/deploy_devnet.sh --build-only   # build + provenance gate, no keypairs
+bash scripts/devnet/deploy_devnet.sh --build-only   # build + provenance gate, no keypairs
 scripts/devnet/local_rehearsal_ns3.sh          # local validator lifecycle drill
 ```
 
@@ -236,7 +236,7 @@ global default Solana signer.
 The owner runs, one verified step at a time:
 
 ```bash
-scripts/devnet/deploy_devnet.sh \
+bash scripts/devnet/deploy_devnet.sh \
   --url https://api.devnet.solana.com \
   --scanner-keypair /path/to/scanner-keypair.json \
   --vault-keypair   /path/to/vault-keypair.json \

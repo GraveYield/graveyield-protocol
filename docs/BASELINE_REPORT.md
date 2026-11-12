@@ -277,7 +277,7 @@ Write the custody answer (key recoverable: yes/no) into a decision record (issue
 *Accept:* written decision exists; B1 reclassified from "unknown" to resolved-either-way.
 
 **NS-2 — Fresh devnet deployment (path B; do after NS-1 = no).**
-Generate 3 fresh keypairs (scanner, vault, deployer) **in custody, never in git**; fund deployer ≥ 6 SOL; run `scripts/devnet/deploy_devnet.sh`; `protocol_admin.mjs init-all`; run both drills; sync all program-ID references (list in §6); update DEVNET.md status block with the new tx signatures and correct UTC dates.
+Generate 3 fresh keypairs (scanner, vault, deployer) **in custody, never in git**; fund deployer ≥ 6 SOL; run `bash scripts/devnet/deploy_devnet.sh`; `protocol_admin.mjs init-all`; run both drills; sync all program-ID references (list in §6); update DEVNET.md status block with the new tx signatures and correct UTC dates.
 *Accept:* new IDs live on devnet; both configs decoded at spec defaults (this report's §1.2 checks re-run green); both drills pass (pause → intruder-reject → unpause); `getProgramAccounts` shows exactly 2 accounts; zero references to old IDs remain in active code paths (`grep -rn "5JiCVx\|HUyoG5" --exclude docs/DEVNET.md` returns only historical/appendix mentions); DEVNET.md carries the new signature table.
 
 **NS-3 — Upgrade-in-place (path A; only if NS-1 = yes).**

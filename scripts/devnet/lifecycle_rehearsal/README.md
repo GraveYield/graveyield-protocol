@@ -26,7 +26,7 @@ bash scripts/devnet/lifecycle_rehearsal.sh          # uses ../salvor-bots
 The rehearsal executes the LOCALLY BUILT scanner/vault ELFs and never
 downloads GraveYield program bytes from Devnet or Mainnet:
 
-1. `scripts/devnet/deploy_devnet.sh --build-only` builds both programs with
+1. `bash scripts/devnet/deploy_devnet.sh --build-only` builds both programs with
    the repo's authenticated toolchain (platform-tools v1.54 archive
    sha256-verified against `scripts/devnet/provenance.manifest.json` on
    every run; embedded rustc 1.89.0-dev; SBPF v0).
