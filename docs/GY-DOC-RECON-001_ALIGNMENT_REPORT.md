@@ -29,6 +29,23 @@ GhostPools r3-vs-r4 differential is upgraded from PARTIAL to DOCUMENTED from the
 (§1 p. 2, Appendix A p. 15, Document Changelog pp. 15-17). The pending-transfer limitation
 is narrowed accordingly (R4-03): it applies only to the three v3.0-era DOCX originals, and
 no report finding depends on their full text.
+**Revision 5 (review-response, 2026-11-14):** three findings from the latest independent
+review of this PR, applied without any broad rewrite. R5-01: the GhostPools r3-vs-r4
+differential is re-labeled from DOCUMENTED to an **r4-documented revision summary** — r4's
+own change documentation establishes what r4 declares changed and that the Sections 5-8
+cross-chain estimates are carried forward unchanged from r3; it does not establish that
+r3's Section 4 sampling-and-extrapolation methodology, the ~$400 million-per-month
+inventory-growth figure of r3's abstract (owner-supplied; the same figure appears in r4's
+own text — abstract p. 1, §3.3 p. 4, §9 valuation note p. 7 — but never as an r3→r4
+continuity claim), or any other r3 methodology/research claim is unchanged; no independent
+claim-by-claim r3/r4 comparison has been performed (the r3 DOCX is not in the working
+environment) and none is claimed. R5-02: the historical Combined-v3.0 six-criteria
+citation is corrected from "Table 4" to §3.2, "Eligibility Criteria (cheapest-first
+evaluation order)" (owner direct DOCX inspection: fifth Word table in document sequence,
+no visible numbered "Table 4" caption; the v4.0 edition's own "Table 4" is the
+EligibilityCert layout); the historical criteria and their ordering are preserved exactly.
+R5-03: matrix verification dates are restated as two clearly labeled layers — row evidence
+verified 2026-11-13, source-document status re-verified through revision 4, 2026-11-14.
 **Baselines:** `graveyield-protocol` @ `c7d203272b994c055295c925ccd69e42c121f581` (main);
 `grave-indexer` @ `17998bab3a1c6854e42b67bf3bd1305433e3c3af` (main); `vendor/protocol` SDK pin
 `d52669990a6ea01be7387b0bc4020c29ebdd1699` (zero wire-format drift); W2 NS-3 Devnet acceptance
@@ -65,7 +82,9 @@ correction pass over the existing consolidated report — not new research. What
 
 1. **C-01 (criteria ordering).** The prior claim that "no ordering divergence exists
    anywhere" was wrong for the assigned original sources: the frozen Combined Technical
-   Documentation v3.0 (Table 4) numbered the six criteria in a different order (C1 No LP
+   Documentation v3.0 — its §3.2 six-criteria table, "Eligibility Criteria (cheapest-first
+   evaluation order)" (cited as "Table 4" in earlier revisions; corrected by the owner's
+   direct DOCX inspection in revision 5, R5-02) — numbered the six criteria in a different order (C1 No LP
    burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline —
    owner-confirmed by direct inspection of the original in the review context,
    2026-11-14 — R3-01; the binary is not yet in the working environment, so section-level
@@ -174,7 +193,8 @@ are used as current-canon evidence — they are not substitutes for the assigned
 Revision 3 status: those three reconciliations are upgraded from INCOMPLETE to
 OWNER-CONFIRMED (the owner inspected each original directly in the review context on
 2026-11-14 — R3-01); previously owner-supplied historical facts are re-labeled as
-owner-confirmed, including the v3.0 Table 4 ordering. The binaries themselves are still
+owner-confirmed, including the v3.0 historical six-criteria ordering (its §3.2 table;
+cited as "Table 4" before the revision-5 correction, R5-02). The binaries themselves are still
 not in the working environment, so section-level citations from those three files remain
 open pending transfer (R3-01).
 
@@ -186,7 +206,8 @@ required four further items, applied here:
   unavailable were inspected by the owner directly, in the review context:
   TechnicalDocumentation v3.0 (historical Pyth dependency, cheapest-first evaluation,
   `invalidate_cert`, certificate-consumption model, 72-hour timelock claims, broader AMM
-  support); CombinedTechnicalDocumentation v3.0 (historical Table 4 ordering, C1 No LP burn
+  support); CombinedTechnicalDocumentation v3.0 (historical §3.2 six-criteria-table
+  ordering — cited as "Table 4" before the revision-5 correction, R5-02 — C1 No LP burn
   … C6 Price decline); GhostPools r3 (its own research scope, estimates, methodology, and
   protocol claims). All historical-claim labels for those documents are upgraded from
   "owner-supplied (assignment brief)" to "owner-confirmed (owner inspection, review
@@ -213,8 +234,9 @@ required four further items, applied here:
   r3's existence, scope, and claim areas are owner-confirmed; the r4 changelog's declared
   r3→r4 deltas are recorded; the claim-by-claim comparison of r3's own estimates and
   methodology against r4's text remains open pending binary transfer. GhostPools rows,
-  Section 2.3, and Appendix C item 8 updated. (Upgraded in revision 4, R4-02: the
-  differential is now DOCUMENTED from the r4 binary itself — see R4-02.)
+  Section 2.3, and Appendix C item 8 updated. (Upgraded in revision 4, R4-02; re-labeled
+  in revision 5, R5-01: the status is an r4-documented revision summary, not an
+  independently verified differential — see R5-01.)
 - **R3-05 (PR description).** The pull-request body is synchronized with this revision
   (source-document status, row/question/appendix counts, revision history).
 
@@ -243,8 +265,10 @@ corroboration:
   shipped order (C1 Inactivity 90 d, C2 Price collapse 9,900 bps, C3 Residual TVL 0.5 SOL =
   500,000,000 lamports, C4 LP not burned 1,000 LP units, C5 No locked LP via the UNCX marker
   and TokenLock evidence accounts 6020-6023, C6 Epoch confirmation 2 epochs) — consistent
-  with the owner-confirmed v3.0 Table 4 sequence (C1 No LP burn … C6 Price decline) being a
-  materially different, cheapest-first ordering. Consequence: the v3.0-era claims are now
+  with the owner-confirmed v3.0 §3.2 six-criteria sequence (C1 No LP burn … C6 Price
+  decline; cited as the "v3.0 Table 4 sequence" in revision 4, corrected in revision 5,
+  R5-02) being a materially different, cheapest-first ordering. Consequence: the v3.0-era
+  claims are now
   owner-confirmed AND published-edition-corroborated. The 72-hour timelock figure and
   `invalidate_cert` naming remain owner-confirmed only (the v4.0 editions do not quote
   them), and the full v3.0 texts remain unverified pending the DOCX binaries — which now
@@ -269,12 +293,16 @@ corroboration:
   (October 2026) and the r3 row (May 2026: whitepaper v4.0 alignment, canonical
   salvage/salvor/derelict vocabulary, maritime salvage law as primary legal analogy,
   multi-epoch added; the changelog's quoted legacy vocabulary is elided here to comply with
-  the repository's canonical-vocabulary lint). Differential status: DOCUMENTED — the r4
-  side is binary-anchored with section-level citations, and r4's own continuity assertion
-  ties r3's estimates and methodology to the current text; the residual (independent
-  re-reading of r3's own wording) requires the r3 DOCX and gates no finding — the report's
-  GhostPools rows cite r4 with the paper's own qualifications preserved, and no r4 content
-  is presented as r3 content.
+  the repository's canonical-vocabulary lint). Differential status: DOCUMENTED at
+  revision 4; re-labeled in revision 5 (R5-01) to an r4-documented revision summary — the
+  r4 side is binary-anchored with section-level citations, and r4's own continuity
+  assertion carries r3's Sections 5-8 estimates forward unchanged, but does not cover
+  r3's Section 4 sampling-and-extrapolation methodology, the ~$400 million-per-month
+  inventory-growth figure of r3's abstract, or any other r3 claim outside that scope
+  (unchanged estimates do not establish unchanged methodology); the residual (independent
+  claim-by-claim comparison of r3's own wording, beginning with those areas) requires the
+  r3 DOCX and remains open (non-gating) — the report's GhostPools rows cite r4 with the
+  paper's own qualifications preserved, and no r4 content is presented as r3 content.
 - **R4-03 (working-environment limitation narrowed).** The "binaries are not in the working
   environment" statements are re-scoped: they describe the three v3.0-era DOCX originals
   only. The three published v4.0-era PDF renditions are repository objects (added via owner
@@ -286,6 +314,44 @@ corroboration:
 - **R4-04 (PR description).** The pull-request body is synchronized with this revision
   (source-document status table: differential DOCUMENTED; revision history: revision 4
   entry).
+
+**Revision 5 additions (review-response, 2026-11-14).** Three findings from the latest
+independent review of this PR, applied as a documentation-only correction pass:
+
+- **R5-01 (differential status re-labeled).** The GhostPools r3-vs-r4 differential is
+  re-labeled from DOCUMENTED to an r4-documented revision summary. What the recorded
+  evidence establishes: r4's own change documentation (§1 p. 2; Document Changelog
+  pp. 15-17) declares the r3→r4 deltas, and r4's Appendix A continuity assertion (p. 15)
+  carries the Sections 5-8 cross-chain estimates forward unchanged from r3. What it does
+  not establish: that r3's Section 4 sampling-and-extrapolation methodology, the
+  ~$400 million-per-month inventory-growth figure of r3's abstract (owner-supplied from
+  direct DOCX inspection; the same figure appears in r4's own text — abstract p. 1, §3.3
+  p. 4, and the §9 valuation note p. 7 — but r4 nowhere states it as an r3→r4 continuity
+  claim), or any other r3 methodology or research claim outside the Sections 5-8 scope is
+  unchanged. Unchanged estimates do not establish unchanged methodology — a distinction
+  r4 itself draws by isolating "the effect of new methodology (rather than new market
+  prices)" in the same Appendix A sentence. No independent claim-by-claim r3/r4 comparison
+  has been performed (the r3 DOCX is not in the working environment); none is claimed.
+  Status: r4-documented revision summary + owner-confirmed r3 scope; the residual remains
+  open and non-gating.
+- **R5-02 (historical table citation corrected).** The historical Combined-v3.0
+  six-criteria ordering was cited throughout this report as "Table 4" of
+  GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx. The owner's direct
+  DOCX inspection (2026-11-14) locates the table under §3.2, "Eligibility Criteria
+  (cheapest-first evaluation order)", as the fifth Word table in document sequence, with
+  no visible numbered "Table 4" caption; every v3.0-historical "Table 4" reference is
+  corrected to that §3.2 citation. The historical criteria and their ordering are
+  preserved exactly (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5
+  Inactivity, C6 Price decline), the C-01 divergence explanation is unchanged, and the
+  v4.0 edition's own numbered tables (its "Table 4" is the EligibilityCert layout; its
+  Table 9 fixes the shipped order) remain cited as before — table numbering is not
+  comparable across editions.
+- **R5-03 (verification dates labeled in layers).** The §3 and §7 matrix headings'
+  "(verified 2026-11-13)" labels are restated as two clearly separated layers: row-level
+  evidence verification (2026-11-13 — code, living-source, and live-RPC checks at the
+  baseline) and the source-document status re-verified through revision 4 (2026-11-14).
+  The ADR table's per-column "Verified State (2026-11-13)" vintage label is retained as
+  an accurate baseline marker.
 
 ---
 
@@ -404,8 +470,8 @@ deployment, commit, push, or PR was created or modified in either repository.
 |---|---|---|
 | GraveYield_Whitepaper_v4_0_1 (1).docx | FOUND and INSPECTED (revision 2): uploaded by the owner to the assignment workspace on 2026-11-13 (`upload/GraveYield_Whitepaper_v4_0_1 (1).docx`, 20,977 bytes; full text extracted from the DOCX itself, not from a preview). Internal metadata: header and footer read "Version 4.0 · May 2026"; docProps created 2026-05-02; footer states it supersedes Whitepaper v3.0 (April 2026) with the legacy-vocabulary-to-salvage reframing recorded in its own changelog (the reframing the CI lint and glossary.md:26-42 now enforce). The filename-vs-metadata contradiction (Q-01) is therefore CONFIRMED from the original: the file named v4_0_1 is internally v4.0. See Section 2.3 for the reconciliation matrix and the material claims now verified first-hand. Repository availability (R3-02): no .docx was located in any repository ref searched; this file is an owner-supplied review artifact, not a repository object. |
 | GraveYield_TechnicalDocumentation_v3_0.docx | NOT PRESENT in the working environment; OWNER-INSPECTED in the review context (2026-11-14, R3-01) | Revision 3 status: the owner inspected the original directly in the review context and confirms it contains the historical Pyth dependency, cheapest-first evaluation, `invalidate_cert`, the certificate-consumption model, 72-hour timelock claims, and broader AMM support — exactly the legacy claims this report reconciles against current code in spec §3.1 (none of which describes current behavior except as evidenced). The owner-provided links on 2026-11-13 point to the repo's PUBLISHED v4.0 edition (`docs/published/GraveYield_TechnicalDocumentation_v4_0.pdf`), a newer generation, NOT the assigned v3.0 DOCX; it was inspected in full and is used as current-canon evidence only. What is still needed: transfer of the v3.0 DOCX binary into the working environment for section-level citation; until then these historical claims are labeled owner-confirmed, not binarily verified here. Revision-4 corroboration (R4-01): the published v4.0 edition itself corroborates the claim categories from its own change documentation — §2 "Oracle distinction" note (p. 4): "It does not currently use Pyth as the price-collapse oracle described in the old technical document"; §12 Revision history (pp. 12-13): v3.0 "contained stale version, AMM-support, oracle, governance and deployment claims". |
-| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx | NOT PRESENT in the working environment; OWNER-INSPECTED in the review context (2026-11-14, R3-01) | Revision 3 status: the owner's direct inspection confirms the historical Table 4 ordering (C1 No LP burn ... C6 Price decline) — the C-01 historical-divergence record now rests on owner-confirmed evidence rather than assignment-brief assertion. The owner-provided link points to the repo's PUBLISHED v4.0 edition (`docs/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v4_0.pdf`, inspected in full — a newer generation, not the assigned v3.0 DOCX). The living combined markdown (v3.0-labeled) was inspected. What is still needed: transfer of the v3.0 DOCX binary into the working environment for section-level citation of the v3.0 original. Revision-4 corroboration (R4-01): the published v4.0 edition corroborates the divergence — §1.1 (p. 1): "Eligibility certificates are reissued, not consumed. The v3.0 consumed_at field does not exist"; §3.3 (p. 8): "v3.0 described this as a cheapest-first order"; Table 9 (pp. 8-9) fixes the shipped C1-C6 order. Caution: v4.0's own "Table 4" is the EligibilityCert layout — table numbering is not comparable across editions. |
-| GhostPools_Research_Paper_WP-2026-001r3.docx | NOT PRESENT in the working environment; OWNER-INSPECTED in the review context (2026-11-14, R3-01) | Revision 3 status: the owner's direct inspection confirms r3 contains its own research scope, estimates, methodology, and protocol claims. The r3-vs-r4 differential is DOCUMENTED (R3-04; upgraded by R4-02): r3's existence, scope, and claim areas are owner-confirmed, and the r4 binary documents the declared r3→r4 changes directly — r4 §1 (p. 2): "Since the third revision of this working paper (May 2026), two material developments extend the research program"; r4 Appendix A (p. 15): "the cross-chain estimates of Sections 5-8 are carried forward unchanged from r3 so that revisions remain comparable"; Document Changelog (pp. 15-17, consistent with ghostpools-research.md:128-136). Declared deltas (r4: Ghost Pool Observatory/Dune instrumentation integrated; frozen spec v1.0.0 deeply merged; 9 Oct 2026 devnet deployment recorded; first typeset two-column edition; r3 itself (May 2026): Whitepaper v4.0 alignment, canonical salvage/salvor/derelict vocabulary, maritime salvage law as primary legal analogy, multi-epoch added to feasibility). What remains open (non-gating): independent re-reading of r3's own wording, which requires the r3 DOCX binary; r4's continuity assertion plus the owner's scope confirmation already connect r3's estimates and methodology to the current text. The report's GhostPools rows cite r4 as the current edition and preserve the research-estimate qualifications; no r4 content is presented as r3 content. |
+| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx | NOT PRESENT in the working environment; OWNER-INSPECTED in the review context (2026-11-14, R3-01) | Revision 3 status: the owner's direct inspection confirms the historical six-criteria ordering (C1 No LP burn ... C6 Price decline), located under §3.2 "Eligibility Criteria (cheapest-first evaluation order)" — cited as "Table 4" before the revision-5 correction (R5-02) — so the C-01 historical-divergence record now rests on owner-confirmed evidence rather than assignment-brief assertion. The owner-provided link points to the repo's PUBLISHED v4.0 edition (`docs/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v4_0.pdf`, inspected in full — a newer generation, not the assigned v3.0 DOCX). The living combined markdown (v3.0-labeled) was inspected. What is still needed: transfer of the v3.0 DOCX binary into the working environment for section-level citation of the v3.0 original. Revision-4 corroboration (R4-01): the published v4.0 edition corroborates the divergence — §1.1 (p. 1): "Eligibility certificates are reissued, not consumed. The v3.0 consumed_at field does not exist"; §3.3 (p. 8): "v3.0 described this as a cheapest-first order"; Table 9 (pp. 8-9) fixes the shipped C1-C6 order. Caution: v4.0's own "Table 4" is the EligibilityCert layout — table numbering is not comparable across editions. |
+| GhostPools_Research_Paper_WP-2026-001r3.docx | NOT PRESENT in the working environment; OWNER-INSPECTED in the review context (2026-11-14, R3-01) | Revision 3 status: the owner's direct inspection confirms r3 contains its own research scope, estimates, methodology, and protocol claims. The r3-vs-r4 differential is an r4-documented revision summary (R3-04; R4-02 recorded r4's own change documentation; re-labeled by R5-01 — not an independently verified comparison): r3's existence, scope, and claim areas are owner-confirmed, and the r4 binary documents the declared r3→r4 changes directly — r4 §1 (p. 2): "Since the third revision of this working paper (May 2026), two material developments extend the research program"; r4 Appendix A (p. 15): "the cross-chain estimates of Sections 5-8 are carried forward unchanged from r3 so that revisions remain comparable"; Document Changelog (pp. 15-17, consistent with ghostpools-research.md:128-136). Declared deltas (r4: Ghost Pool Observatory/Dune instrumentation integrated; frozen spec v1.0.0 deeply merged; 9 Oct 2026 devnet deployment recorded; first typeset two-column edition; r3 itself (May 2026): Whitepaper v4.0 alignment, canonical salvage/salvor/derelict vocabulary, maritime salvage law as primary legal analogy, multi-epoch added to feasibility). What remains open (non-gating): an independent claim-by-claim comparison of r3's own wording — explicitly including r3's Section 4 sampling-and-extrapolation methodology, the ~$400 million-per-month inventory-growth figure of its abstract, and any other claims outside the Sections 5-8 continuity scope — which requires the r3 DOCX binary; r4's continuity assertion connects only the Sections 5-8 estimates to the current text, and unchanged estimates do not establish unchanged methodology. The report's GhostPools rows cite r4 as the current edition and preserve the research-estimate qualifications; no r4 content is presented as r3 content. |
 
 Availability semantics (R3-02, revision 3). Two distinct availability questions are kept
 separate throughout this report: (a) REPOSITORY availability — no .docx file was located in
@@ -442,14 +508,14 @@ the Combined upload stayed at `docs/` — and all three verified present in the
 report-baseline tree via `git cat-file` at `c7d2032`; page counts re-confirmed 19/13/25;
 the single-Pyth claim re-verified (1/0/0 occurrences across the set).
 
-### 2.3 Original source-document reconciliation matrix (revisions 3-4)
+### 2.3 Original source-document reconciliation matrix (revisions 3-5)
 
 | Source | Version | Sections inspected | Historical claims (verified vs owner-supplied) | Current canonical position | Material discrepancies | Resolution / decision |
 |---|---|---|---|---|---|---|
-| GraveYield_Whitepaper_v4_0_1 (1).docx — INSPECTED (owner upload, 2026-11-13) | Internally Version 4.0 (May 2026; created 2026-05-02) despite v4_0_1 filename; self-describes as superseding v3.0 (April 2026) | Full text (abstract; §1; §2.1-2.3 incl. criteria table; §3.1-3.4; §4.1-4.5; §5 roadmap; §6; §7; §8; §9; Appendix A glossary; closing changelog) | VERIFIED: criteria table uses bare numerals 1-6 in the canonical semantic order (inactivity, price decline, TVL, LP supply, lock, multi-epoch) — consistent with WP-03; criterion 2 data source "Pyth oracle + LaunchPrice PDA" and four further Pyth claims (§2.1, §4.1, §4.5, glossary); criterion 5 "No governance or multisig lock" (data source "Pool account authority field"); criterion 3 "≥ 0.5 SOL equivalent in base asset"; §2.3 "GraveVault redeems the entire LP supply of the pool via CPI into Raydium, Orca, or PumpSwap"; §4.2 "Acquires and redeems LP tokens via CPI into Raydium CLMM, Orca Whirlpool, or PumpSwap"; §2.3 cert validation "(not expired, not consumed, not invalidated)"; glossary "≥ 2 consecutive Solana epochs"; §3.4 protocol-share purposes ("designated exclusively for smart contract security audits and bug bounty payouts, protocol maintenance and upgrades, infrastructure costs, development of new protocol capabilities and DEX integrations, and legal and compliance advisory fees"); §4.4/§7.2 "72-hour on-chain timelock"; §8.2 "guaranteed 40% restitution share" and "This is not a fully settled legal framework in any major jurisdiction"; §6.1 internal figures (~155,000 derelict pools; $420M-$2.8B Solana; $860M-$5.4B cross-chain); §5 dated roadmap (Q2 2026 → Q2 2027+, audit "Q3 2026", BVI entity "Q4 2026") | criteria.rs bitmap C1-C6; dedicated Ed25519 oracle attestations (no Pyth anywhere in the implementation — live-verified); UNCX-only lock detection (governance/multisig locks undetected, Q-04); raw-unit TVL floor with no SOL/USD normalization (Q-03); salvor-held LP burn with no protocol acquisition path (Q-16); cert not consumed (init-once PoolRegistry); two-epoch gap + bitmap equality (no per-epoch checks); write-only timelock fields (7014 never raised); defined share of realized proceeds, not guaranteed recovery (legal-documentation.md:599); GhostPools r4 qualified figures; status-based roadmap without dates | Pyth claims contradicted by implementation (matrix WP-08/TD rows + §4 draft §4.2); "entire LP supply"/"acquires LP" contradicted by salvage_pool.rs (NEW row WP-12); governance/multisig lock criterion vs UNCX-only detection (Q-04, C-07); "0.5 SOL equivalent" vs raw-unit floor (Q-03, C-06); "not consumed" validation concept vs no consumed state (C-02 note); "consecutive epochs" glossary wording vs gap+bitmap-equality semantics (C-03); "on-chain timelock" vs write-only fields (RSK-05); "guaranteed 40% restitution" vs defined-share language (legal boundary); dated roadmap vs status-based roadmap (Q-12) | Revised whitepaper v4.1.0 (Sections 4 and 9.3) already reflects every correction; Q-01 updated to largely resolved (v4.0 metadata confirmed from the original; 4.1.0 designation still requires owner ratification); the combined-doc Table 4 ordering is owner-confirmed (R3-01; binary transfer pending for section-level citation) |
+| GraveYield_Whitepaper_v4_0_1 (1).docx — INSPECTED (owner upload, 2026-11-13) | Internally Version 4.0 (May 2026; created 2026-05-02) despite v4_0_1 filename; self-describes as superseding v3.0 (April 2026) | Full text (abstract; §1; §2.1-2.3 incl. criteria table; §3.1-3.4; §4.1-4.5; §5 roadmap; §6; §7; §8; §9; Appendix A glossary; closing changelog) | VERIFIED: criteria table uses bare numerals 1-6 in the canonical semantic order (inactivity, price decline, TVL, LP supply, lock, multi-epoch) — consistent with WP-03; criterion 2 data source "Pyth oracle + LaunchPrice PDA" and four further Pyth claims (§2.1, §4.1, §4.5, glossary); criterion 5 "No governance or multisig lock" (data source "Pool account authority field"); criterion 3 "≥ 0.5 SOL equivalent in base asset"; §2.3 "GraveVault redeems the entire LP supply of the pool via CPI into Raydium, Orca, or PumpSwap"; §4.2 "Acquires and redeems LP tokens via CPI into Raydium CLMM, Orca Whirlpool, or PumpSwap"; §2.3 cert validation "(not expired, not consumed, not invalidated)"; glossary "≥ 2 consecutive Solana epochs"; §3.4 protocol-share purposes ("designated exclusively for smart contract security audits and bug bounty payouts, protocol maintenance and upgrades, infrastructure costs, development of new protocol capabilities and DEX integrations, and legal and compliance advisory fees"); §4.4/§7.2 "72-hour on-chain timelock"; §8.2 "guaranteed 40% restitution share" and "This is not a fully settled legal framework in any major jurisdiction"; §6.1 internal figures (~155,000 derelict pools; $420M-$2.8B Solana; $860M-$5.4B cross-chain); §5 dated roadmap (Q2 2026 → Q2 2027+, audit "Q3 2026", BVI entity "Q4 2026") | criteria.rs bitmap C1-C6; dedicated Ed25519 oracle attestations (no Pyth anywhere in the implementation — live-verified); UNCX-only lock detection (governance/multisig locks undetected, Q-04); raw-unit TVL floor with no SOL/USD normalization (Q-03); salvor-held LP burn with no protocol acquisition path (Q-16); cert not consumed (init-once PoolRegistry); two-epoch gap + bitmap equality (no per-epoch checks); write-only timelock fields (7014 never raised); defined share of realized proceeds, not guaranteed recovery (legal-documentation.md:599); GhostPools r4 qualified figures; status-based roadmap without dates | Pyth claims contradicted by implementation (matrix WP-08/TD rows + §4 draft §4.2); "entire LP supply"/"acquires LP" contradicted by salvage_pool.rs (NEW row WP-12); governance/multisig lock criterion vs UNCX-only detection (Q-04, C-07); "0.5 SOL equivalent" vs raw-unit floor (Q-03, C-06); "not consumed" validation concept vs no consumed state (C-02 note); "consecutive epochs" glossary wording vs gap+bitmap-equality semantics (C-03); "on-chain timelock" vs write-only fields (RSK-05); "guaranteed 40% restitution" vs defined-share language (legal boundary); dated roadmap vs status-based roadmap (Q-12) | Revised whitepaper v4.1.0 (Sections 4 and 9.3) already reflects every correction; Q-01 updated to largely resolved (v4.0 metadata confirmed from the original; 4.1.0 designation still requires owner ratification); the combined-doc historical §3.2 six-criteria ordering (initially cited as "Table 4"; corrected R5-02) is owner-confirmed (R3-01; binary transfer pending for section-level citation) |
 | GraveYield_TechnicalDocumentation_v3_0.docx — OWNER-INSPECTED (review context, 2026-11-14; binary not in working environment) | — | Owner inspection: presence of the historical claims listed next confirmed; section-level citation pending binary transfer (R3-01); corroborated by the published v4.0 edition's own change documentation (R4-01: §2 Oracle-distinction note p. 4; §12 Revision history pp. 12-13) | Owner-confirmed (R3-01): historical Pyth dependency, cheapest-first evaluation, invalidate_cert, certificate-consumption model, 72-hour timelock claims, broader AMM support, older account/field definitions | technical-documentation.md (living, v4.0) + published v4.0 PDF are the current canon; legacy claims reconciled against current code in spec §3.1 | Reconciled result: none of the confirmed legacy claims describes current behavior except as evidenced in spec §3.1 | PARTIALLY RECONCILED — claims owner-confirmed, published-edition-corroborated (R4-01), and reconciled against current code; the residual is full-v3.0-text verification only, which gates no finding. Do not reconstruct the v3.0 full text from the v4.0 edition; its revision history is evidence about v3.0's claim categories, not a copy of its text |
-| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx — OWNER-INSPECTED (review context, 2026-11-14; binary not in working environment) | — | Owner inspection: Table 4 ordering confirmed; section-level citation pending binary transfer (R3-01); corroborated by the published v4.0 edition (R4-01: §1.1 consumed_at/reissue p. 1; §3.3 cheapest-first p. 8; Table 9 shipped order pp. 8-9) | Owner-confirmed (R3-01): Table 4 historical ordering (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline); §7 error ranges and §9 deployment narrative known via the living md | living combined md (v3.0-labeled) + published v4.0 PDF are current canon; historical mapping documented in spec §3.1 Table 3.1a | Historical ordering divergence (C-01, owner-confirmed); "Consumed by GraveVault" wording in the living md (CB-04) | RECONCILED FOR THE RECORDED CLAIMS — owner-confirmed AND corroborated by the published v4.0 edition's own change documentation (R4-01); the residual is full-v3.0-text verification only. Historical labels must not be read as current identifiers, and v4.0 table numbers (its Table 4 is the EligibilityCert layout) must not be projected onto v3.0 |
-| GhostPools_Research_Paper_WP-2026-001r3.docx — OWNER-INSPECTED (review context, 2026-11-14; binary not in working environment) | — | Owner inspection: r3's own research scope, estimates, methodology, and protocol claims confirmed present; section-level citation pending binary transfer (R3-01); the r4 binary documents the r3→r4 delta directly (R4-02) | Owner-confirmed (R3-01): r3 carries its own research scope, estimates, methodology, and protocol claims; changelog-recorded r3 features (May 2026): Whitepaper v4.0 alignment; salvage/salvor/derelict vocabulary; maritime salvage as primary legal analogy; multi-epoch added to feasibility — per the r4 changelog | r4 (published PDF + ghostpools-research.md) is the current edition; the report's GhostPools rows cite r4 with the paper's own qualifications preserved | r3-vs-r4 differential DOCUMENTED (R3-04, upgraded by R4-02): scope and claim areas owner-confirmed; the r4 binary itself documents the delta (§1 p. 2 two-material-developments passage; Appendix A p. 15 continuity assertion; Document Changelog pp. 15-17) | RECONCILED FOR THE DIFFERENTIAL — documented from the r4 binary (R4-02); r3's own wording remains owner-confirmed-only (non-gating residual). r4 figures are never treated as a substitute for r3 claims |
+| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx — OWNER-INSPECTED (review context, 2026-11-14; binary not in working environment) | — | Owner inspection: §3.2 six-criteria-table ordering confirmed (the table is the fifth Word table in document sequence; no visible numbered "Table 4" caption — R5-02); section-level citation pending binary transfer (R3-01); corroborated by the published v4.0 edition (R4-01: §1.1 consumed_at/reissue p. 1; §3.3 cheapest-first p. 8; Table 9 shipped order pp. 8-9) | Owner-confirmed (R3-01): historical six-criteria ordering per §3.2 "Eligibility Criteria (cheapest-first evaluation order)" (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline; the report's earlier "Table 4" attribution corrected in revision 5, R5-02); §7 error ranges and §9 deployment narrative known via the living md | living combined md (v3.0-labeled) + published v4.0 PDF are current canon; historical mapping documented in spec §3.1 Table 3.1a | Historical ordering divergence (C-01, owner-confirmed); "Consumed by GraveVault" wording in the living md (CB-04) | RECONCILED FOR THE RECORDED CLAIMS — owner-confirmed AND corroborated by the published v4.0 edition's own change documentation (R4-01); the residual is full-v3.0-text verification only. Historical labels must not be read as current identifiers, and v4.0 table numbers (its Table 4 is the EligibilityCert layout) must not be projected onto v3.0 |
+| GhostPools_Research_Paper_WP-2026-001r3.docx — OWNER-INSPECTED (review context, 2026-11-14; binary not in working environment) | — | Owner inspection: r3's own research scope, estimates, methodology, and protocol claims confirmed present; section-level citation pending binary transfer (R3-01); the r4 binary documents the r3→r4 delta directly (R4-02; re-labeled by R5-01 as an r4-documented revision summary) | Owner-confirmed (R3-01): r3 carries its own research scope, estimates, methodology, and protocol claims; changelog-recorded r3 features (May 2026): Whitepaper v4.0 alignment; salvage/salvor/derelict vocabulary; maritime salvage as primary legal analogy; multi-epoch added to feasibility — per the r4 changelog | r4 (published PDF + ghostpools-research.md) is the current edition; the report's GhostPools rows cite r4 with the paper's own qualifications preserved | r3-vs-r4 differential status: r4-documented revision summary (R3-04; R4-02; re-labeled by R5-01): scope and claim areas owner-confirmed; r4's own change documentation is recorded from the binary (§1 p. 2 two-material-developments passage; Appendix A p. 15 continuity assertion — Sections 5-8 estimates carried forward unchanged; Document Changelog pp. 15-17); this is not an independent r3/r4 comparison | RECONCILED AS AN R4-DOCUMENTED REVISION SUMMARY (R4-02; re-labeled R5-01) — r4's declared deltas and the Sections 5-8 estimate continuity are recorded; r3's own wording — including its Section 4 methodology and abstract figures — remains owner-confirmed-only, with no independent comparison performed (non-gating residual). r4 figures are never treated as a substitute for r3 claims |
 
 #### Key searches (read-only)
 
@@ -520,13 +586,13 @@ the GY-ADR-001 decision-alignment sheet (D1–D10).
 ### 3.1 Reconciliation matrix (49 rows)
 
 
-**GraveYield Documentation Reconciliation Matrix - GY-DOC-RECON-001 (verified 2026-11-13)**
+**GraveYield Documentation Reconciliation Matrix - GY-DOC-RECON-001 (row evidence verified 2026-11-13; source-document status re-verified through revision 4, 2026-11-14)**
 
 | ID | Document | Section / Claim | Existing Statement (as written) | Verified Current State | Required Change | Evidence | Priority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | WP-01 | Whitepaper v4.0 (living md) | Header / snapshot pointer | whitepaper.md:3 - 'Snapshot in published/GraveYield_Whitepaper_v4_0.docx' | No whitepaper .docx exists in docs/published/ (only GhostPools r4 and TechnicalDocumentation v4.0 PDFs). Git history shows no .docx was ever committed to the repo. | Fix the snapshot pointer, or publish the docx snapshot under docs/published/ at the next release render. | graveyield-protocol/docs/whitepaper.md:3; docs/published/ listing; git log --all --diff-filter=A (no docx hits) @ c7d2032 | Medium |
 | WP-02 | Whitepaper v4.0 / program source | Version designation | Living whitepaper self-declares 'Whitepaper v4.0' (canon-locked May 2026). Program source comments cite 'Whitepaper v4.0.1' as spec reference (criteria.rs, errors.rs, lib.rs, sweep_stale_anchor.rs, invalidate_anchor.rs). The assigned external docx is named v4_0_1 while its internal metadata reads Version 4.0 (per assignment; file not accessible in this environment). | No living v4.0.1 document exists in either repo; '4.0.1' appears only as code-comment spec references. CORRECTED (revision 3; this cell was stale): the assigned docx WAS inspected — the owner uploaded it on 2026-11-13 and its internal metadata (Version 4.0, May 2026) was read from the file itself (Section 2.3, WP-12); no .docx was located in any repository ref searched (R3-02). Three version designations now coexist: v4.0 (living md), v4.0.1 (code comments + assigned docx filename), v4.0 (docx internal metadata). | Establish ONE authoritative designation. Recommended: publish the revised draft as Version 4.1.0 (Draft), explicitly absorbing the informal v4.0.1 spec patch; preserve v4.0 as historical. Owner decision recorded in Deliverable 6 (Q-01). | graveyield-protocol/docs/whitepaper.md:1; programs/grave-scanner/src/criteria.rs:12; errors.rs:4; lib.rs:110; assignment brief §2.A | High |
-| WP-03 | Whitepaper v4.0 | §3 criteria numbering | Criteria table uses bare numerals 1-6 with no C-prefix. | All LIVING canon (PROTOCOL_SPEC §4, technical-documentation §2, combined md §4.3, code criteria.rs:25-30 bitmap bits) uses C1-C6 in the same semantic order. CORRECTED (C-01): the frozen Combined Technical Documentation v3.0 DOCX — the assigned original, Table 4 — numbered the criteria differently (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline; owner-confirmed from the original — R3-01), so ordering divergence DID exist historically; the living combined md and all current canon have since converged on the canonical order. Historical labels must not be read as current identifiers; mapping table in spec §3.1. | Adopt the canonical C1-C6 labels in the revised whitepaper; keep thresholds unchanged; annotate the historical mapping wherever v3.0-era labels are quoted. | whitepaper.md:41-48; PROTOCOL_SPEC.md:292-368; technical-documentation.md:129-136; grave-scanner-grave-vault-combined.md:149-156; criteria.rs:25-30; owner inspection of the v3.0 DOCX Table 4 (review context, 2026-11-14; R3-01) | Medium |
+| WP-03 | Whitepaper v4.0 | §3 criteria numbering | Criteria table uses bare numerals 1-6 with no C-prefix. | All LIVING canon (PROTOCOL_SPEC §4, technical-documentation §2, combined md §4.3, code criteria.rs:25-30 bitmap bits) uses C1-C6 in the same semantic order. CORRECTED (C-01): the frozen Combined Technical Documentation v3.0 DOCX — the assigned original, its §3.2 six-criteria table "Eligibility Criteria (cheapest-first evaluation order)" (cited as "Table 4" before the revision-5 correction, R5-02) — numbered the criteria differently (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline; owner-confirmed from the original — R3-01), so ordering divergence DID exist historically; the living combined md and all current canon have since converged on the canonical order. Historical labels must not be read as current identifiers; mapping table in spec §3.1. | Adopt the canonical C1-C6 labels in the revised whitepaper; keep thresholds unchanged; annotate the historical mapping wherever v3.0-era labels are quoted. | whitepaper.md:41-48; PROTOCOL_SPEC.md:292-368; technical-documentation.md:129-136; grave-scanner-grave-vault-combined.md:149-156; criteria.rs:25-30; owner inspection of the v3.0 DOCX §3.2 six-criteria table (review context, 2026-11-14; R3-01, R5-02) | Medium |
 | WP-04 | Whitepaper v4.0 | §3 criterion 4 | 'LP not burned \| (boolean)'. | Implementation is threshold-based, not boolean: lp_supply > lp_burn_dust_threshold (strict >), default dust threshold 1,000 raw LP units (marked PRE-MAINNET-TODO(KEYS-002)). | Restate as 'LP supply not burned: lp_supply strictly greater than the LP burn dust threshold (default 1,000 raw LP units)'. | whitepaper.md:46; criteria.rs:142-151; constants.rs:34; technical-documentation.md:134 | Medium |
 | WP-05 | Whitepaper v4.0 | §3 criterion 5 | 'LP not locked \| (boolean)'. | Implementation: lp_locked_amount == 0, where the amount is produced exclusively by the UNCX Raydium V4 locker adapter (LOCKER-001; marker PDA + TokenLock evidence, errors 6020-6023). PinkSale, Team Finance, Streamflow and any other lockers are NOT detected (LOCKER-002 open); a pool locked in an undetected locker passes C5. | Qualify the criterion with its detection scope ('zero locked LP attributable to supported locker adapters'); document undetected-locker limitation without expanding the criterion (owner approval required for expansion). | whitepaper.md:47; criteria.rs:153-158; adapters/locker.rs (programs/grave-scanner/src); PRE_MAINNET_CHECKLIST.md LOCKER-002; technical-documentation.md:135 | High |
 | WP-06 | Whitepaper v4.0 | §3 criterion 3 | 'Minimum residual TVL \| >= 0.5 SOL (quote-side vault balance)'. | Implementation compares min_tvl_lamports >= 500,000,000 RAW UNITS of the quote-side vault. This equals 0.5 SOL only when the quote mint is WSOL; for a 6-decimal quote mint (e.g. USDC) the same raw count equals 500 display tokens (500,000,000 raw units — CORRECTED in revision 2, C-06; the previous text wrongly said "500 raw display units"). The implementation applies the same fixed raw-unit count to every quote mint with no decimals or value normalization (evaluate_pool_phase1.rs:151 uses the quote reserve directly), so it does not establish a universal 0.5 SOL-equivalent or USD-denominated minimum. Tech-doc lists 'C3 TVL unit consistency' as an open item; live devnet config decodes min_tvl_lamports = 500,000,000. | Add the raw-units caveat to the revised whitepaper; keep the 0.5 SOL default framing tied to WSOL quote pools. | whitepaper.md:45; criteria.rs:135-140; technical-documentation.md:133 + §10 blockers; live RPC decode 2026-11-13 (evidence/live_rpc_verification_2026-11-13.txt) | Medium |
@@ -646,7 +712,7 @@ Not a Mainnet product yet. The protocol is deployed and accepted on Solana Devne
 
 #### **3. Eligibility - The Six Derelict-Pool Criteria**
 
-Eligibility is decided by a single evaluator function in the GraveScanner program, executed identically in both lifecycle phases. The evaluator is a fixed sequential conjunction C1 through C6: the first failed criterion aborts evaluation, a passing evaluation produces the full criteria bitmap 0x3F, and a pool failing any criterion is not eligible. Thresholds live in ProtocolConfig and are governance-tunable only within bounded ranges; invariant-violating updates revert. The canonical numbering below is used across the specification, the technical documentation, and the program source. Historical note (C-01): the frozen Combined Technical Documentation v3.0 (its Table 4) numbered the six criteria in a different order — its C1 was "No LP burn", C2 "No governance lock", C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline. Those are historical labels only; the canonical identifiers are C1-C6 as defined in this table, and historical labels must not be read as current identifiers.
+Eligibility is decided by a single evaluator function in the GraveScanner program, executed identically in both lifecycle phases. The evaluator is a fixed sequential conjunction C1 through C6: the first failed criterion aborts evaluation, a passing evaluation produces the full criteria bitmap 0x3F, and a pool failing any criterion is not eligible. Thresholds live in ProtocolConfig and are governance-tunable only within bounded ranges; invariant-violating updates revert. The canonical numbering below is used across the specification, the technical documentation, and the program source. Historical note (C-01): the frozen Combined Technical Documentation v3.0 (its §3.2 six-criteria table, "Eligibility Criteria (cheapest-first evaluation order)"; cited as "Table 4" before revision 5's correction, R5-02) numbered the six criteria in a different order — its C1 was "No LP burn", C2 "No governance lock", C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline. Those are historical labels only; the canonical identifiers are C1-C6 as defined in this table, and historical labels must not be read as current identifiers.
 
 **Table 2. Canonical criteria (thresholds unchanged from v4.0; defaults shown)**
 
@@ -890,9 +956,9 @@ One evaluator (grave-scanner/src/criteria.rs) implements the six criteria for bo
 
 All LIVING canonical sources use the same semantic order. Differences are labeling only: the whitepaper uses bare numerals 1-6; the specification, technical documentation, combined living markdown, and code use C1-C6; wording variants exist for C4 ("LP not burned" vs "LP supply not burned") and C5 ("LP not locked" vs "No LP lock"). The revised whitepaper adopts C1-C6 and the wording in Table 3.1. One historical inversion - root README's "low TVL" for C3 - was retired by spec decision D1 and remains only in the root README. [SRC][SDK]
 
-CORRECTED (C-01): the assigned ORIGINAL Combined Technical Documentation v3.0 (frozen DOCX, Table 4) used a different historical ordering. Owner-confirmed from the original (R3-01; the binary is not yet in the working environment — Section 2.3):
+CORRECTED (C-01): the assigned ORIGINAL Combined Technical Documentation v3.0 (frozen DOCX, §3.2 "Eligibility Criteria (cheapest-first evaluation order)"; cited as "Table 4" before the revision-5 correction, R5-02) used a different historical ordering. Owner-confirmed from the original (R3-01; the binary is not yet in the working environment — Section 2.3):
 
-**Table 3.1a Historical (v3.0 DOCX Table 4) → current canonical criterion mapping**
+**Table 3.1a Historical (v3.0 DOCX §3.2 six-criteria table) → current canonical criterion mapping**
 
 | Historical v3.0 label | Historical meaning | Current canonical ID | Current meaning (Table 3.1) |
 |---|---|---|---|
@@ -1309,7 +1375,7 @@ partially implemented / approved-not-implemented / proposed operational requirem
 decision — each with its evidence source.
 
 
-**GraveYield Requirements and Implementation Status - GY-DOC-RECON-001 (verified 2026-11-13)**
+**GraveYield Requirements and Implementation Status - GY-DOC-RECON-001 (row evidence verified 2026-11-13; rows unchanged through revision 4, 2026-11-14)**
 
 | ID | Requirement / Component | Area | Classification | Evidence source(s) | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -1385,7 +1451,7 @@ risk register. Q-21 was added by corrective revision 2 (C-11 evidence-type namin
 | ID | Issue | Why it matters | Current evidence | Possible interpretations | Recommended resolution | Owner approval required? | Blocks publication / implementation? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Q-01 | Authority and lineage of the "Whitepaper v4.0.1" artifact. The assigned whitepaper file is named v4_0_1 while its internal metadata reads Version 4.0; the file was uploaded by the owner on 2026-11-13 and inspected in revision 2 (internal metadata Version 4.0 confirmed from the binary); program-source comments cite "Whitepaper v4.0.1"; the living markdown self-declares v4.0; no living v4.0.1 exists in either repo. | Determines which text is the historical record and what the revised draft must supersede; unresolvable version labels undermine the documentation lineage this assignment exists to fix. | whitepaper.md:1-8; criteria.rs:12 / errors.rs:4 / lib.rs:110 code comments; repo search (no .docx located in any ref searched — R3-02); docs/README canonical set. | (a) v4.0.1 was a real internal spec patch rendered only in the external docx, whose metadata was never bumped; (b) v4.0.1 is label drift and v4.0 is the sole canonical text. | Owner confirms the lineage; adopt Version 4.1.0 (draft absorbs the informal v4.0.1 references); publish a docx snapshot only after approval. | Yes | Blocks whitepaper publication (draft itself is complete). |
-| Q-02 | Canonical criterion label set: C4 "LP supply not burned" vs "LP not burned"; C5 "LP not locked" vs "No LP lock"; whitepaper bare numerals vs C1-C6. PLUS (C-01): the frozen v3.0 DOCX Table 4 ordering (C1 No LP burn ... C6 Price decline) diverges from the canonical C1-C6 — how should historical labels be annotated where v3.0-era text is quoted? | Consistent numbering is an explicit completion standard of the assignment; misreading historical labels as current identifiers corrupts eligibility descriptions. | Matrix WP-03 (corrected); living-source comparison (aligned); owner-confirmed v3.0 Table 4 ordering (owner inspection, R3-01); mapping table in spec §3.1. | Adopt spec wording everywhere + annotate historical mapping vs keep per-document variants. | Adopt the C1-C6 labels and Table 3.1 wording of Deliverable 3 across all documents; publish the Table 3.1a historical mapping wherever v3.0-era labels are quoted. | Recommended (ratification) | Blocks sign-off of revised docs. |
+| Q-02 | Canonical criterion label set: C4 "LP supply not burned" vs "LP not burned"; C5 "LP not locked" vs "No LP lock"; whitepaper bare numerals vs C1-C6. PLUS (C-01): the frozen v3.0 DOCX §3.2 six-criteria-table ordering (C1 No LP burn ... C6 Price decline; cited as "Table 4" before the revision-5 correction, R5-02) diverges from the canonical C1-C6 — how should historical labels be annotated where v3.0-era text is quoted? | Consistent numbering is an explicit completion standard of the assignment; misreading historical labels as current identifiers corrupts eligibility descriptions. | Matrix WP-03 (corrected); living-source comparison (aligned); owner-confirmed v3.0 §3.2 six-criteria ordering (owner inspection, R3-01; R5-02); mapping table in spec §3.1. | Adopt spec wording everywhere + annotate historical mapping vs keep per-document variants. | Adopt the C1-C6 labels and Table 3.1 wording of Deliverable 3 across all documents; publish the Table 3.1a historical mapping wherever v3.0-era labels are quoted. | Recommended (ratification) | Blocks sign-off of revised docs. |
 | Q-03 | C3 unit convention: raw units (500,000,000) vs "0.5 SOL" phrasing, and the KEYS-002 reform of the flat LP dust threshold. CORRECTED units (C-06): for a 6-decimal quote mint the threshold is 500 display tokens = 500,000,000 raw units; the same raw count is applied to every quote mint without decimals/value normalization, so there is no universal 0.5 SOL-equivalent or USD minimum. | The 0.5 SOL framing is wrong for non-WSOL quote mints; user-facing docs must not overstate precision; whether a fixed raw-unit floor is the intended economic criterion across heterogeneous quote mints is an eligibility-design decision. | criteria.rs:135-140; evaluate_pool_phase1.rs:151 (quote reserve used directly); tech-doc §2 caveat + §10 blocker; live decode 500,000,000. | (a) document raw-unit semantics with WSOL caveat and per-mint implications (done in Deliverables 2/3); (b) reform to a percent-of-supply or USD/normalized check on chain (behavior change); (c) normalize by decimals while keeping a raw floor (behavior change). | Document the caveat now (done); owner decides the threshold semantics before Mainnet readiness. | Yes (for any on-chain reform) | Blocks mainnet docs; not devnet docs. |
 | Q-04 | Workstream D lock scope: should C5 eventually cover non-UNCX lockers, pool-authority status, or governance/multisig restrictions, and how should "locked" be defined? CORRECTED FRAMING (C-07): the original whitepaper describes the absence of governance or multisig locks, and the Combined Technical Documentation discusses governance and pool-authority lock conditions (both owner-confirmed from the originals — R3-01), while the implemented detection scope is UNCX Raydium V4 locker locks ONLY. The owner decision is whether UNCX-only detection is the intended canonical criterion, or the implementation is incomplete relative to the historical governance/pool-authority lock requirement. | Undetected lockers let locked pools pass C5; a pool locked only by governance/multisig arrangements (or non-UNCX lockers) is eligible under the implemented criterion; expanding scope changes eligibility behavior - explicitly out of scope without approval. THIS IS A PUBLICATION AND MAINNET-READINESS BLOCKER UNTIL RESOLVED. | Advisory A (Appendix A of Deliverable 3); LOCKER-002 open; criteria.rs:153-158 + adapters/locker.rs (UNCX-only, verified); assignment statement (owner-supplied historical definitions). | (a) keep UNCX-only scope and document it as the canonical criterion; (b) treat UNCX-only as incomplete and add adapters per locker; (c) redefine locked to include custody/governance/pool-authority mechanisms. | Owner decides the canonical lock criterion scope before any revised documentation is signed off or Mainnet readiness is claimed; keep the current scope until then. | Yes (for any expansion or redefinition) | Blocks publication and Mainnet readiness until resolved. |
 | Q-05 | Fate of the core repo's overlapping indexer functionality (indexer/ submit path holding ACTIVITY_ORACLE_KEY; ops indexerService submission contract). | ADR D3 directs narrowing/migration/retirement; oracle-key custody in a candidate scanner widens the compromise surface and blurs the evidence/authority boundary. | submit.ts:140-141; OPS.md env table; ADR D3; Deliverable 3 §16 recommendation table. | (a) retire submit + reposition ops to monitoring-only; (b) migrate the funnel to a salvor tool; (c) retain both with custody compensations. | Adopt the Deliverable 3 §16 recommendation (retire submit path; migrate tracking; narrow funnel to read-only; ops to monitoring). | Yes | Blocks implementation of the repo split; not the documentation. |
@@ -1827,7 +1893,7 @@ enforced by deployed bytecode.
 Canonical numbering C1–C6, used across the specification, technical documentation, and program
 source. The evaluator is a fixed sequential conjunction; the first miss aborts; a full pass is
 bitmap `0x3F`. Thresholds are governance-tunable only within bounded ranges. Historical note
-(C-01): the frozen Combined Technical Documentation v3.0 (Table 4) used a different historical
+(C-01): the frozen Combined Technical Documentation v3.0 (its §3.2 six-criteria table; cited as "Table 4" before revision 5's correction, R5-02) used a different historical
 numbering (its C1 "No LP burn" … C6 "Price decline"); those are historical labels only and must
 not be read as current identifiers.
 
@@ -2188,7 +2254,7 @@ this single report, each resolved inside the report itself:
 
 ---
 
-## Appendix C. Corrective revision validation record (revisions 2-4)
+## Appendix C. Corrective revision validation record (revisions 2-5)
 
 Validation performed before reporting completion (assignment §8), with method and outcome:
 
@@ -2245,8 +2311,12 @@ Validation performed before reporting completion (assignment §8), with method a
    the differential is now DOCUMENTED from the r4 binary itself — r4 §1 (p. 2) names the two
    material developments since r3; r4 Appendix A (p. 15) states the Sections 5-8 estimates
    are carried forward unchanged from r3 for cross-revision comparability; the Document
-   Changelog (pp. 15-17) records both revisions' entries. The remaining non-gating residual
-   is independent re-reading of r3's own wording (r3 DOCX binary).
+   Changelog (pp. 15-17) records both revisions' entries. Revision-5 re-label (R5-01): the
+   current status is an r4-documented revision summary, not an independently verified
+   differential — r4's continuity assertion covers the Sections 5-8 estimates only; the
+   residual is an independent claim-by-claim comparison of r3's own wording (beginning with
+   r3's Section 4 sampling-and-extrapolation methodology and the ~$400 million-per-month
+   inventory-growth figure of its abstract), which requires the r3 DOCX binary.
 9. **Original whitepaper economic and Charter provisions.** Verified present in the revised
    drafts: §3.4 purpose list (both renderings, C-09); 40/40/20 with remainder conservation;
    unsweepable LP-holder vault; no-expiry pause-immune claims; no-token commitments;
@@ -2273,11 +2343,13 @@ Validation performed before reporting completion (assignment §8), with method a
     paths on `main` are consistent with the exhaustive search.
 13. **Owner-confirmed historical claims (R3-01).** TechDoc v3.0 (Pyth dependency,
     cheapest-first evaluation, invalidate_cert, certificate consumption, 72-hour timelock
-    claims, broader AMM support), Combined v3.0 (Table 4 ordering, C1 No LP burn … C6
+    claims, broader AMM support), Combined v3.0 (historical §3.2 six-criteria ordering —
+    cited as "Table 4" before the revision-5 correction, R5-02 — C1 No LP burn … C6
     Price decline), and GhostPools r3 (own scope/estimates/methodology/claims) are recorded
     as owner-confirmed from direct inspection in the review context — not as binarily
     verified in this environment; the claim-by-claim r3-vs-r4 differential remains open
-    (R3-04). Revision-4 corroboration (R4-01): the published editions corroborate the
+    (R3-04; re-labeled as an r4-documented revision summary in revision 5, R5-01 — see
+    item 8). Revision-4 corroboration (R4-01): the published editions corroborate the
     recorded claims from their own change documentation — TechDoc v4.0 §2 Oracle-distinction
     note (p. 4: the old technical document's Pyth price-collapse oracle) and §12 Revision
     history (pp. 12-13: v3.0 "contained stale version, AMM-support, oracle, governance and
@@ -2298,12 +2370,25 @@ Validation performed before reporting completion (assignment §8), with method a
     rows, this appendix); no source, SDK, deployment, or protocol-behavior statement
     changed, and no finding changed status except the r3-vs-r4 differential (PARTIAL →
     DOCUMENTED, R4-02) and the source-status labels it implies.
+16. **Revision 5 scope.** Confirmed: the revision-5 edits touch only this report file
+    (header revision-5 block; §0 C-01/R3-01/R3-04/R4-01 annotations and new items
+    R5-01–R5-03; §2 Combined and GhostPools rows; §2.3 heading and Combined/GhostPools
+    rows; §3 and §7 matrix-heading date labels; WP-03 and Q-02 citation corrections; spec
+    §3.1 mapping-table title and §4 historical note; the §4 draft's C-01 note; Appendix C
+    heading, items 8 and 13, and this item; the closing open-items paragraph). No source,
+    SDK, deployment, or protocol-behavior statement changed; no eligibility criterion,
+    threshold, ordering, allocation, or owner decision changed; the C-01 divergence record
+    is unchanged except for the corrected v3.0 table citation (R5-02); the differential
+    status re-label (R5-01) narrows a claim, it resolves no owner question.
 
 **Remaining unverified / open after this revision:** full-text section-level citations from
 the three v3.0-era DOCX originals (their binaries are not in the working environment; the
 claims are owner-confirmed and, where applicable, published-edition-corroborated — R3-01,
-R4-01) and independent re-reading of the r3 DOCX wording (non-gating; the r3-vs-r4
-differential is documented from the r4 binary — R4-02); CI-secrets configuration (Q-09,
+R4-01) and an independent claim-by-claim comparison of the r3 DOCX wording — explicitly
+including r3's Section 4 sampling-and-extrapolation methodology and the ~$400
+million-per-month inventory-growth figure of its abstract — which requires the r3 DOCX
+binary (non-gating; the differential's status is an r4-documented revision summary —
+R5-01); CI-secrets configuration (Q-09,
 unverifiable from a sandbox); scheduled-smoke posture; and
 every decision explicitly reserved to the owner (Q-01 ratification of 4.1.0, Q-03 threshold
 semantics, Q-04 lock-criterion scope — publication and Mainnet-readiness blocker, Q-05,
