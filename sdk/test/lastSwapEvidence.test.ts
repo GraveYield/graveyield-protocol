@@ -524,7 +524,7 @@ describe("candidate selection and completeness", () => {
     assert.equal(result.lastSwap, null);
   });
 
-  test("an empty signature response is incomplete (pruned RPC indistinguishable from a dead pool)", async () => {
+  test("an empty signature response is incomplete (pruned RPC indistinguishable from a derelict pool's empty history)", async () => {
     const rpc = new LastSwapFakeRpc([]);
     const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
     assert.equal(result.status, "incomplete");
