@@ -146,8 +146,10 @@ None contains "4.0.1"; Pyth appears exactly once across the set (the tech-doc co
 
 - `pyth` across protocol repo source: only documentation hits (tech-doc correction paragraph;
   PRE_MAINNET_CHECKLIST; two false positives "Python") — zero in programs/SDK/scripts.
-- `rescue` across docs/programs/sdk: only glossary.md (forbidden-terms table) +
-  scripts/terminology-lint.sh. All living documents comply with the terminology lint.
+- the glossary's forbidden lexeme (spelled only in glossary.md:26-42 and
+  scripts/terminology-lint.sh — the two files the lint exempts as documentation sites)
+  across docs/programs/sdk: only those two files match. All living documents comply with
+  the terminology lint.
 - `4.0.1|v4_0_1`: 6 hits, all in programs/grave-scanner/src comments ("Whitepaper v4.0.1",
   "Combined Tech Doc v3.0.1"); `v4_0_1` zero hits anywhere.
 
@@ -247,7 +249,7 @@ the GY-ADR-001 decision-alignment sheet (D1–D10).
 | IN-08 | grave-indexer docs/ORACLE_PIPELINE.md | §7 determinism claim | 'Two runs over identical chain state produce byte-identical ledgers' (unconditional). | Claim is conditional: under the MAX_POOLS_PER_SCAN cap (default 500), selection follows RPC response order before sorting (audit M-3); RPC response ordering is not contractually guaranteed. | Qualify the determinism claim with the cap caveat (or sort before truncation - code change, flagged). | ORACLE_PIPELINE.md:344-347; src/discovery.ts:294-302; audit F-M3 | Medium |
 | SPC-01 | docs/README.md | Canonical set + render contract | Canonical set of six lists Combined Tech Doc (v3.0); 'the next quarterly release re-renders the published/ .docx snapshots from these markdown files'. | Combined doc published PDF is v4.0 while the living md is v3.0 (inversion, CB-01); the whitepaper docx snapshot referenced by whitepaper.md does not exist (WP-01). | Update the canonical-set table (versions + pointers) and restate the render contract with actual artifact inventory. | docs/README.md:17-27,80-82; docs/published/ listing | Medium |
 | LEG-01 | docs/legal-documentation.md | Guarantee language | v4.0 Draft: 'No guarantee of recovery is provided'; §III.14 'Neither Salvors nor LP holders are guaranteed a particular economic outcome'; eligibility != legal abandonment declarations. | Consistent with the on-chain reality (proportional claim, not guaranteed recovery value) - the strictest language in the doc set. | None; use as the reference standard for qualifying whitepaper and research-paper language. | legal-documentation.md:599,603-611,237 | None |
-| GEN-01 | All documents | Terminology 'rescue' | Glossary forbids 'rescue/rescuer/dead pool/RescueReceipt/rescue_pool/RescueCompleted/PoolRescued' (CI lint scripts/terminology-lint.sh). | Verified: zero 'rescue' tokens in whitepaper.md, technical-documentation.md, PROTOCOL_SPEC.md, programs/, sdk/ (only glossary + lint script reference the mapping). GhostPools r4 changelog confirms r3 replaced rescue terminology. | None; preserve the lint and the canonical vocabulary in all revised drafts. | glossary.md:26-42; scripts/terminology-lint.sh; repo searches | None |
+| GEN-01 | All documents | Forbidden vocabulary | Glossary forbids a nine-pattern legacy vocabulary family (exact spelling only in glossary.md:26-42 and scripts/terminology-lint.sh — the two files the CI lint intentionally exempts as documentation sites for the mapping). | Verified: zero hits for the forbidden patterns in whitepaper.md, technical-documentation.md, PROTOCOL_SPEC.md, programs/, sdk/ (only glossary + lint script reference the mapping). GhostPools r4 changelog confirms r3 replaced the legacy terminology. | None; preserve the lint and the canonical vocabulary in all revised drafts. | glossary.md:26-42; scripts/terminology-lint.sh; repo searches | None |
 | GEN-02 | Whitepaper / legal / spec | No Mainnet-readiness claims | None of the living documents claims Mainnet readiness; tech-doc cover states 'not a security audit or mainnet release approval'; W2 §9 scope limitations state Devnet-only, not a Mainnet approval, not a security-audit certification. | Consistent. | Preserve these boundary statements verbatim in revised drafts. | Tech-doc PDF cover; W2 acceptance §9:181-186 | None |
 
 > Priority: Critical = contradicted by deployment evidence; must be corrected before any document is republished. High = material misrepresentation risk. Medium = accuracy/completeness. Low = hygiene. 'None' rows record verified-accurate claims kept as-is.
@@ -480,7 +482,7 @@ The original ten-milestone build sequence remains the project's structure, state
 
 #### **11. Terminology**
 
-The canonical vocabulary is enforced in the repository by a CI terminology lint. GraveYield is the project; GraveScanner and GraveVault are the on-chain programs; EligibilityAnchor, EligibilityCert, SalvageReceipt, LaunchPrice, PoolRegistry, and ClaimRecord are the on-chain state objects; C1 activity evidence and C2 launch-price evidence are the two attestation types; original LP holders, salvor, and protocol allocation are the three distribution parties; derelict pool is the object of settlement; and the deterministic lifecycle for abandoned liquidity is the two-phase, certificate-gated settlement flow described above. The word "rescue" is not part of the project's vocabulary in any artifact, and this draft does not reintroduce it. The maritime salvage framing is an analytical analogy and potential legal theory, not a representation of settled law; the legal documentation governs that boundary.
+The canonical vocabulary is enforced in the repository by a CI terminology lint. GraveYield is the project; GraveScanner and GraveVault are the on-chain programs; EligibilityAnchor, EligibilityCert, SalvageReceipt, LaunchPrice, PoolRegistry, and ClaimRecord are the on-chain state objects; C1 activity evidence and C2 launch-price evidence are the two attestation types; original LP holders, salvor, and protocol allocation are the three distribution parties; derelict pool is the object of settlement; and the deterministic lifecycle for abandoned liquidity is the two-phase, certificate-gated settlement flow described above. The lexeme the glossary forbids (spelled only in glossary.md and scripts/terminology-lint.sh, which the lint exempts) is not part of the project's vocabulary in any artifact, and this draft does not reintroduce it. The maritime salvage framing is an analytical analogy and potential legal theory, not a representation of settled law; the legal documentation governs that boundary.
 
 #### **12. Revision History and Provenance**
 
@@ -1639,8 +1641,9 @@ allocation above — and must not be read as guaranteed recovery value.
 Canonical terms enforced by CI terminology lint: GraveYield; GraveScanner; GraveVault;
 EligibilityAnchor; EligibilityCert; SalvageReceipt; LaunchPrice; PoolRegistry; ClaimRecord;
 C1 activity evidence; C2 launch-price evidence; original LP holders; salvor; protocol
-allocation; derelict pool; the deterministic lifecycle for abandoned liquidity. The word
-"rescue" is not part of the project's vocabulary and is not reintroduced here. The maritime
+allocation; derelict pool; the deterministic lifecycle for abandoned liquidity. The lexeme
+forbidden by the glossary (spelled only in glossary.md and scripts/terminology-lint.sh) is
+not part of the project's vocabulary and is not reintroduced here. The maritime
 salvage framing is an analytical analogy and potential legal theory, not a representation of
 settled law; the legal documentation governs that boundary.
 
