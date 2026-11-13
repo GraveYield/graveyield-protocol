@@ -1,9 +1,13 @@
 # GY-DOC-RECON-001 — GraveYield Documentation & Specification Alignment Report (Consolidated)
 
-**Status:** Draft for owner review. Not published, not applied, not merged — and this pull
-request must not be merged; it is a review artifact.
-**Assignment:** GraveYield Documentation and Specification Reconciliation (GY-DOC-RECON-001),
-prepared 2026-11-13, consolidated into a single report at the owner's request.
+**Status:** Draft for owner review. Applied to no living document, not merged — and this
+pull request must not be merged; it is a review artifact.
+**Revision 2 (corrective, 2026-11-13):** corrections C-01–C-14 applied per the owner's
+corrective-revision assignment (Parts 1 and 2); Section 0 lists every correction, Section 2.3
+records the original source-document reconciliation, and Appendix C is the validation record.
+This revision is pushed to this PR branch as the proposed replacement of this file
+(owner-authorized corrective push, 2026-11-14, on top of the branch's then-current head
+`2731b3d`); the pull request remains draft and must not be merged.
 **Baselines:** `graveyield-protocol` @ `c7d203272b994c055295c925ccd69e42c121f581` (main);
 `grave-indexer` @ `17998bab3a1c6854e42b67bf3bd1305433e3c3af` (main); `vendor/protocol` SDK pin
 `d52669990a6ea01be7387b0bc4020c29ebdd1699` (zero wire-format drift); W2 NS-3 Devnet acceptance
@@ -16,8 +20,9 @@ made during consolidation.
 
 ## Contents
 
+0. [Corrective revision summary (v2)](#0-corrective-revision-summary-v2)
 1. [Executive summary](#1-executive-summary)
-2. [Repositories and documents examined](#2-repositories-and-documents-examined)
+2. [Repositories and documents examined](#2-repositories-and-documents-examined) (2.3: [original source-document reconciliation matrix](#23-original-source-document-reconciliation-matrix-revision-2))
 3. [Documentation alignment matrix (Deliverable 1)](#3-documentation-alignment-matrix-deliverable-1)
 4. [Revised whitepaper draft v4.1.0 (Deliverable 2)](#4-revised-whitepaper-draft-v410-deliverable-2)
 5. [Canonical technical specification draft (Deliverable 3)](#5-canonical-technical-specification-draft-deliverable-3)
@@ -28,6 +33,119 @@ made during consolidation.
 10. [Boundary confirmation](#10-boundary-confirmation)
 - [Appendix A. Live devnet readback evidence (raw)](#appendix-a-live-devnet-readback-evidence-raw)
 - [Appendix B. Consolidation findings and corrections](#appendix-b-consolidation-findings-and-corrections)
+- [Appendix C. Corrective revision validation record](#appendix-c-corrective-revision-validation-record)
+
+---
+
+## 0. Corrective revision summary (v2)
+
+This revision applies the owner's corrective-revision assignment (C-01–C-14). It is a
+correction pass over the existing consolidated report — not new research. What changed:
+
+1. **C-01 (criteria ordering).** The prior claim that "no ordering divergence exists
+   anywhere" was wrong for the assigned original sources: the frozen Combined Technical
+   Documentation v3.0 (Table 4) numbered the six criteria in a different order (C1 No LP
+   burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline —
+   owner-supplied; the DOCX itself remains unavailable for re-inspection). The historical
+   mapping is now documented (spec §3.1, matrix WP-03, Q-02), and legacy v3.0 claims
+   (cheapest-first evaluation, `invalidate_cert`, certificate consumption, legacy AMM/adapter
+   support, older account/field definitions) are reconciled against current code: none of
+   them describes current behavior except as noted and evidenced.
+2. **C-02 (certificate validity reversed).** The report previously said "an expired one is
+   required for settlement (7002)". Verified against source: settlement requires a **valid,
+   unexpired** certificate (`is_expired` gate, salvage_pool.rs:300-303); a missing cert
+   reverts 7001 and an expired cert is rejected with 7002 (re-run Phase 2 to reissue). A
+   live cert blocks re-certification (6034). Fixed everywhere; the cert is also documented
+   as NOT consumed by settlement (init-once PoolRegistry enforces one-shot).
+3. **C-03 (multi-epoch wording).** Replaced "≥ 2 consecutive Solana epochs with identical
+   criteria bitmap" (which implies per-epoch evaluation) with the precise semantics verified
+   in code: Phase 2 occurs no earlier than two epochs after the Phase 1 EligibilityAnchor
+   (`current_epoch - first_eligible_epoch >= 2`, criteria.rs:160-179), and Phase 2
+   re-evaluates all criteria and requires the resulting bitmap to equal the Phase 1 bitmap
+   (evaluate_pool_phase2.rs:188-195). No continuous intervening-epoch evaluation exists.
+4. **C-04 (C2 pipeline contradiction).** Every section now separates the implemented parts
+   (on-chain `record_launch_price` verification; `LaunchPrice` PDA; both oracle authorities
+   registered on Devnet; SDK `deriveLaunchPriceV4` derivation) from the incomplete parts
+   (dedicated-indexer C2 issuance workflow: derivation integration, CLI path, evidence-bundle
+   type, launch-price key custody — audit F-H3, R-33). Diagrams and stage descriptions are
+   labeled as target flow, not operational capability.
+5. **C-05 (reserved bytes).** Resolved with a fresh readback: both ProtocolConfig accounts'
+   reserved ranges (scanner [188..252) = 64 bytes; vault [114..210) = 96 bytes) are **all
+   zero**. The earlier "reserved[64] all-zero: False" line was a Python comparison-literal
+   bug in the readback script (`b'\\x00'` is the 4-character string `\x00`, not a NUL byte),
+   not an account-state fact. Appendix A records the artifact and the corrected evidence.
+6. **C-06 (TVL units).** "500 raw display units" corrected: for a 6-decimal quote mint,
+   500,000,000 raw units = 500 display tokens. The implementation applies the same fixed
+   raw-unit count to every quote mint with no decimals or value normalization
+   (evaluate_pool_phase1.rs:151), so it does not establish a universal 0.5 SOL-equivalent or
+   USD minimum. Classified as an unresolved eligibility-design issue for owner review
+   (Q-03); threshold unchanged.
+7. **C-07 (lock scope).** Historical definitions are now documented against the UNCX-only
+   implemented detection scope. The whitepaper side is VERIFIED from the inspected original:
+   §2.2 criterion 5 reads "No governance or multisig lock" with data source "Pool account
+   authority field". The combined-doc side (governance and pool-authority lock conditions)
+   remains owner-supplied (that DOCX is still unavailable). Presented as an explicit owner
+   decision (Q-04) and marked a publication and Mainnet-readiness blocker until resolved. No
+   criterion change proposed.
+8. **C-08 (salvor LP-token prerequisite).** The "anyone may permissionlessly settle" language
+   now discloses the verified prerequisite: the withdraw burns LP from a salvor-controlled
+   account (`salvor_lp_token_account`, `token::authority = salvor`; `salvor_lp_amount > 0`),
+   so the salvor must source LP tokens themselves; the protocol provides no acquisition path;
+   original holders keep their snapshot-based claims; locked/inaccessible LP cannot be burned
+   by the salvor. Classified as an economic/operational design issue for owner review (Q-16).
+   The discrepancy is deeper than wording: the inspected ORIGINAL whitepaper claims "GraveVault
+   redeems the entire LP supply of the pool via CPI" (§2.3) and that GraveVault "Acquires and
+   redeems LP tokens via CPI" (§4.2) — neither is implemented (the salvor supplies and burns
+   their own LP; there is no acquisition path). Matrix row WP-12 records this as a
+   material original-vs-implementation discrepancy.
+9. **C-09 (protocol 20% purposes).** The original whitepaper §3.4 purpose restrictions are
+   VERIFIED verbatim from the inspected original ("designated exclusively for smart contract
+   security audits and bug bounty payouts, protocol maintenance and upgrades, infrastructure
+   costs, development of new protocol capabilities and DEX integrations, and legal and
+   compliance advisory fees") and restored in both whitepaper renderings, explicitly labeled
+   as Charter commitments, not bytecode enforcement (the program enforces only the 20% cap,
+   error 7005).
+10. **C-10 (roadmap overstatement).** "Implemented and Devnet-verified (W2 NS-3 acceptance
+    56/56)" for m1–m8 is replaced by a seven-level status split (source / tests / fork
+    simulation / deployment acceptance / end-to-end Devnet demonstration / independent audit /
+    Mainnet readiness) with per-milestone evidence. The 56/56 result is preserved but scoped:
+    W2's own limitations state it "does not establish full end-to-end GraveYield lifecycle
+    operation"; no controlled real-pool salvage has been executed on Devnet.
+11. **C-11 (C1/C2 naming collision).** C1–C6 are now used exclusively for eligibility
+    criteria. The evidence types are named the activity attestation and the launch-price
+    attestation. Verified literal code identifiers: the SDK defines `LastSwapAttestation` and
+    `LaunchPriceAttestation`; `ActivityAttestation` is an explanatory name (no such code
+    identifier exists) and is labeled as such wherever used. PROTOCOL_SPEC.md §5 itself still
+    labels evidence rows "C1/C2" — recorded as documentation decision Q-21, not changed.
+12. **C-12 (proposed link paths).** Every relative link in the proposed diffs was resolved
+    against the actual repository trees (6 links, 0 problems). The DEVNET.md change's href is
+    already the correct directory-relative form (`w2-ns3-acceptance/...`); the `docs/` prefix
+    appears only in display text. Validation recorded in §9.2.
+13. **C-13 (oracle error-code sequence).** Verified against errors.rs and attestation.rs:
+    6024 = precompile presence (AttestationMissing), 6025 = offset validity
+    (InvalidAttestationOffsets), 6026 = oracle equality (AttestationOracleMismatch); the
+    message-span pin is a **second, later check that also reverts 6025** — the apparent
+    repetition is real behavior, now stated explicitly. The spec §4.1 check order was
+    corrected to the source order (6024 → 6025 offsets → 6026 → 6025 span).
+14. **C-14 (legal framing and salvor discretion).** Maritime salvage is now used only as an
+    analogy and potential legal framing (never as settled legal treatment). "The salvor takes
+    no discretion" is narrowed to the accurate statement: the salvor does not determine
+    eligibility outcomes or the distribution formula, but retains ordinary discretion over
+    which qualifying pool to pursue and whether to undertake the operation.
+
+**Original source documents.** Status as of revision 2: (1) the assigned whitepaper DOCX
+(`GraveYield_Whitepaper_v4_0_1 (1).docx`) was uploaded by the owner and is now INSPECTED —
+its internal metadata (Version 4.0, May 2026) resolves the Q-01 contradiction from the
+original, and its material claims are verified first-hand and cited below and in Section 2.3;
+(2) the other three assigned originals (TechnicalDocumentation_v3_0, Combined_v3_0,
+GhostPools_r3 DOCX) were exhaustively searched for in the GitHub repository (all branch
+heads, all 102 pull-request refs, tags/notes, releases, wiki, issue attachments, plus the
+other three org repositories) and are NOT present; the links the owner supplied point to the
+repo's newer published editions (v4.0 / v4.0 / r4), which were already inspected in full and
+are used as current-canon evidence — they are not substitutes for the assigned originals, and
+those three reconciliations remain marked INCOMPLETE pending transfer of the DOCX files.
+Previously owner-supplied historical facts that are now verified from the inspected original
+are re-labeled as verified; the v3.0 Table 4 ordering remains owner-supplied only.
 
 ---
 
@@ -46,8 +164,11 @@ addresses, or acceptance records.
 passed 56/56 (deployment acceptance 29/29 + ELF digest verification 27/27, finalized at slots
 521557300 / 521557485, epoch 1207); the dedicated activity and launch-price oracle authorities
 are registered on-chain; a live readback on 2026-11-13 confirmed both ProtocolConfig accounts
-with thresholds at specification defaults. Baseline commits and access limitations are recorded
-in Section 2.
+with thresholds at specification defaults. Scope of that evidence (C-10): the acceptance
+verifies deployment and ELF-related checks; by its own limitations it is Devnet-only, is not a
+Mainnet approval or security-audit certification, and "does not establish full end-to-end
+GraveYield lifecycle operation" — no controlled real-pool salvage has been executed on Devnet.
+Baseline commits and access limitations are recorded in Section 2.
 
 **Headline findings.**
 
@@ -58,7 +179,7 @@ in Section 2.
 2. **Approved-but-unimplemented work is the largest class of drift.** GY-ADR-001 D4 (economic
    swap classification in the core SDK), D5 (finalized-transaction-only evidence), and D6
    (explicit completeness status, persistent cursors, controlled backfill) are binding
-   direction without code. Until the SDK work lands, the C1 attestation must be read as "last
+   direction without code. Until the SDK work lands, the activity attestation must be read as "last
    AMM interaction," not "last economic swap." The revised whitepaper and the canonical spec
    state this explicitly instead of presenting approved policy as implemented behavior
    (Sections 4, 5, 7).
@@ -66,6 +187,9 @@ in Section 2.
    anywhere in the eligibility path; the real evidence issuers are two dedicated Ed25519
    oracle authorities (activity, launch-price), verified live on-chain. Their custody,
    rotation, and revocation are operational requirements (spec §13), not bytecode guarantees.
+   Scope caveat (corrected in this revision, C-04): on-chain verification and SDK derivation
+   for C2 are implemented, but the dedicated indexer's C2 issuance workflow is not wired into
+   the pipeline (R-33) — C2 evidence production is not operationally complete.
 4. **C5 locker coverage is limited to UNCX.** The documents now say precisely that "not
    detected" is not "not locked" (PinkSale, Team Finance, Streamflow are outside detection
    scope), and any widening of the criterion is flagged as an owner decision.
@@ -88,18 +212,22 @@ in Section 2.
    Review)**, absorbing the informal v4.0.1 code-comment references and preserving v4.0 as a
    historical document (GY-ADR-001 D2). This remains owner question Q-01.
 
-**Inventory.** Section 3 carries the 47-row documentation alignment matrix plus the 10-row
+**Inventory.** Section 3 carries the 49-row documentation alignment matrix (47 original
+rows plus CB-04 and WP-12 added in revision 2) plus the 10-row
 D1–D10 decision alignment; Section 7 the 51-row requirements and implementation status matrix
-in six classes; Section 8 twenty outstanding questions (of which thirteen require owner
-approval, per the register's own approval column) and twelve risk entries; Section 9 ten
+in six classes; Section 8 twenty-one outstanding questions (of which thirteen require owner
+approval, per the register's own approval column; Q-21 added by revision 2 is a documentation
+decision) and twelve risk entries; Section 9 ten
 proposed documentation-only diffs plus the complete proposed whitepaper v4.1.0 file.
 Section 10 records the boundary confirmation.
 
 **What this report does not do.** It changes no source code, protocol behavior, deployment,
 or governance surface, and it applies no fix to any branch — every change is a proposal
-awaiting owner review. The four assigned .docx source documents were not present in the
-working environment; newer or equal in-repo generations were used instead and the
-substitutions are recorded in Section 2.2 with the provisional flags they imply (Q-01).
+awaiting owner review. The four assigned .docx source documents were exhaustively searched
+for in the GitHub repository and are not present (Section 2.3 records the full search and
+what access is still required); reconciliation against the original documents is therefore
+marked incomplete, owner-supplied historical facts are labeled as such, and newer in-repo
+generations are used only as corroboration, never as substitutes (Q-01).
 
 ---
 
@@ -132,20 +260,42 @@ deployment, commit, push, or PR was created or modified in either repository.
 
 | Assigned file | Found? | Disposition |
 |---|---|---|
-| GraveYield_Whitepaper_v4_0_1 (1).docx | NOT FOUND (upload/ empty; never committed to either repo; no .docx in published/) | Reconciliation built from the in-repo living whitepaper (whitepaper.md, v4.0) + program-source v4.0.1 references + the assignment's characterization; marked provisional where the docx is the only source (Q-01) |
-| GraveYield_TechnicalDocumentation_v3_0.docx | NOT FOUND | Superseded by the in-repo living source (technical-documentation.md v4.0) and published v4.0 PDF; v3.0 content represented via the living file's own revision notes |
-| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx | NOT FOUND | Superseded by the living md (v3.0) and the published Combined v4.0 PDF (both inspected) |
-| GhostPools_Research_Paper_WP-2026-001r3.docx | NOT FOUND | Superseded by the published r4 PDF (inspected in full) + ghostpools-research.md cover |
+| GraveYield_Whitepaper_v4_0_1 (1).docx | FOUND and INSPECTED (revision 2): uploaded by the owner to the assignment workspace on 2026-11-13 (`upload/GraveYield_Whitepaper_v4_0_1 (1).docx`, 20,977 bytes; full text extracted from the DOCX itself, not from a preview). Internal metadata: header and footer read "Version 4.0 · May 2026"; docProps created 2026-05-02; footer states it supersedes Whitepaper v3.0 (April 2026) with the legacy-vocabulary-to-salvage reframing recorded in its own changelog (the reframing the CI lint and glossary.md:26-42 now enforce). The filename-vs-metadata contradiction (Q-01) is therefore CONFIRMED from the original: the file named v4_0_1 is internally v4.0. See Section 2.3 for the reconciliation matrix and the material claims now verified first-hand. |
+| GraveYield_TechnicalDocumentation_v3_0.docx | NOT FOUND | Reconciliation of the v3.0 technical documentation is INCOMPLETE. The owner-provided links on 2026-11-13 point to the repo's PUBLISHED v4.0 edition (`docs/published/GraveYield_TechnicalDocumentation_v4_0.pdf`), which is a newer generation, NOT the assigned v3.0 DOCX; it was inspected in full and is used as current-canon evidence only. What is needed: the original v3.0 DOCX itself (owner re-upload). Legacy v3.0-era claims (cheapest-first, invalidate_cert, certificate consumption, legacy adapters, older account fields) are reconciled against current code in spec §3.1 and labeled by evidence source; claims that exist only in the missing DOCX remain marked owner-supplied/unverified. |
+| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx | NOT FOUND | Reconciliation of the original combined doc is INCOMPLETE. The owner-provided link points to the repo's PUBLISHED v4.0 edition (`docs/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v4_0.pdf`, inspected in full — a newer generation, not the assigned v3.0 DOCX). The living combined markdown (v3.0-labeled) was inspected; the historical Table 4 ordering (C1 No LP burn ... C6 Price decline) is recorded per the owner's assignment and cannot be independently re-verified until the DOCX is transferred. What is needed: the original v3.0 DOCX itself. |
+| GhostPools_Research_Paper_WP-2026-001r3.docx | NOT FOUND | Reconciliation against r3 is INCOMPLETE. The owner-provided link points to the PUBLISHED r4 PDF (`docs/published/GhostPools_Research_Paper_WP-2026-001r4.pdf`, 19 pp, inspected in full) — a later revision, not the assigned r3 DOCX. The r4 changelog (ghostpools-research.md:128-136) documents r3→r4 changes (r4: Ghost Pool Observatory/Dune instrumentation integrated; frozen spec v1.0.0 deeply merged; 9 Oct 2026 devnet deployment recorded; first typeset two-column edition); r3 itself (May 2026): Whitepaper v4.0 alignment, canonical salvage/salvor/derelict vocabulary, maritime salvage law as primary legal analogy, multi-epoch added to feasibility (per the changelog's r3 row). A full r3-vs-r4 content comparison has NOT been performed (r3 unavailable); the report's GhostPools rows cite r4 as the current edition and preserve the research-estimate qualifications. What is needed: the original r3 DOCX for a differential review. |
+
+Additional artifact received 2026-11-13: `GraveYield_Settlement_Architecture (1).pdf` (14 pp,
+image-only — no extractable text layer; AI-generated infographic deck, Gemini/NotebookLM
+artifacts visible). Its figures cite WP-2026-001r4 ($2.17B total stranded across chains;
+$1.10B base case on Solana, ~155,000 pools). Cataloged as an ILLUSTRATIVE DERIVATIVE only —
+it is not one of the four assigned sources, contains no text layer to reconcile, and its
+figures must not be quoted beyond the underlying paper's qualified estimates.
 
 PDFs inspected (pdftotext extraction, full read): GhostPools_Research_Paper_WP-2026-001r4.pdf
 (19 pp), GraveYield_TechnicalDocumentation_v4_0.pdf (13 pp),
 GraveScanner_GraveVault_CombinedTechnicalDocumentation_v4_0.pdf (25 pp).
 None contains "4.0.1"; Pyth appears exactly once across the set (the tech-doc correction).
 
+### 2.3 Original source-document reconciliation matrix (revision 2)
+
+| Source | Version | Sections inspected | Historical claims (verified vs owner-supplied) | Current canonical position | Material discrepancies | Resolution / decision |
+|---|---|---|---|---|---|---|
+| GraveYield_Whitepaper_v4_0_1 (1).docx — INSPECTED (owner upload, 2026-11-13) | Internally Version 4.0 (May 2026; created 2026-05-02) despite v4_0_1 filename; self-describes as superseding v3.0 (April 2026) | Full text (abstract; §1; §2.1-2.3 incl. criteria table; §3.1-3.4; §4.1-4.5; §5 roadmap; §6; §7; §8; §9; Appendix A glossary; closing changelog) | VERIFIED: criteria table uses bare numerals 1-6 in the canonical semantic order (inactivity, price decline, TVL, LP supply, lock, multi-epoch) — consistent with WP-03; criterion 2 data source "Pyth oracle + LaunchPrice PDA" and four further Pyth claims (§2.1, §4.1, §4.5, glossary); criterion 5 "No governance or multisig lock" (data source "Pool account authority field"); criterion 3 "≥ 0.5 SOL equivalent in base asset"; §2.3 "GraveVault redeems the entire LP supply of the pool via CPI into Raydium, Orca, or PumpSwap"; §4.2 "Acquires and redeems LP tokens via CPI into Raydium CLMM, Orca Whirlpool, or PumpSwap"; §2.3 cert validation "(not expired, not consumed, not invalidated)"; glossary "≥ 2 consecutive Solana epochs"; §3.4 protocol-share purposes ("designated exclusively for smart contract security audits and bug bounty payouts, protocol maintenance and upgrades, infrastructure costs, development of new protocol capabilities and DEX integrations, and legal and compliance advisory fees"); §4.4/§7.2 "72-hour on-chain timelock"; §8.2 "guaranteed 40% restitution share" and "This is not a fully settled legal framework in any major jurisdiction"; §6.1 internal figures (~155,000 derelict pools; $420M-$2.8B Solana; $860M-$5.4B cross-chain); §5 dated roadmap (Q2 2026 → Q2 2027+, audit "Q3 2026", BVI entity "Q4 2026") | criteria.rs bitmap C1-C6; dedicated Ed25519 oracle attestations (no Pyth anywhere in the implementation — live-verified); UNCX-only lock detection (governance/multisig locks undetected, Q-04); raw-unit TVL floor with no SOL/USD normalization (Q-03); salvor-held LP burn with no protocol acquisition path (Q-16); cert not consumed (init-once PoolRegistry); two-epoch gap + bitmap equality (no per-epoch checks); write-only timelock fields (7014 never raised); defined share of realized proceeds, not guaranteed recovery (legal-documentation.md:599); GhostPools r4 qualified figures; status-based roadmap without dates | Pyth claims contradicted by implementation (matrix WP-08/TD rows + §4 draft §4.2); "entire LP supply"/"acquires LP" contradicted by salvage_pool.rs (NEW row WP-12); governance/multisig lock criterion vs UNCX-only detection (Q-04, C-07); "0.5 SOL equivalent" vs raw-unit floor (Q-03, C-06); "not consumed" validation concept vs no consumed state (C-02 note); "consecutive epochs" glossary wording vs gap+bitmap-equality semantics (C-03); "on-chain timelock" vs write-only fields (RSK-05); "guaranteed 40% restitution" vs defined-share language (legal boundary); dated roadmap vs status-based roadmap (Q-12) | Revised whitepaper v4.1.0 (Sections 4 and 9.3) already reflects every correction; Q-01 updated to largely resolved (v4.0 metadata confirmed from the original; 4.1.0 designation still requires owner ratification); the v3.0-DOCX-derived claims (combined-doc Table 4 ordering) remain owner-supplied |
+| GraveYield_TechnicalDocumentation_v3_0.docx — NOT INSPECTED (unavailable) | — | none (original) | Legacy claims (cheapest-first ordering, invalidate_cert, certificate consumption, legacy adapters/AMM support, older account/field definitions) are owner-supplied | technical-documentation.md (living, v4.0) + published v4.0 PDF are the current canon; legacy claims reconciled against current code in spec §3.1 | Cannot be enumerated from the original | INCOMPLETE — owner to transfer the v3.0 DOCX; do not infer its contents from the v4.0 edition |
+| GraveScanner_GraveVault_CombinedTechnicalDocumentation_v3_0.docx — NOT INSPECTED (unavailable) | — | none (original) | Table 4 historical ordering (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline) — owner-supplied; §7 error ranges and §9 deployment narrative known only via the living md | living combined md (v3.0-labeled) + published v4.0 PDF are current canon; historical mapping documented in spec §3.1 Table 3.1a | Historical ordering divergence (C-01); "Consumed by GraveVault" wording in the living md (CB-04) | INCOMPLETE — owner to transfer the v3.0 DOCX; historical labels must not be read as current identifiers |
+| GhostPools_Research_Paper_WP-2026-001r3.docx — NOT INSPECTED (unavailable) | — | none (original) | r3 changelog row (May 2026): Whitepaper v4.0 alignment; salvage/salvor/derelict vocabulary; maritime salvage as primary legal analogy; multi-epoch added to feasibility — per the r4 changelog | r4 (published PDF + ghostpools-research.md) is the current edition; the report's GhostPools rows cite r4 with the paper's own qualifications preserved | r3-vs-r4 differential NOT performed | INCOMPLETE — owner to transfer the r3 DOCX for a differential review; r4 figures are never treated as a substitute for r3 claims |
+
 #### Key searches (read-only)
 
 - `pyth` across protocol repo source: only documentation hits (tech-doc correction paragraph;
   PRE_MAINNET_CHECKLIST; two false positives "Python") — zero in programs/SDK/scripts.
+  CONFIRMED AGAINST THE ORIGINAL (revision 2): the assigned whitepaper DOCX claims Pyth as
+  the evaluation-time dependency in five places (§2.1 "The only external data dependency at
+  evaluation time is Pyth Network"; §2.2 criterion 2 data source "Pyth oracle + LaunchPrice
+  PDA"; §4.1 "Reads current SOL/USD price ... from Pyth Network"; §4.5; glossary "Pyth").
+  None of these is implemented; the oracle-model correction in Deliverable 2 §5 is now
+  anchored to the original's own text.
 - the glossary's forbidden lexeme (spelled only in glossary.md:26-42 and
   scripts/terminology-lint.sh — the two files the lint exempts as documentation sites)
   across docs/programs/sdk: only those two files match. All living documents comply with
@@ -166,7 +316,11 @@ Script: scripts/verify_devnet_live.py; output: evidence/live_rpc_verification_20
   pending_authority zeroed (rotation not armed, eta 0);
   activity_oracle @ [123..155) = 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o (registered);
   launch_price_oracle @ [155..187) = 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee (registered);
-  bump @ 187 = 255 (matches W2 acceptance); reserved[64] all zero;
+  bump @ 187 = 255 (matches W2 acceptance); reserved[64] at [188..252) all zero — re-verified
+  2026-11-13 with a corrected byte comparison; the original evidence line "reserved[64]
+  all-zero: False" was a script comparison-literal bug (`b'\\x00'` is a 4-character literal,
+  not a NUL byte), not an account fact (C-05; Appendix A). Vault reserved [114..210) also
+  verified all zero.
   inactivity_seconds 7,776,000; price_collapse_bps 9,900; min_tvl_lamports 500,000,000;
   anchor_staleness_seconds 1,209,600; lp_burn_dust_threshold 1,000; cert_ttl_seconds 3,600;
   paused = 0 — all at specification defaults.
@@ -193,11 +347,12 @@ live chain state was additionally re-confirmed independently today (script above
 
 ## 3. Documentation alignment matrix (Deliverable 1)
 
-Two sheets: the full reconciliation matrix (47 rows — every material discrepancy found, each
-with existing statement, verified current state, required change, evidence, and priority) and
+Two sheets: the full reconciliation matrix (49 rows — every material discrepancy found, each
+with existing statement, verified current state, required change, evidence, and priority; rows
+CB-04 and WP-12 added by corrective revision 2) and
 the GY-ADR-001 decision-alignment sheet (D1–D10).
 
-### 3.1 Reconciliation matrix (47 rows)
+### 3.1 Reconciliation matrix (49 rows)
 
 
 **GraveYield Documentation Reconciliation Matrix - GY-DOC-RECON-001 (verified 2026-11-13)**
@@ -206,15 +361,16 @@ the GY-ADR-001 decision-alignment sheet (D1–D10).
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | WP-01 | Whitepaper v4.0 (living md) | Header / snapshot pointer | whitepaper.md:3 - 'Snapshot in published/GraveYield_Whitepaper_v4_0.docx' | No whitepaper .docx exists in docs/published/ (only GhostPools r4 and TechnicalDocumentation v4.0 PDFs). Git history shows no .docx was ever committed to the repo. | Fix the snapshot pointer, or publish the docx snapshot under docs/published/ at the next release render. | graveyield-protocol/docs/whitepaper.md:3; docs/published/ listing; git log --all --diff-filter=A (no docx hits) @ c7d2032 | Medium |
 | WP-02 | Whitepaper v4.0 / program source | Version designation | Living whitepaper self-declares 'Whitepaper v4.0' (canon-locked May 2026). Program source comments cite 'Whitepaper v4.0.1' as spec reference (criteria.rs, errors.rs, lib.rs, sweep_stale_anchor.rs, invalidate_anchor.rs). The assigned external docx is named v4_0_1 while its internal metadata reads Version 4.0 (per assignment; file not accessible in this environment). | No living v4.0.1 document exists in either repo; '4.0.1' appears only as code-comment spec references. The v4_0_1 docx was not accessible (not in upload/, never committed). Three version designations now coexist: v4.0 (living md), v4.0.1 (code comments + assigned docx filename), v4.0 (docx internal metadata). | Establish ONE authoritative designation. Recommended: publish the revised draft as Version 4.1.0 (Draft), explicitly absorbing the informal v4.0.1 spec patch; preserve v4.0 as historical. Owner decision recorded in Deliverable 6 (Q-01). | graveyield-protocol/docs/whitepaper.md:1; programs/grave-scanner/src/criteria.rs:12; errors.rs:4; lib.rs:110; assignment brief §2.A | High |
-| WP-03 | Whitepaper v4.0 | §3 criteria numbering | Criteria table uses bare numerals 1-6 with no C-prefix. | All other canon (PROTOCOL_SPEC §4, technical-documentation §2, combined doc §4.3, code criteria.rs:25-30 bitmap bits) uses C1-C6 in the SAME semantic order. No ordering divergence exists anywhere; only labeling diverges. | Adopt the canonical C1-C6 labels in the revised whitepaper; keep thresholds unchanged. | whitepaper.md:41-48; PROTOCOL_SPEC.md:292-368; technical-documentation.md:129-136; grave-scanner-grave-vault-combined.md:149-156; criteria.rs:25-30 | Medium |
+| WP-03 | Whitepaper v4.0 | §3 criteria numbering | Criteria table uses bare numerals 1-6 with no C-prefix. | All LIVING canon (PROTOCOL_SPEC §4, technical-documentation §2, combined md §4.3, code criteria.rs:25-30 bitmap bits) uses C1-C6 in the same semantic order. CORRECTED (C-01): the frozen Combined Technical Documentation v3.0 DOCX — the assigned original, Table 4 — numbered the criteria differently (C1 No LP burn, C2 No governance lock, C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline; owner-supplied — the DOCX itself remains unavailable for direct re-inspection), so ordering divergence DID exist historically; the living combined md and all current canon have since converged on the canonical order. Historical labels must not be read as current identifiers; mapping table in spec §3.1. | Adopt the canonical C1-C6 labels in the revised whitepaper; keep thresholds unchanged; annotate the historical mapping wherever v3.0-era labels are quoted. | whitepaper.md:41-48; PROTOCOL_SPEC.md:292-368; technical-documentation.md:129-136; grave-scanner-grave-vault-combined.md:149-156; criteria.rs:25-30; assignment statement (owner-supplied, v3.0 DOCX Table 4) | Medium |
 | WP-04 | Whitepaper v4.0 | §3 criterion 4 | 'LP not burned \| (boolean)'. | Implementation is threshold-based, not boolean: lp_supply > lp_burn_dust_threshold (strict >), default dust threshold 1,000 raw LP units (marked PRE-MAINNET-TODO(KEYS-002)). | Restate as 'LP supply not burned: lp_supply strictly greater than the LP burn dust threshold (default 1,000 raw LP units)'. | whitepaper.md:46; criteria.rs:142-151; constants.rs:34; technical-documentation.md:134 | Medium |
 | WP-05 | Whitepaper v4.0 | §3 criterion 5 | 'LP not locked \| (boolean)'. | Implementation: lp_locked_amount == 0, where the amount is produced exclusively by the UNCX Raydium V4 locker adapter (LOCKER-001; marker PDA + TokenLock evidence, errors 6020-6023). PinkSale, Team Finance, Streamflow and any other lockers are NOT detected (LOCKER-002 open); a pool locked in an undetected locker passes C5. | Qualify the criterion with its detection scope ('zero locked LP attributable to supported locker adapters'); document undetected-locker limitation without expanding the criterion (owner approval required for expansion). | whitepaper.md:47; criteria.rs:153-158; adapters/locker.rs (programs/grave-scanner/src); PRE_MAINNET_CHECKLIST.md LOCKER-002; technical-documentation.md:135 | High |
-| WP-06 | Whitepaper v4.0 | §3 criterion 3 | 'Minimum residual TVL \| >= 0.5 SOL (quote-side vault balance)'. | Implementation compares min_tvl_lamports >= 500,000,000 RAW UNITS of the quote-side vault. This equals 0.5 SOL only when the quote mint is WSOL; for a 6-decimal quote mint (e.g. USDC) the floor is 500 raw display units. Tech-doc lists 'C3 TVL unit consistency' as an open item; live devnet config decodes min_tvl_lamports = 500,000,000. | Add the raw-units caveat to the revised whitepaper; keep the 0.5 SOL default framing tied to WSOL quote pools. | whitepaper.md:45; criteria.rs:135-140; technical-documentation.md:133 + §10 blockers; live RPC decode 2026-11-13 (evidence/live_rpc_verification_2026-11-13.txt) | Medium |
-| WP-07 | Whitepaper v4.0 | §3 C1/C2 evidence sentences | C1 consumes an indexer-signed Ed25519 attestation verified in-transaction against ProtocolConfig.activity_oracle (spec §5 / D8); C2 consumes an oracle-signed launch-price attestation (D9). | Accurate. Byte-verified: 112-byte C1 and 168-byte C2 layouts match attestation.rs and the SDK; dedicated oracle keys registered on devnet (live readback 2026-11-13). | No correction needed; carry into revised draft with full oracle-model explanation (Deliverable 2 §5). | attestation.rs (grave-scanner); PROTOCOL_SPEC.md §5 table:375-383; live verification evidence file | None |
+| WP-06 | Whitepaper v4.0 | §3 criterion 3 | 'Minimum residual TVL \| >= 0.5 SOL (quote-side vault balance)'. | Implementation compares min_tvl_lamports >= 500,000,000 RAW UNITS of the quote-side vault. This equals 0.5 SOL only when the quote mint is WSOL; for a 6-decimal quote mint (e.g. USDC) the same raw count equals 500 display tokens (500,000,000 raw units — CORRECTED in revision 2, C-06; the previous text wrongly said "500 raw display units"). The implementation applies the same fixed raw-unit count to every quote mint with no decimals or value normalization (evaluate_pool_phase1.rs:151 uses the quote reserve directly), so it does not establish a universal 0.5 SOL-equivalent or USD-denominated minimum. Tech-doc lists 'C3 TVL unit consistency' as an open item; live devnet config decodes min_tvl_lamports = 500,000,000. | Add the raw-units caveat to the revised whitepaper; keep the 0.5 SOL default framing tied to WSOL quote pools. | whitepaper.md:45; criteria.rs:135-140; technical-documentation.md:133 + §10 blockers; live RPC decode 2026-11-13 (evidence/live_rpc_verification_2026-11-13.txt) | Medium |
+| WP-07 | Whitepaper v4.0 | §3 C1/C2 evidence sentences | Criterion 1 (C1) consumes an indexer-signed Ed25519 activity attestation verified in-transaction against ProtocolConfig.activity_oracle (spec §5 / D8); Criterion 2 (C2) consumes an oracle-signed launch-price attestation (D9). (Labels clarified per C-11: C1-C6 denote criteria; the evidence types are the activity and launch-price attestations.) | Accurate. Byte-verified: 112-byte C1 and 168-byte C2 layouts match attestation.rs and the SDK; dedicated oracle keys registered on devnet (live readback 2026-11-13). | No correction needed; carry into revised draft with full oracle-model explanation (Deliverable 2 §5). | attestation.rs (grave-scanner); PROTOCOL_SPEC.md §5 table:375-383; live verification evidence file | None |
 | WP-08 | Whitepaper v4.0 | §5 Charter invariant 8 | 'Squads v4 multisig 3-of-5 at launch, 4-of-7 post-audit.' | Devnet NS-3 runs a dedicated governance authority key (BMnrpx9m...Uwf5) with the deployer holding upgrade authority; the multisig posture is the planned mainnet governance commitment, not an existing devnet artifact (charter-invariants #8: 'No devnet artifact is a proxy for mainnet custody'; KEYS-003 open). | Qualify invariant 8 as a mainnet governance commitment; state devnet single-key posture explicitly. | whitepaper.md:91; charter-invariants.md:26; DEVNET.md authority arrangement; LEGACY_DEPLOYMENTS.md | Medium |
 | WP-09 | Whitepaper v4.0 | §6 research reference | Cites 'WP-2026-001r3'. | Canonical research artifact is WP-2026-001r4 (October 2026, docs/published/). | Update reference to r4 in revised whitepaper. | whitepaper.md:98; docs/README.md canonical set; docs/published/ | Low |
 | WP-10 | Whitepaper v4.0 | §7 roadmap pointer | 'See grave-scanner-grave-vault-combined.md for the per-milestone breakdown' (m1-m10). | The combined living markdown contains NO m1-m10 milestone table (dangling pointer; the breakdown exists only in the frozen external docx, if anywhere). | Restructure the roadmap in the revised whitepaper with current status per milestone; remove the dangling pointer. | whitepaper.md:104-110; grave-scanner-grave-vault-combined.md (no milestone table found); GhostPools r4 Table 16 build-phase status | Medium |
 | WP-11 | Whitepaper v4.0 | §7 m10 locker adapters | m10 = locker adapters for UNCX, PinkSale, Team Finance (future). | UNCX Raydium V4 locker introspection is IMPLEMENTED and retired as checklist item LOCKER-001 (mainnet-verified vectors: 125 locks / 74 pools, per-mint custody reconciliation 74/74). PinkSale / Team Finance remain unimplemented. adapters/ README is stale ('Future (m10)'). | Update roadmap status: UNCX done, others open under LOCKER-002. | PRE_MAINNET_CHECKLIST.md LOCKER-001 row; locker.rs header; adapters/README.md | Medium |
+| WP-12 | Original Whitepaper v4.0.1 DOCX (inspected, revision 2) | §2.3 salvage sequence + §4.2 vault responsibilities | 'GraveVault redeems the entire LP supply of the pool via CPI into Raydium, Orca, or PumpSwap' (§2.3); 'Acquires and redeems LP tokens via CPI into Raydium CLMM, Orca Whirlpool, or PumpSwap' (§4.2). | Implementation burns LP from the SALVOR's own token account (`salvor_lp_token_account`, `token::authority = salvor`, `salvor_lp_amount > 0`; salvage_pool.rs:243-249,410-412); the protocol neither redeems the full supply nor acquires LP for the salvor, and provides no acquisition path (added in revision 2, C-08). | Revised drafts must not carry 'redeems the entire LP supply' or 'acquires LP' claims; disclose the LP-token prerequisite; classify the operational model as an owner decision (Q-16). | upload/GraveYield_Whitepaper_v4_0_1 (1).docx §2.3, §4.2; salvage_pool.rs; Q-16 | High |
 | TD-01 | Technical Documentation v4.0 | Header / baseline | Version 4.0 - 9 October 2026; 'Repository baseline main @ 5cc46cdce13e'. | Protocol main is now c7d203272b994c055295c925ccd69e42c121f581 (W2 NS-3 acceptance + documentation landed after 5cc46cd). The living doc predates the NS-3 deployment acceptance. | Re-baseline the document against current main and refresh §9 deployment status (see TD-02). | technical-documentation.md:7-8; git log @ c7d2032 | High |
 | TD-02 | Technical Documentation v4.0 | §9 Devnet deployment status | 'NS-3 is NOT deployed or initialized yet... deployment PENDING' (assigned 2026-11-04). | CONTRADICTED by evidence: W2 NS-3 post-deployment acceptance PASS 56/56 (29/29 acceptance verifier + 27/27 ELF digest verifier) at devnet slots 521557300 / 521557485, epoch 1207; independent live readback 2026-11-13 confirms both ProtocolConfig PDAs exist with dedicated oracle keys registered and all thresholds at spec defaults. | Flip §9 to the deployed state, citing the W2 acceptance report and the registration transaction; keep the Devnet-only scope limitations verbatim. | technical-documentation.md:449-454; docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md:16-26; evidence/live_rpc_verification_2026-11-13.txt | Critical |
 | TD-03 | Technical Documentation v4.0 | §2 Oracle distinction (Pyth) | 'It does not currently use Pyth as the price-collapse oracle described in the old technical document.' | Accurate: zero Pyth references in any program, SDK, script or manifest in either repo (searched; only doc/comment hits). The sole eligibility evidence is the two dedicated Ed25519 oracle authorities. | None; retain the correction and keep Pyth out of the evidence model unless a future owner decision adds it. | technical-documentation.md:138-143; repo-wide searches @ c7d2032 (4 doc-only hits, 2 false positives) | None |
@@ -251,6 +407,7 @@ the GY-ADR-001 decision-alignment sheet (D1–D10).
 | LEG-01 | docs/legal-documentation.md | Guarantee language | v4.0 Draft: 'No guarantee of recovery is provided'; §III.14 'Neither Salvors nor LP holders are guaranteed a particular economic outcome'; eligibility != legal abandonment declarations. | Consistent with the on-chain reality (proportional claim, not guaranteed recovery value) - the strictest language in the doc set. | None; use as the reference standard for qualifying whitepaper and research-paper language. | legal-documentation.md:599,603-611,237 | None |
 | GEN-01 | All documents | Forbidden vocabulary | Glossary forbids a nine-pattern legacy vocabulary family (exact spelling only in glossary.md:26-42 and scripts/terminology-lint.sh — the two files the CI lint intentionally exempts as documentation sites for the mapping). | Verified: zero hits for the forbidden patterns in whitepaper.md, technical-documentation.md, PROTOCOL_SPEC.md, programs/, sdk/ (only glossary + lint script reference the mapping). GhostPools r4 changelog confirms r3 replaced the legacy terminology. | None; preserve the lint and the canonical vocabulary in all revised drafts. | glossary.md:26-42; scripts/terminology-lint.sh; repo searches | None |
 | GEN-02 | Whitepaper / legal / spec | No Mainnet-readiness claims | None of the living documents claims Mainnet readiness; tech-doc cover states 'not a security audit or mainnet release approval'; W2 §9 scope limitations state Devnet-only, not a Mainnet approval, not a security-audit certification. | Consistent. | Preserve these boundary statements verbatim in revised drafts. | Tech-doc PDF cover; W2 acceptance §9:181-186 | None |
+| CB-04 | Combined living md (grave-scanner-grave-vault-combined.md) | §4.3 EligibilityCert row | 'Consumed by GraveVault.' | Implementation does not consume or close the cert: salvage_pool validates it (existence 7001, unexpired 7002, bitmap 0x3F, binding) and one-shot settlement is enforced by the init-once PoolRegistry/SalvageReceipt PDAs (added in revision 2, C-02/C-01). | Correct the wording at the next combined-doc re-alignment (Q-17); not diffed in this revision to keep the changeset to the ten reviewed items. | combined md:147; salvage_pool.rs:300-318; PROTOCOL_SPEC D-note | Low |
 
 > Priority: Critical = contradicted by deployment evidence; must be corrected before any document is republished. High = material misrepresentation risk. Medium = accuracy/completeness. Low = hygiene. 'None' rows record verified-accurate claims kept as-is.
 > Evidence paths are relative to the repo root at the recorded commits: graveyield-protocol @ c7d203272b994c055295c925ccd69e42c121f581 (main), grave-indexer @ 17998bab3a1c6854e42b67bf3bd1305433e3c3af (main), vendor/protocol pin d52669990a6ea01be7387b0bc4020c29ebdd1699.
@@ -310,9 +467,9 @@ The assigned whitepaper file (filename containing v4_0_1, internal metadata Vers
 
 #### **1. Premise**
 
-GraveYield is the settlement layer for derelict liquidity on Solana. It is settlement infrastructure under a maritime salvage framing, not a discretionary intervention. When an AMM liquidity pool crosses all six derelict-pool criteria - long inactivity, at least 99% price collapse from the recorded launch price, minimum residual TVL at or above the floor, LP supply not fully burned, LP not locked within the protocol's detection scope, and multi-epoch confirmation - anyone may permissionlessly settle the pool by removing the LP, swapping the recovered tokens, and distributing the proceeds 40 / 40 / 20 to the original LP holders, the salvor, and the protocol.
+GraveYield is the settlement layer for derelict liquidity on Solana. It is settlement infrastructure; maritime salvage is used in this draft only as an analytical analogy and a potential legal framing, never as a representation of GraveYield's settled legal treatment (the legal documentation governs that boundary). When an AMM liquidity pool crosses all six derelict-pool criteria - long inactivity, at least 99% price collapse from the recorded launch price, minimum residual TVL at or above the floor, LP supply not fully burned, LP not locked within the protocol's detection scope, and multi-epoch confirmation - anyone may submit settlement permissionlessly (no protocol permission gate exists), with one disclosed economic prerequisite: the settlement withdraw burns LP tokens from an account the salvor controls, so the salvor must already hold, or acquire, LP tokens of the pool before settlement (verified: salvage_pool.rs `salvor_lp_token_account`, `token::authority = salvor`; `salvor_lp_amount > 0` required). The protocol provides no LP-acquisition mechanism. Settlement then removes the LP the salvor burns, swaps the recovered tokens, and distributes the proceeds 40 / 40 / 20 to the original LP holders, the salvor, and the protocol.
 
-The actor performing the salvage is a salvor - a finder under maritime salvage law (1989 International Convention on Salvage). The framing is deliberate: a salvor takes no discretion. Eligibility is evaluated on chain from objective conditions, distribution is executed on chain by fixed formula, and neither the protocol nor the salvor exercises judgment over which pools qualify.
+The actor performing the salvage is a salvor. Maritime-salvage concepts (for example, the salvor-as-finder framing of the 1989 International Convention on Salvage) are used only as an analogy and a potential legal framing; no legal conclusion is drawn here. The discretion boundary is narrow and specific: the salvor does not determine eligibility outcomes (eligibility is evaluated on chain from objective conditions) and does not determine the distribution formula (executed on chain by fixed formula); the salvor retains ordinary discretion over which qualifying pool, if any, to pursue and whether to undertake the operation at all.
 
 Since Whitepaper v4.0 was canon-locked, the evidence architecture has been implemented and accepted on Devnet: two dedicated oracle authorities now sign the two evidence types the criteria consume, and the two-phase eligibility lifecycle is enforced by deployed bytecode. This revision states that architecture as implemented; Section 5 replaces the earlier treatment of external price oracles.
 
@@ -324,14 +481,14 @@ Not a Mainnet product yet. The protocol is deployed and accepted on Solana Devne
 
 #### **3. Eligibility - The Six Derelict-Pool Criteria**
 
-Eligibility is decided by a single evaluator function in the GraveScanner program, executed identically in both lifecycle phases. The evaluator is a fixed sequential conjunction C1 through C6: the first failed criterion aborts evaluation, a passing evaluation produces the full criteria bitmap 0x3F, and a pool failing any criterion is not eligible. Thresholds live in ProtocolConfig and are governance-tunable only within bounded ranges; invariant-violating updates revert. The canonical numbering below is used across the specification, the technical documentation, and the program source.
+Eligibility is decided by a single evaluator function in the GraveScanner program, executed identically in both lifecycle phases. The evaluator is a fixed sequential conjunction C1 through C6: the first failed criterion aborts evaluation, a passing evaluation produces the full criteria bitmap 0x3F, and a pool failing any criterion is not eligible. Thresholds live in ProtocolConfig and are governance-tunable only within bounded ranges; invariant-violating updates revert. The canonical numbering below is used across the specification, the technical documentation, and the program source. Historical note (C-01): the frozen Combined Technical Documentation v3.0 (its Table 4) numbered the six criteria in a different order — its C1 was "No LP burn", C2 "No governance lock", C3 TVL, C4 Multi-epoch, C5 Inactivity, C6 Price decline. Those are historical labels only; the canonical identifiers are C1-C6 as defined in this table, and historical labels must not be read as current identifiers.
 
 **Table 2. Canonical criteria (thresholds unchanged from v4.0; defaults shown)**
 
 | ID | Criterion | Rule (default) | Evidence source |
 | --- | --- | --- | --- |
-| C1 | Trading inactivity | current_unix_ts - last_swap_unix_ts >= inactivity_seconds; default 90 days (7,776,000 s); equality passes. | Indexer-signed 112-byte Ed25519 last-swap attestation (C1 activity evidence), verified in-transaction against ProtocolConfig.activity_oracle; the attested slot must still resolve in SlotHashes (approximately 512 slots). |
-| C2 | Price collapse from launch | drop_bps = floor((launch - current) x 10,000 / launch) >= price_collapse_bps; default 9,900 bps (99%); 0 if price has risen above launch; capped at 10,000. | Launch price carried by an oracle-signed 168-byte launch-price attestation (C2) recorded init-once in the LaunchPrice PDA; current price derived on-chain from vault balances. |
+| C1 | Trading inactivity | current_unix_ts - last_swap_unix_ts >= inactivity_seconds; default 90 days (7,776,000 s); equality passes. | Indexer-signed 112-byte Ed25519 activity attestation (SDK type `LastSwapAttestation`), verified in-transaction against ProtocolConfig.activity_oracle; the attested slot must still resolve in SlotHashes (approximately 512 slots). |
+| C2 | Price collapse from launch | drop_bps = floor((launch - current) x 10,000 / launch) >= price_collapse_bps; default 9,900 bps (99%); 0 if price has risen above launch; capped at 10,000. | Launch price carried by an oracle-signed 168-byte launch-price attestation (SDK type `LaunchPriceAttestation`) recorded init-once in the LaunchPrice PDA; current price derived on-chain from vault balances. |
 | C3 | Minimum residual TVL | current_tvl_lamports >= min_tvl_lamports; default 500,000,000 raw units of the quote-side vault balance. This equals 0.5 SOL when the quote mint is WSOL; for other quote mints the floor is the same raw-unit count in that mint's smallest denomination. | Quote-side vault balance read on-chain via the pool's own vault pointer. |
 | C4 | LP supply not burned | lp_supply > lp_burn_dust_threshold (strict); default threshold 1,000 raw LP units. | LP mint SPL token supply read on-chain. |
 | C5 | LP not locked | lp_locked_amount == 0, exactly. | Detected locked LP attributable to supported locker adapters - currently the UNCX Raydium V4 locker only - proven by a per-pool marker-PDA gate plus strictly validated TokenLock evidence. See the scope note below. |
@@ -339,25 +496,25 @@ Eligibility is decided by a single evaluator function in the GraveScanner progra
 
 ##### **3.1 Scope notes required for accuracy**
 
-Criterion 3 is enforced in raw token units. The on-chain comparison is 500,000,000 raw units of the quote-side vault; describing it as "0.5 SOL" is correct only for WSOL-quoted pools. Reconciling the unit convention across mints is an open pre-mainnet item.
+Criterion 3 is enforced in raw token units. The on-chain comparison is 500,000,000 raw units of the quote-side vault; describing it as "0.5 SOL" is correct only for WSOL-quoted pools (for a 6-decimal quote mint it is 500 display tokens). The same fixed raw-unit count is applied to every quote mint — the code performs no decimals normalization and no SOL/USD conversion — so the economic floor varies with the quote mint and does not establish a universal 0.5 SOL-equivalent minimum. Whether this raw-unit threshold is the intended economic criterion is an unresolved eligibility-design issue requiring owner review before Mainnet readiness (Q-03; C-06).
 
-Criterion 5 is enforced only within the protocol's detection scope. The v1 implementation introspects the UNCX Raydium V4 locker (verified against live mainnet lock state). LP locked in PinkSale, Team Finance, Streamflow, or any other locker, and restrictions imposed by multisig or governance arrangements that no adapter reads, are not detected and therefore do not fail this criterion. "Not detected" is not "not locked"; expanding the criterion's detection scope requires owner approval.
+Criterion 5 is enforced only within the protocol's detection scope. The v1 implementation introspects the UNCX Raydium V4 locker (verified against live mainnet lock state). LP locked in PinkSale, Team Finance, Streamflow, or any other locker, and restrictions imposed by multisig or governance arrangements that no adapter reads, are not detected and therefore do not fail this criterion. "Not detected" is not "not locked"; expanding the criterion's detection scope requires owner approval. Historical definitions were broader: the original whitepaper describes the absence of governance or multisig locks, and the Combined Technical Documentation discusses governance and pool-authority lock conditions; whether UNCX-only detection is the intended canonical criterion, or the implementation is incomplete relative to those historical definitions, is an explicit owner decision (Q-04) and a publication and Mainnet-readiness blocker until resolved.
 
 Criterion 4 uses a strict inequality above a configurable dust threshold, so a pool whose LP supply has been entirely incinerated always fails. Whether a flat dust threshold is the right long-term formulation is an open item (KEYS-002).
 
 Criterion 6 is enforced on chain between the two phases. It is an on-chain multi-epoch requirement and is not replaced or weakened by any off-chain evidence policy (see Section 5.4).
 
-#### **4. Evidence Model - C1 and C2**
+#### **4. Evidence Model — Activity and Launch-Price Attestations**
 
 Two eligibility inputs cannot be derived on chain. Raydium V4's pool account stores no last-swap timestamp, the SlotHashes sysvar covers only approximately 512 recent slots, and Solana programs cannot read historical account state. Inactivity and launch price are therefore carried into the transaction as Ed25519-signed attestations, verified in-transaction through the ed25519_program precompile. There is no external price-feed dependency anywhere in the eligibility path: the implementation does not use Pyth or any other oracle network, and no prior whitepaper description of an external evaluation dependency remains accurate.
 
-##### **4.1 C1 - activity evidence**
+##### **4.1 Activity attestation (criterion C1 input)**
 
-C1 activity evidence carries the pool's last qualifying economic swap timestamp. The dedicated indexer derives it from Raydium V4 transaction history and the designated activity oracle signs a 112-byte message: amm_program_id, pool_address, last_swap_unix_ts, issued_slot, and the slot hash of issued_slot. Under the approved architectural direction, only verified economic swaps reset inactivity; liquidity additions and removals, administrative instructions, crank operations, and other non-swap AMM interactions must not count, and ambiguous transactions must remain unresolved rather than optimistically classified. Canonical classification of transactions belongs in the core SDK. Implementing that classification is approved direction not yet implemented; until it lands, the attested timestamp must be read as "last AMM interaction" and this gap is tracked as a named work item.
+The activity attestation (explanatory name — the literal SDK identifier is `LastSwapAttestation`; no `ActivityAttestation` identifier exists in code) carries the pool's last qualifying economic swap timestamp. The dedicated indexer derives it from Raydium V4 transaction history and the designated activity oracle signs a 112-byte message: amm_program_id, pool_address, last_swap_unix_ts, issued_slot, and the slot hash of issued_slot. Under the approved architectural direction, only verified economic swaps reset inactivity; liquidity additions and removals, administrative instructions, crank operations, and other non-swap AMM interactions must not count, and ambiguous transactions must remain unresolved rather than optimistically classified. Canonical classification of transactions belongs in the core SDK. Implementing that classification is approved direction not yet implemented; until it lands, the attested timestamp must be read as "last AMM interaction" and this gap is tracked as a named work item.
 
-##### **4.2 C2 - launch-price evidence**
+##### **4.2 Launch-price attestation (criterion C2 input)**
 
-C2 launch-price evidence establishes the baseline for the collapse calculation. The launch price is defined as the quote-per-base price formed by the pool's vault balances immediately before the pool's first successful swap - the deployer-seeded initial market price. The designated launch-price oracle - deliberately a different key from the activity oracle, because the baseline is init-once and permanently binding - signs a 168-byte message carrying the pool and mint identities, the first-swap slot and timestamp, the price as a Q64.64 fixed-point number, and the issuing slot. record_launch_price accepts the price only inside this attestation and writes the init-once LaunchPrice PDA; caller-supplied prices revert. Deriving the baseline requires sufficient historical transaction coverage to reach the first qualifying price event; if the available history cannot establish it, the evidence is classified incomplete or unavailable and no price is substituted.
+C2 launch-price evidence establishes the baseline for the collapse calculation. The launch price is defined as the quote-per-base price formed by the pool's vault balances immediately before the pool's first successful swap - the deployer-seeded initial market price. The designated launch-price oracle - deliberately a different key from the activity oracle, because the baseline is init-once and permanently binding - signs a 168-byte message carrying the pool and mint identities, the first-swap slot and timestamp, the price as a Q64.64 fixed-point number, and the issuing slot. record_launch_price accepts the price only inside this attestation and writes the init-once LaunchPrice PDA; caller-supplied prices revert. Deriving the baseline requires sufficient historical transaction coverage to reach the first qualifying price event; if the available history cannot establish it, the evidence is classified incomplete or unavailable and no price is substituted. Implementation status: on-chain verification and SDK derivation are implemented and verified; the dedicated indexer's C2 issuance integration is incomplete (audit F-H3; R-33), so the end-to-end C2 pipeline is not operationally complete and is not depicted as such.
 
 ##### **4.3 Division of responsibility**
 
@@ -373,7 +530,7 @@ C2 launch-price evidence establishes the baseline for the collapse calculation. 
 
 ##### **4.4 Failure behavior**
 
-Evidence that is incomplete, stale, invalid, or unavailable fails closed. Every failure mode is a revert; there is no fallback to caller-supplied values. Missing precompile instruction or malformed offsets reverts (6024/6025); a signature by any key other than the configured oracle reverts (6026); a message bound to a different pool or program reverts (6027); zero or future timestamps or slots revert (6028/6031); a slot that has aged out of SlotHashes reverts (6029); a slot-hash mismatch reverts (6030); a missing or mismatched launch-price record reverts (6002/6032/6033); a live certificate blocks re-certification (6034) and an expired one is required for settlement (7002). Oracle downtime blocks new evaluations - an availability cost, not an integrity risk, because the chain rejects evidence it cannot verify. Off-chain, the indexer's verifier mirrors the on-chain check order and preserves an explicit indeterminate outcome for RPC conditions that cannot be resolved, so that unverifiable evidence is never presented as verified. An indexer whose historical scan is incomplete must never claim that a pool has been inactive for a qualifying period; under the approved direction, completeness must be explicit, scan-bounded evidence must be labeled as such, and backfill must be controlled (approved direction; cursor and backfill subsystems not yet implemented).
+Evidence that is incomplete, stale, invalid, or unavailable fails closed. Every failure mode is a revert; there is no fallback to caller-supplied values. Missing precompile instruction or malformed offsets reverts (6024/6025); a signature by any key other than the configured oracle reverts (6026); a message bound to a different pool or program reverts (6027); zero or future timestamps or slots revert (6028/6031); a slot that has aged out of SlotHashes reverts (6029); a slot-hash mismatch reverts (6030); a missing or mismatched launch-price record reverts (6002/6032/6033); a live certificate blocks re-certification (6034); settlement requires a valid, unexpired certificate — a missing certificate reverts (7001) and an expired certificate is rejected (7002; re-run Phase 2 to reissue). CORRECTED in revision 2 (C-02): the previous text wrongly said an expired certificate was "required" for settlement. Oracle downtime blocks new evaluations - an availability cost, not an integrity risk, because the chain rejects evidence it cannot verify. Off-chain, the indexer's verifier mirrors the on-chain check order and preserves an explicit indeterminate outcome for RPC conditions that cannot be resolved, so that unverifiable evidence is never presented as verified. An indexer whose historical scan is incomplete must never claim that a pool has been inactive for a qualifying period; under the approved direction, completeness must be explicit, scan-bounded evidence must be labeled as such, and backfill must be controlled (approved direction; cursor and backfill subsystems not yet implemented).
 
 #### **5. The Two-Phase Eligibility Lifecycle**
 
@@ -381,7 +538,7 @@ A derelict pool is a pool whose terminal state has persisted, and any single poi
 
 ##### **5.1 Phase 0 - launch-price record**
 
-Before evaluation, a LaunchPrice PDA is recorded for the pool from a C2 attestation. It is init-once per pool: a second record for the same pool reverts, which both prevents replay and makes a mis-recorded baseline permanent - the reason the launch-price signing key is isolated and its derivation is held to a fail-closed archive standard.
+Before evaluation, a LaunchPrice PDA is recorded for the pool from a launch-price attestation. It is init-once per pool: a second record for the same pool reverts, which both prevents replay and makes a mis-recorded baseline permanent - the reason the launch-price signing key is isolated and its derivation is held to a fail-closed archive standard.
 
 ##### **5.2 Phase 1 - EligibilityAnchor**
 
@@ -389,7 +546,7 @@ Phase 1 runs the full evaluator. If any criterion fails, nothing is written. If 
 
 ##### **5.3 The waiting period and Phase 2 - EligibilityCert**
 
-Phase 2 may run no earlier than MIN_EPOCH_CONFIRMATION (2) Solana epochs - approximately four to six days - after the anchor's epoch. Phase 2 re-runs the identical evaluator with a fresh C1 attestation (the Phase 1 attestation has necessarily aged out of the SlotHashes window long before the gap elapses, so old evidence cannot be replayed) and additionally requires the new criteria bitmap to equal the anchor's bitmap. If any threshold, oracle key, or adapter behavior changed such that the evaluator would now produce a different result, certification fails entirely and the pool must re-enter Phase 1. On success, Phase 2 writes an EligibilityCert PDA - the only object GraveVault trusts - with a time-to-live of one hour by default (governance-configurable, floored at ten minutes). A live certificate is immutable (re-running Phase 2 fails); an expired certificate is reissued in place by a fresh full Phase 2 run, bumping a generation counter. Reissuance never waives any check.
+Phase 2 may run no earlier than MIN_EPOCH_CONFIRMATION (2) Solana epochs - approximately four to six days - after the anchor's epoch. Phase 2 re-runs the identical evaluator with a fresh activity attestation (the Phase 1 attestation has necessarily aged out of the SlotHashes window long before the gap elapses, so old evidence cannot be replayed) and additionally requires the new criteria bitmap to equal the anchor's bitmap. If any threshold, oracle key, or adapter behavior changed such that the evaluator would now produce a different result, certification fails entirely and the pool must re-enter Phase 1. On success, Phase 2 writes an EligibilityCert PDA - the only object GraveVault trusts - with a time-to-live of one hour by default (governance-configurable, floored at ten minutes). A live certificate is immutable (re-running Phase 2 fails); an expired certificate is reissued in place by a fresh full Phase 2 run, bumping a generation counter. Reissuance never waives any check.
 
 ##### **5.4 What the two phases do not defend against**
 
@@ -399,7 +556,9 @@ Both phases consume oracle-attested evidence; a dishonest activity oracle that l
 
 salvage_pool is permissionless and executes the entire settlement in one atomic transaction: pre-flight validation against live pool state, an LP-holder snapshot commitment, CPI to the AMM to remove liquidity (burning the salvor's LP in place), conversion of the recovered assets through a Jupiter route with a protocol-checked slippage floor, and distribution of the recovered SOL.
 
-Proceeds from a successful salvage are split: 40% to the per-pool lp_holder_pool_vault PDA, claimable pro-rata by original LP holders against the snapshot Merkle root; 40% to the salvor who submitted the transaction; and 20% to the protocol treasury PDA. The protocol share is computed as the remainder of the proceeds after the two floored shares, so the three transfers exactly exhaust the total, and configuration rejects any attempt to raise the protocol share above the 20% Charter ceiling (the ceiling is a ceiling, not a target; governance may lower it).
+**LP-token prerequisite (disclosed; verified in source).** The withdraw CPI burns LP from `salvor_lp_token_account`, an account whose token authority must be the salvor, and `salvor_lp_amount` (any amount greater than zero that the salvor controls) selects how much liquidity is removed. Consequences: the salvor must acquire LP tokens before settlement - by purchase, over-the-counter transfer, or a prior position - and the protocol supports no alternative acquisition mechanism; original LP holders' tokens are never taken from them (their claims come from the snapshot census, which must enumerate the full LP mint supply, so burning does not change anyone's claim share); locked LP (UNCX) and LP held by inaccessible wallets cannot be burned by the salvor; and the snapshot supply-parity gate requires the snapshot to match the live supply at settlement time, not that the salvor burn the whole supply. Whether an economic salvor can realistically source LP for a given derelict pool is an open design question requiring owner review before the Mainnet funnel is finalized (Q-16).
+
+Proceeds from a successful salvage are split: 40% to the per-pool lp_holder_pool_vault PDA, claimable pro-rata by original LP holders against the snapshot Merkle root; 40% to the salvor who submitted the transaction; and 20% to the protocol treasury PDA. The protocol share is computed as the remainder of the proceeds after the two floored shares, so the three transfers exactly exhaust the total, and configuration rejects any attempt to raise the protocol share above the 20% Charter ceiling (the ceiling is a ceiling, not a target; governance may lower it). Per the original whitepaper §3.4, the protocol's share is intended to fund: smart-contract security audits and bug bounties; maintenance and upgrades; infrastructure; new protocol capabilities and DEX integrations; and legal and compliance advisory. These purpose restrictions are Charter commitments binding governance and treasury controls - the deployed program enforces only the 20% cap (update_protocol_config rejects protocol_share_bps above 2,000, error 7005) and the remainder-based computation; no instruction inspects or restricts how the treasury spends its share.
 
 ##### **6.1 The LP-holder snapshot and claims**
 
@@ -435,6 +594,7 @@ The protocol's documentation deliberately separates what deployed bytecode enfor
 | Only verified economic swaps reset inactivity; finalized-transaction evidence; explicit completeness | Approved direction - not yet implemented | GY-ADR-001 D4/D5/D6. The current SDK derivation accepts any AMM-program touch and does not gate on confirmation status; both corrections are named, owned work items in the core SDK. |
 | C5 lock detection covers all lockers | Limitation | Currently UNCX Raydium V4 only; other lockers and non-contract restrictions are undetected (Section 3.1). |
 | Claims recover each holder's original capital | Not a guarantee | The 40% allocation is a defined share of realized proceeds (Section 6.3). |
+| Protocol 20% share is spent per Charter purposes (audits/bounties, maintenance/upgrades, infrastructure, new capabilities/DEX integrations, legal/compliance advisory) | Charter commitment - NOT bytecode | The program enforces only the 20% cap (7005) and the remainder computation; spending purposes bind governance and treasury controls (original whitepaper §3.4; restored per corrective revision C-09). |
 
 A reserved or write-only authority field is not an enforced timelock, and this document does not describe it as one. Readers and auditors should verify multisig membership and Squads configuration directly; the process layer has no runtime tripwire.
 
@@ -473,7 +633,7 @@ The original ten-milestone build sequence remains the project's structure, state
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
-| m1-m8 | Mainnet-grade salvage on Raydium V4: evidence model, evaluator, settlement, claims, dust policy, adversarial hardening. | Implemented and Devnet-verified (W2 NS-3 acceptance 56/56). Mainnet deployment itself is pending and gated by the items below. |
+| m1-m8 | Mainnet-grade salvage on Raydium V4: evidence model, evaluator, settlement, claims, dust policy, adversarial hardening. | Status split by evidence class (corrected C-10): (1) Source implementation - complete for the m1-m8 surface (programs/ + sdk/ at the recorded commits). (2) Unit/integration tests - pass at their recorded baselines (668-pass NS-1-era aggregate; 367 Phase-12 gate; different baselines, Q-13). (3) Fork/simulation testing - 8 fork suites exercise the full settlement path against mainnet bytecode locally. (4) Devnet deployment acceptance - W2 NS-3 acceptance 56/56 (deployment acceptance 29/29 + ELF digest verification 27/27): this verifies deployment, ownership, schema, config defaults, and ELF digests ONLY. (5) Controlled end-to-end Devnet lifecycle demonstration of a REAL pool - NOT executed (W2 §9 states the acceptance "does not establish full end-to-end GraveYield lifecycle operation"; the fork suites are the current end-to-end evidence). (6) Independent security audit - not begun (Phase 13 open). (7) Mainnet readiness - not claimed and not implied. Per-milestone evidence: m1/m2 evaluator and criteria - criteria.rs + fork suites + live default decode; evidence model - attestation.rs + live 6024/6025/6026 sims (Phases 1.2/1.3/1.4 changelog); m3/m5 settlement - salvage_pool.rs + fork suites; m4 Raydium V4 adapter - mainnet-verified fixtures; m6 claims - lp_claim fork suite + snapshotter tests; m7 dust policy - sweep_dust + settlement_economics fork suite; m8 adversarial hardening - Phase 12 battery (15 threat classes, dedicated suites). |
 | m9 | Off-chain indexer. | Delivered as the dedicated indexer repository (Phase 2 evidence pipeline, operational) with named gaps: economic-swap classification and finalized-transaction gating live in the core SDK (approved, unimplemented), the C2 issuance path is not yet wired into the pipeline, and cursors/backfill are designed but unbuilt. The core repository's bundled candidate indexer is under separation-of-responsibilities review. |
 | m10 | Locker adapters. | UNCX Raydium V4 adapter implemented and verified against live mainnet lock state; PinkSale, Team Finance, and other lockers open. |
 | Additional AMMs | Raydium CLMM, Orca Whirlpool, PumpSwap, Meteora scanner and settlement adapters. | Open (v1.1 scope); current salvage scope is Raydium V4 only. |
@@ -482,7 +642,7 @@ The original ten-milestone build sequence remains the project's structure, state
 
 #### **11. Terminology**
 
-The canonical vocabulary is enforced in the repository by a CI terminology lint. GraveYield is the project; GraveScanner and GraveVault are the on-chain programs; EligibilityAnchor, EligibilityCert, SalvageReceipt, LaunchPrice, PoolRegistry, and ClaimRecord are the on-chain state objects; C1 activity evidence and C2 launch-price evidence are the two attestation types; original LP holders, salvor, and protocol allocation are the three distribution parties; derelict pool is the object of settlement; and the deterministic lifecycle for abandoned liquidity is the two-phase, certificate-gated settlement flow described above. The lexeme the glossary forbids (spelled only in glossary.md and scripts/terminology-lint.sh, which the lint exempts) is not part of the project's vocabulary in any artifact, and this draft does not reintroduce it. The maritime salvage framing is an analytical analogy and potential legal theory, not a representation of settled law; the legal documentation governs that boundary.
+The canonical vocabulary is enforced in the repository by a CI terminology lint. GraveYield is the project; GraveScanner and GraveVault are the on-chain programs; EligibilityAnchor, EligibilityCert, SalvageReceipt, LaunchPrice, PoolRegistry, and ClaimRecord are the on-chain state objects; the two attestation types are the activity attestation (SDK type `LastSwapAttestation`, consumed by criterion C1) and the launch-price attestation (SDK type `LaunchPriceAttestation`, consumed by criterion C2); the labels C1-C6 refer exclusively to the six eligibility criteria; original LP holders, salvor, and protocol allocation are the three distribution parties; derelict pool is the object of settlement; and the deterministic lifecycle for abandoned liquidity is the two-phase, certificate-gated settlement flow described above. The lexeme the glossary forbids (spelled only in glossary.md and scripts/terminology-lint.sh, which the lint exempts) is not part of the project's vocabulary in any artifact, and this draft does not reintroduce it. The maritime salvage framing is an analytical analogy and potential legal theory, not a representation of settled law; the legal documentation governs that boundary.
 
 #### **12. Revision History and Provenance**
 
@@ -539,7 +699,7 @@ Numbering disambiguation: this document says "spec decision Dn" for the decision
 | --- | --- | --- | --- | --- |
 | GraveScanner (program) | core | ProtocolConfig; LaunchPrice PDA recording (init-once, oracle-attested only); Phase 1 EligibilityAnchor creation; Phase 2 EligibilityCert issuance/reissue; anchor invalidation and stale-anchor sweep; threshold and oracle-key updates. | Settlement, custody of funds, snapshot production, evidence derivation. | [SRC] programs/grave-scanner (8 instructions) [DEP] deployed @ EFJpKtWx...AQJL |
 | GraveVault (program) | core | Salvage execution (preflight, snapshot commitment, AMM withdrawal CPI, Jupiter conversion, 40/40/20 distribution); LP-holder claims; dust sweep; pause; vault-side config. | Eligibility decisions (consumes certs only); oracle signing. | [SRC] programs/grave-vault (6 instructions) [DEP] deployed @ 7VxUGJNg...shya |
-| Core SDK (@graveyield/sdk 0.2.0) | core | All wire formats: C1/C2 attestation builders and parsers, precompile instruction construction, AmmInfo parsing, ProtocolConfig/account decoders, PDA derivation, error-code mirror, salvage/claim instruction builders, snapshot mirror. | Hosting, key custody, service availability. | [SDK] sdk/src (19 modules) [TST] sdk/test 108 tests @ 5cc46cd baseline |
+| Core SDK (@graveyield/sdk 0.2.0) | core | All wire formats: activity/launch-price attestation builders and parsers, precompile instruction construction, AmmInfo parsing, ProtocolConfig/account decoders, PDA derivation, error-code mirror, salvage/claim instruction builders, snapshot mirror. | Hosting, key custody, service availability. | [SDK] sdk/src (19 modules) [TST] sdk/test 108 tests @ 5cc46cd baseline |
 | Dedicated indexer (@graveyield/grave-indexer 0.1.0) | dedicated | Read-only discovery (Raydium V4), provenance-preserving ingestion (dedupe/conflict/staleness), last-swap derivation via SDK, C1 issuance and secret-free evidence bundles, off-chain verifier mirroring on-chain checks, replay journal, live evidence-path matrix, health, deployment-state classification, console snapshots. | Eligibility authority; transaction submission; state mutation; swap-semantic classification (lives in the SDK per ADR D4). | [SRC] src/ 16 files, 4,311 LOC [TST] 78 offline tests verified 2026-11-13 |
 | Snapshotter (grave-snapshotter) | core | Off-chain pre-salvage LP-holder snapshot: enumerate LP holders, supply-parity hard gate, per-owner aggregation, locked-LP beneficial-owner attribution, sealed self-verifying Merkle artifact (SHA-256 sorted-pair). | On-chain settlement (salvage_pool pins root + supply). | [SRC] snapshotter/src [TST] snapshotter tests; fork-verified end-to-end |
 | Ops services (@graveyield/ops) | core | Indexer sweeps, GraveVault observer (receipt/claim/failed-tx monitoring, invariant checks R1/R2), Merkle service, health, alerts, controlled salvage scenarios. | Canonical evidence attestation (overlaps dedicated indexer - see Section 16). | [SRC] ops/ [TST] 47 offline tests |
@@ -554,16 +714,41 @@ One evaluator (grave-scanner/src/criteria.rs) implements the six criteria for bo
 
 | ID | Rule | Default | On-chain input | Evidence |
 | --- | --- | --- | --- | --- |
-| C1 Trading inactivity | current_unix_ts - last_swap_unix_ts >= inactivity_seconds (equality passes); sanity: attested ts <= now (6028). | 7,776,000 s (90 d) | C1 attestation last_swap_unix_ts | [SRC] criteria.rs:109-121; constants.rs:13 [DEP] decode = 7776000 |
-| C2 Price collapse from launch | drop_bps = floor((launch - current) x 10,000 / launch) >= price_collapse_bps; 0 if risen above launch; capped 10,000. Requires positive, mint-matched launch price (6032/6033). | 9,900 bps (99%) | LaunchPrice PDA (C2-attested) + on-chain spot price | [SRC] criteria.rs:123-133,188-192; constants.rs:17 [DEP] = 9900 |
+| C1 Trading inactivity | current_unix_ts - last_swap_unix_ts >= inactivity_seconds (equality passes); sanity: attested ts <= now (6028). | 7,776,000 s (90 d) | activity-attestation last_swap_unix_ts | [SRC] criteria.rs:109-121; constants.rs:13 [DEP] decode = 7776000 |
+| C2 Price collapse from launch | drop_bps = floor((launch - current) x 10,000 / launch) >= price_collapse_bps; 0 if risen above launch; capped 10,000. Requires positive, mint-matched launch price (6032/6033). | 9,900 bps (99%) | LaunchPrice PDA (launch-price-attested) + on-chain spot price | [SRC] criteria.rs:123-133,188-192; constants.rs:17 [DEP] = 9900 |
 | C3 Minimum residual TVL | current_tvl_lamports >= min_tvl_lamports (inclusive). Raw units of the quote-side vault; 0.5 SOL only when quote mint is WSOL. | 500,000,000 | Quote vault balance | [SRC] criteria.rs:135-140; constants.rs:21 [DEP] = 500000000 [ACC] unit caveat open |
 | C4 LP supply not burned | lp_supply > lp_burn_dust_threshold (strict >). | 1,000 raw LP | LP mint supply | [SRC] criteria.rs:142-151; constants.rs:34 [DEP] = 1000 |
 | C5 LP not locked | lp_locked_amount == 0 exactly. Amount = sum of validated UNCX TokenLock amounts; marker absent = zero proven without enumeration; marker present requires TokenLock evidence (6020-6023). | 0 | Locker adapter inputs | [SRC] criteria.rs:153-158; adapters/locker.rs [TST] locker vectors [ACC] LOCKER-001 retired |
 | C6 Multi-epoch confirmation | Phase 1 stamps first_eligible_epoch; Phase 2 requires current_epoch - first_eligible_epoch >= MIN_EPOCH_CONFIRMATION (6016) and bitmap equality with the anchor (6011). | 2 epochs | Clock + EligibilityAnchor | [SRC] criteria.rs:160-179; constants.rs:25 |
 
-##### **3.1 Numbering across documents (verified - no ordering divergence)**
+##### **3.1 Numbering across documents (living sources aligned; historical v3.0 divergence documented)**
 
-All canonical sources use the same semantic order. Differences are labeling only: the whitepaper uses bare numerals 1-6; the specification, technical documentation, combined documentation, and code use C1-C6; wording variants exist for C4 ("LP not burned" vs "LP supply not burned") and C5 ("LP not locked" vs "No LP lock"). The revised whitepaper adopts C1-C6 and the wording in Table 3.1. One historical inversion - root README's "low TVL" for C3 - was retired by spec decision D1 and remains only in the root README. [SRC][SDK]
+All LIVING canonical sources use the same semantic order. Differences are labeling only: the whitepaper uses bare numerals 1-6; the specification, technical documentation, combined living markdown, and code use C1-C6; wording variants exist for C4 ("LP not burned" vs "LP supply not burned") and C5 ("LP not locked" vs "No LP lock"). The revised whitepaper adopts C1-C6 and the wording in Table 3.1. One historical inversion - root README's "low TVL" for C3 - was retired by spec decision D1 and remains only in the root README. [SRC][SDK]
+
+CORRECTED (C-01): the assigned ORIGINAL Combined Technical Documentation v3.0 (frozen DOCX, Table 4) used a different historical ordering. Per the owner's assignment (the DOCX itself remains unavailable for direct re-inspection — Section 2.3):
+
+**Table 3.1a Historical (v3.0 DOCX Table 4) → current canonical criterion mapping**
+
+| Historical v3.0 label | Historical meaning | Current canonical ID | Current meaning (Table 3.1) |
+|---|---|---|---|
+| C1 | No LP burn | C4 | LP supply not burned (`lp_supply > lp_burn_dust_threshold`) |
+| C2 | No governance lock | C5 (partial) | LP not locked — implemented detection scope is UNCX-only; see C-07/Q-04 on the governance/multisig gap |
+| C3 | TVL | C3 | Minimum residual TVL |
+| C4 | Multi-epoch | C6 | Multi-epoch confirmation |
+| C5 | Inactivity | C1 | Trading inactivity |
+| C6 | Price decline | C2 | Price collapse from launch |
+
+Historical v3.0 labels must NOT be read as current identifiers: e.g., "v3.0 C2" (no governance lock) is not current C2 (price collapse), and the historical governance-lock criterion has no full current counterpart because the implemented C5 detects UNCX locker locks only (Q-04). The living combined markdown (v3.0-labeled, lines 149-156) already uses the canonical order — it has been updated since the DOCX freeze (its own header notes the DOCX snapshot predates on-main error-code changes).
+
+Legacy v3.0-era claims reconciled against current code (each described as current ONLY where the current source supports it):
+
+| Legacy claim (v3.0 era) | Current verified state | Classification |
+|---|---|---|
+| "Cheapest-first" evaluation ordering | The evaluator is a fixed sequential conjunction in canonical order C1→C6, short-circuiting on the first miss (criteria.rs comment + evaluate()). The string "cheapest" appears in repository history only in the Phase-9-era bundled indexer (pool-selection heuristics, commit c82ecad) — a different, since-superseded subsystem; never in the on-chain evaluator. | Not current behavior; historical only |
+| `invalidate_cert` instruction | No such identifier exists anywhere in either repository's history (`git log -S "invalidate_cert"` = 0 hits). The current instruction is `invalidate_anchor` — authority-gated, pre-certification control; an issued cert is unaffected (its own TTL bounds it). The name presumably comes from the v3.0 DOCX, which cannot be re-inspected. | Legacy name; current = `invalidate_anchor` |
+| Certificate consumed on settlement | No consumption exists: salvage_pool validates the cert (existence 7001, unexpired 7002, bitmap, binding) and never closes or mutates it; one-shot settlement is enforced by the init-once PoolRegistry/SalvageReceipt PDAs. The living combined md §4.3 still says "Consumed by GraveVault" — inaccurate wording, recorded as matrix row CB-04 (proposed correction bundled with the next combined-doc re-alignment, Q-17). | Legacy wording; not current behavior |
+| Legacy adapter/AMM support | Raydium V4 is the only implemented scanner/settlement path; all other registered AMM stubs revert 6007 (honest-stub test adv_cpi03). PinkSale/Team Finance lockers are not implemented (LOCKER-002). | Current scope documented; legacy broader claims not current |
+| Older account/field definitions | Current layouts are normative (state/protocol_config.rs etc., byte-verified live 2026-11-13). v3.0-era field lists cannot be re-inspected (DOCX unavailable) and are superseded. | Current layouts authoritative |
 
 ##### **3.2 Program identity and configuration**
 
@@ -576,20 +761,20 @@ All canonical sources use the same semantic order. Differences are labeling only
 | Scanner ProtocolConfig PDA | 5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe (bump 255) | [ACC] acceptance report [DEP] 252 B decode |
 | Vault ProtocolConfig PDA | 5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda | [ACC] acceptance report [DEP] 210 B decode |
 | Governance authority | BMnrpx9mSZDzCmM8aJipnzgfLzfxa5tfFgWi3ZvBUwf5 | [DEP] config bytes 8..40 |
-| Activity oracle (C1) | 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o | [DEP] config offset 123 (registered) [ACC] registration tx |
-| Launch-price oracle (C2) | 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee | [DEP] config offset 155 (registered) [ACC] registration tx |
+| Activity oracle (signs the activity attestation) | 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o | [DEP] config offset 123 (registered) [ACC] registration tx |
+| Launch-price oracle (signs the launch-price attestation) | 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee | [DEP] config offset 155 (registered) [ACC] registration tx |
 | Deployer / upgrade authority | cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831 (fees + upgrade; not a config authority) | [ACC] [SRC] DEVNET authority arrangement |
 | Legacy NS-1 / NS-2 programs | 5JiCVxES...zvNF / HUyoG5vU...ox3v6 (2026-10-09); CuQZesHk...Ao54 / Bd5smhQg...s7rg (2026-10-25) - keys dead/lost; preserved records only | [ACC] LEGACY_DEPLOYMENTS.md [ADR] DR-001/DR-002 |
 
 All six scanner thresholds decode at specification defaults on chain (inactivity 7,776,000 s; collapse 9,900 bps; min TVL 500,000,000; anchor staleness 1,209,600 s; LP dust 1,000; cert TTL 3,600 s), pause flag false, pending authority zeroed with eta 0, reserved tail zeroed. [DEP] evidence/live_rpc_verification_2026-11-13.txt
 
-#### **4. C1 and C2 Evidence Formats and Verification Responsibilities**
+#### **4. Activity and Launch-Price Attestation Formats and Verification Responsibilities**
 
-##### **4.1 C1 - activity attestation (112 bytes)**
+##### **4.1 Activity attestation (112 bytes; consumed by criterion C1)**
 
-Message layout (normative; no borsh; do not reorder): amm_program_id [0..32), pool_address [32..64), last_swap_unix_ts i64 LE [64..72), issued_slot u64 LE [72..80), slot_hash [80..112). The transaction carries an ed25519_program precompile verify instruction immediately before the scanner instruction, with pubkey offset 16, signature offset 48, message span (72,112), and message_instruction_index bound to the scanner instruction. [SRC] attestation.rs:28-62,142-171; [SDK] lastSwapAttestation.ts. On-chain checks in order: precompile presence (6024), offset validity and span pinning (6025), oracle-key equality against ProtocolConfig.activity_oracle (6026), binding echo of amm/pool against instruction params (6027), timestamp sanity 0 < ts <= now (6028), issued_slot sanity (6031), SlotHashes resolution within the window with byte-exact hash (6029/6030). [SRC][TST] live sims recorded 6024/6025/6026 against the deployed program. [ACC]
+Message layout (normative; no borsh; do not reorder): amm_program_id [0..32), pool_address [32..64), last_swap_unix_ts i64 LE [64..72), issued_slot u64 LE [72..80), slot_hash [80..112). The transaction carries an ed25519_program precompile verify instruction immediately before the scanner instruction, with pubkey offset 16, signature offset 48, message span (72,112), and message_instruction_index bound to the scanner instruction. [SRC] attestation.rs:28-62,142-171; [SDK] lastSwapAttestation.ts. On-chain checks in order (verified against attestation.rs:254-329 and errors.rs:134-214): precompile presence (6024 AttestationMissing), offset validity (6025 InvalidAttestationOffsets), oracle-key equality against ProtocolConfig.activity_oracle (6026 AttestationOracleMismatch), message-span pinning (6025 — the SAME InvalidAttestationOffsets code guards this later stage; 6025 fires at two distinct check stages by design; corrected order per C-13 — the previous text placed span pinning before oracle equality), binding echo of amm/pool against instruction params (6027), timestamp sanity 0 < ts <= now (6028), issued_slot sanity (6031), SlotHashes resolution within the window with byte-exact hash (6029/6030). SDK mirror names verified: errors.ts 6024 AttestationMissing / 6025 InvalidAttestationOffsets / 6026 AttestationOracleMismatch. [SRC][TST] live sims recorded 6024/6025/6026 against the deployed program. [ACC]
 
-##### **4.2 C2 - launch-price attestation (168 bytes)**
+##### **4.2 Launch-price attestation (168 bytes; consumed by criterion C2)**
 
 Message layout: amm_program_id [0..32), pool_address [32..64), base_mint [64..96), quote_mint [96..128), first_swap_slot u64 LE [128..136), first_swap_unix_ts i64 LE [136..144), launch_price_q64x64 u128 LE [144..160), issued_slot u64 LE [160..168); embedded at offset 152 of record_launch_price instruction data. record_launch_price accepts the price only from this attestation (caller-supplied values revert) and writes the init-once LaunchPrice PDA. There is deliberately no SlotHashes freshness check: the launch price is a time-invariant historical fact and the init-once PDA makes replay structurally impossible. [SRC] attestation.rs:101-118,184-189; [SDK] launchPriceAttestation.ts [TST] precompile construction cases [ACC] phase1-precondition live case
 
@@ -602,7 +787,7 @@ Message layout: amm_program_id [0..32), pool_address [32..64), base_mint [64..96
 | Solana runtime (precompile) | Ed25519 signature over exactly the embedded message span. | Invalid signature aborts before the handler. |
 | GraveScanner | Precompile presence/offsets; oracle identity; binding; timestamps; slot freshness/hash; launch-price record presence, mint match, positivity; all six criteria; bitmap equality; cert validity for settlement. | Errors 6000-6034; every failure is a revert, no caller-supplied fallback. |
 | Dedicated indexer verifier (off-chain mirror) | Same check order against live ProtocolConfig + live blockhash; plus replay journal; outcomes verified / oracle-gated / rejected / indeterminate. | Fail-closed bundle parsing; indeterminate preserved for RPC lag, never conflated with stale. |
-| GraveVault | Cert existence/expiry/bitmap (7001/7002); snapshot supply pin (7018); pool binding; route vetting; slippage floor (7007); share-sum and ceiling (7004/7005). | Errors 7000-7022; init-once registry/receipt prevent double settlement. |
+| GraveVault | Cert existence (7001), unexpired validity (7002 = expired cert rejected), bitmap 0x3F; snapshot supply pin (7018); pool binding; route vetting; slippage floor (7007); share-sum and ceiling (7004/7005). | Errors 7000-7022; init-once registry/receipt prevent double settlement. |
 
 ##### **4.4 Domain separation note**
 
@@ -614,22 +799,22 @@ The attestation messages carry no explicit domain-separation prefix. Binding is 
 
 | Object / step | Semantics | Errors | Evidence |
 | --- | --- | --- | --- |
-| record_launch_price (Phase 0) | Init-once LaunchPrice PDA from a C2 attestation; mint pair re-checked at evaluation (6033). | 6032 zero price; 6033 mint mismatch | [SRC] instructions/record_launch_price.rs |
+| record_launch_price (Phase 0) | Init-once LaunchPrice PDA from a launch-price attestation; mint pair re-checked at evaluation (6033). | 6032 zero price; 6033 mint mismatch | [SRC] instructions/record_launch_price.rs |
 | evaluate_pool_phase_1 | Full evaluator; on pass creates EligibilityAnchor {first_eligible_epoch, criteria_bitmap, writer, invalidated}; on fail writes nothing. LaunchPrice PDA is a hard precondition (6002). Paused config reverts (6010). | 6001/6010/6002; anchor init | [SRC] evaluate_pool_phase1.rs |
 | Waiting period | >= MIN_EPOCH_CONFIRMATION (2) epochs between anchor epoch and Phase 2; approximately 4-6 days. | 6016 EpochConfirmationPending | [SRC] phase2 + constants.rs:25 |
-| evaluate_pool_phase_2 | Full re-run with fresh C1 (Phase 1 attestation necessarily aged out); bitmap equality (6011); anchor invalidated gate (6017); writes/reissues EligibilityCert {expires_at = now + cert_ttl, reissue_generation}. | 6011/6015/6016/6017/6019/6034 | [SRC] evaluate_pool_phase2.rs |
+| evaluate_pool_phase_2 | Full re-run with a fresh activity attestation (the Phase 1 attestation has necessarily aged out); bitmap equality (6011); anchor invalidated gate (6017); writes/reissues EligibilityCert {expires_at = now + cert_ttl, reissue_generation}. | 6011/6015/6016/6017/6019/6034 | [SRC] evaluate_pool_phase2.rs |
 | Cert TTL | Default 3,600 s; floor 600 s (update reverts below floor); live cert immutable (6034); reissue in place after expiry only. | 6019/6034 | [SRC] constants.rs:48,57 [SDK] decode certTtlSeconds |
 | invalidate_anchor (authority) | Marks anchor invalid; Phase 2 via this anchor impossible. Does not affect an issued cert. | 6017 | [SRC] invalidate_anchor.rs |
 | sweep_stale_anchor (permissionless) | Closes anchors after anchor_staleness_seconds (default 14 d, floor sized at 3 epochs); rent returns to writer; confers no salvage rights; safe vs certs because cert TTL is far shorter. | 6018 AnchorNotStale | [SRC] sweep_stale_anchor.rs |
-| salvage_pool consumption | Cert must exist, be fresh (7002), bind this pool/program, carry bitmap 0x3F; consumed by the init-once PoolRegistry path. | 7001/7002 | [SRC] salvage_pool.rs |
+| salvage_pool settlement gate | Cert must exist (7001 if missing), be unexpired (7002 if expired — `is_expired` gate at salvage_pool.rs:300-303), bind this pool/program, carry bitmap 0x3F. The cert is NOT consumed or closed by settlement: one-shot settlement is enforced by the init-once PoolRegistry/SalvageReceipt PDAs, and the cert simply expires by TTL. | 7001/7002 | [SRC] salvage_pool.rs |
 
 An anchor is never a salvage authorization: no instruction path leads from an anchor to liquidity movement, GraveVault does not accept anchors, and Phase 2 must independently re-verify every condition with fresh evidence. [SRC]
 
 #### **6. Historical Transaction Evidence Requirements**
 
-C1 derivation: the SDK's deriveLastSwapV4 scans getSignaturesForAddress newest-first (bounded by SIGNATURE_SCAN_LIMIT, default 1,000) and takes the first transaction that invokes the AMM program with the pool among its accounts, using its blockTime. Verified limitations: the predicate does not distinguish swaps from liquidity/administrative/crank invocations (audit H-1), and no confirmation-status gate exists despite the SDK header naming a minConfirmations requirement (audit H2; the literal is absent from PROTOCOL_SPEC - the header's cross-reference is unsupported as written). ALT-unresolved and version-1 transactions are skipped silently (documented; lowers yield). [SDK][SRC] sdk/src/lastSwapAttestation.ts:194-257 [TST] partial
+Activity-attestation derivation (criterion C1 input): the SDK's deriveLastSwapV4 scans getSignaturesForAddress newest-first (bounded by SIGNATURE_SCAN_LIMIT, default 1,000) and takes the first transaction that invokes the AMM program with the pool among its accounts, using its blockTime. Verified limitations: the predicate does not distinguish swaps from liquidity/administrative/crank invocations (audit H-1), and no confirmation-status gate exists despite the SDK header naming a minConfirmations requirement (audit H2; the literal is absent from PROTOCOL_SPEC - the header's cross-reference is unsupported as written). ALT-unresolved and version-1 transactions are skipped silently (documented; lowers yield). [SDK][SRC] sdk/src/lastSwapAttestation.ts:194-257 [TST] partial
 
-C2 derivation: deriveLaunchPriceV4 scans history backwards for the first transaction that moves the two vault balances in opposite directions; the pre-swap reserve ratio is encoded Q64.64, byte-identical to the on-chain spot-price math. It refuses to guess: a getTransaction miss throws, and hitting the page limit before genesis is fail-closed. It requires full-archive trusted RPC (spec decision D9; ORACLE-003 runbook). [SDK][SRC] launchPriceAttestation.ts:197-259
+Launch-price derivation (criterion C2 input): deriveLaunchPriceV4 scans history backwards for the first transaction that moves the two vault balances in opposite directions; the pre-swap reserve ratio is encoded Q64.64, byte-identical to the on-chain spot-price math. It refuses to guess: a getTransaction miss throws, and hitting the page limit before genesis is fail-closed. It requires full-archive trusted RPC (spec decision D9; ORACLE-003 runbook). Implemented in the SDK; not wired into any operational pipeline (audit F-H3; R-33). [SDK][SRC] launchPriceAttestation.ts:197-259
 
 Approved direction ADR D4: only verified economic swaps reset inactivity. Canonical swap/liquidity/admin classification belongs in the SDK; ambiguous transactions remain unresolved and fail closed. Not yet implemented - the classification and its fixture-test matrix are specified as the acceptance target for the SDK change, to be mirrored byte-equal in salvor-bots (repo red line, ORACLE_PIPELINE §8.3).
 
@@ -644,18 +829,18 @@ ADR D5 establishes that historical transaction evidence must be based on finaliz
 | Stage | Complete-evidence condition | Failure behavior |
 | --- | --- | --- |
 | Discovery | gPA corpus bracketed by slots; deterministic ordering; in-batch dedupe; stale snapshots (>400 slots) excluded. | Malformed accounts counted, never guessed; conflict (same slot, different bytes) excluded fail-closed; determinism currently conditional under the MAX_POOLS_PER_SCAN cap (audit M-3). |
-| C1 derivation | History scan bounded (limit 1,000); noSwapFound is an explicit fact (unknown, never inferred); regression rule keeps the cache authoritative. | Skipped candidates (ALT/v1) recorded nowhere today (audit L-6); the scan limit is recorded, not the actual scan - flagged. |
-| C1 issuance | issued_slot resolves on the destination cluster (finalized - 4) with fetchable hash. | Unresolvable slot aborts issuance (6029 analogue, fail-closed). |
-| C1 verification | Every on-chain property reproduced against live data + journal. | rejected vs indeterminate preserved distinctly; replay journal append-only, torn-tail tolerant. |
-| C2 derivation | Full archive reaches the first qualifying price event. | Page-limit hit or missing tx = fail-closed refusal (incomplete/unavailable is the classification; no price substitution). |
-| C2 record | Oracle-signed attestation only; init-once. | Zero price (6032), mint mismatch (6033), existing PDA reverts. |
+| Activity-attestation derivation | History scan bounded (limit 1,000); noSwapFound is an explicit fact (unknown, never inferred); regression rule keeps the cache authoritative. | Skipped candidates (ALT/v1) recorded nowhere today (audit L-6); the scan limit is recorded, not the actual scan - flagged. |
+| Activity-attestation issuance | issued_slot resolves on the destination cluster (finalized - 4) with fetchable hash. | Unresolvable slot aborts issuance (6029 analogue, fail-closed). |
+| Activity-attestation verification | Every on-chain property reproduced against live data + journal. | rejected vs indeterminate preserved distinctly; replay journal append-only, torn-tail tolerant. |
+| Launch-price derivation | Full archive reaches the first qualifying price event. | Page-limit hit or missing tx = fail-closed refusal (incomplete/unavailable is the classification; no price substitution). |
+| Launch-price record | Oracle-signed attestation only; init-once. | Zero price (6032), mint mismatch (6033), existing PDA reverts. |
 | Lifecycle | Anchor -> gap -> cert with identical bitmap. | Any mismatch fails certification entirely; pool re-enters Phase 1. |
 | Settlement | Snapshot supply equals live LP supply (7018); cert fresh; bitmap 0x3F. | Preflight failure (7013), slippage (7007), CPI failure (7015/7016) revert the whole transaction (atomic, no PDA residue). |
 | Claims | Merkle proof verifies; claim record fresh. | Invalid proof (7010), duplicate (7011) revert; unclaimed residual stays permanently (unsweepable). |
 
 Approved direction ADR D6 requires explicit completeness status, persistent pagination/cursors, and controlled backfill, and forbids inferring inactivity from incomplete or truncated history. Current state: bounded scanning exists; the C2 path already refuses incomplete history; the C1 path lacks a completeness indicator and the pipeline lacks cursors/backfill - classified as approved-but-not-implemented (Deliverable 5). An indexer whose scan is incomplete must never claim a qualifying inactivity period; the honest states today are noSwapFound (unknown) and the pending console criteria. [ADR][SRC]
 
-##### **8.1 C2 historical coverage requirement**
+##### **8.1 Launch-price (criterion C2) historical coverage requirement**
 
 Launch-price evidence requires sufficient historical transaction coverage to establish the first qualifying price event. If the available history cannot reach it - pruned RPC, page limit, missing transaction - the evidence must be classified incomplete or unavailable; substituting an arbitrary price or treating partial history as sufficient is prohibited by the SDK's fail-closed design and by this specification. [SDK][SRC] launchPriceAttestation.ts:254-259
 
@@ -667,7 +852,7 @@ salvage_pool pins the snapshot: the submitted lp_total_supply_at_snapshot must e
 
 #### **10. Salvage Settlement and Distribution**
 
-salvage_pool executes in one atomic transaction: preflight against live pool state (7013); cert validation (7001/7002) with bitmap 0x3F; snapshot supply pin (7018); Raydium V4 withdraw CPI burning the salvor's LP in place (13 remaining accounts, orientation derived from the pool's own mints with the WSOL side pinned, 7019 for non-WSOL base); conversion via a Jupiter v6 route with the protocol's route-vetting rules (no custody-bearing accounts in the route; vault-WSOL destination required) and a slippage floor computed from live reserves and capped by config (7007); the leg-output floor assertion; then the distribution: salvor and LP shares are floor(total x bps / 10,000), the protocol share is the remainder, the share sum is re-validated (7004) and the ceiling enforced (7005); three system transfers signed by the vault authority complete settlement, and the SalvageReceipt PDA is written. Dust below the conversion threshold is not swapped: it is recorded on the receipt and recoverable via the one-shot, permissionless sweep_dust (7020/7021), which never touches the LP-holder SOL bucket. [SRC] salvage_pool.rs + cpi/mod.rs [TST] 8 fork suites incl. settlement_economics (D7) and security_negative [ACC] local fork harness; no controlled real-pool salvage executed on devnet to date. [ACC] tech-doc §9
+salvage_pool executes in one atomic transaction: preflight against live pool state (7013); cert validation (7001/7002) with bitmap 0x3F; snapshot supply pin (7018); Raydium V4 withdraw CPI burning the salvor's LP in place (13 remaining accounts, orientation derived from the pool's own mints with the WSOL side pinned, 7019 for non-WSOL base; LP prerequisite per C-08 — the burned LP comes from `salvor_lp_token_account`, `token::authority = salvor`, `salvor_lp_amount > 0`; the salvor must source the LP themselves, no protocol acquisition path exists, original holders keep their snapshot-based claims, and locked/inaccessible LP cannot be burned by the salvor — Q-16); conversion via a Jupiter v6 route with the protocol's route-vetting rules (no custody-bearing accounts in the route; vault-WSOL destination required) and a slippage floor computed from live reserves and capped by config (7007); the leg-output floor assertion; then the distribution: salvor and LP shares are floor(total x bps / 10,000), the protocol share is the remainder, the share sum is re-validated (7004) and the ceiling enforced (7005); three system transfers signed by the vault authority complete settlement, and the SalvageReceipt PDA is written. Dust below the conversion threshold is not swapped: it is recorded on the receipt and recoverable via the one-shot, permissionless sweep_dust (7020/7021), which never touches the LP-holder SOL bucket. [SRC] salvage_pool.rs + cpi/mod.rs [TST] 8 fork suites incl. settlement_economics (D7) and security_negative [ACC] local fork harness; no controlled real-pool salvage executed on devnet to date. [ACC] tech-doc §9
 
 Distribution defaults: 4,000 / 4,000 / 2,000 bps with the 2,000 bps protocol ceiling (7005). Rounding remainder accrues to the protocol share by construction (conservation, spec decision D7). The LP-holder allocation is a defined share of realized proceeds - not a guarantee of recovery of any holder's original capital (legal documentation: no guarantee of recovery is provided). [SRC] vault constants.rs [ACC] legal-documentation.md:599
 
@@ -762,7 +947,7 @@ The documents historically did not consistently distinguish forms of LP restrict
 | Multisig-controlled restrictions | LP held under multisig control (e.g., Squads accounts). | No | Same as plain custody from the evaluator's perspective. |
 | Full burn | LP supply zero or below dust threshold. | Adjacent: C4 | Burned LP is criterion C4's condition, not C5's; C4's strict-greater rule rejects fully incinerated supplies. |
 
-Definition adopted for documentation: for C5, "locked" means LP amount attributed to a supported dedicated locker adapter. The criterion is not expanded beyond this without owner approval (assignment boundary; Deliverable 6 Q-04). Snapshot-side interaction: UNCX-locked LP is attributed to the beneficial owner in snapshots (D11), which is a claims-fairness rule independent of C5. [SRC] snapshotter/locked.rs [ADR] D11
+Definition adopted for documentation: for C5, "locked" means LP amount attributed to a supported dedicated locker adapter. The criterion is not expanded beyond this without owner approval (assignment boundary; Deliverable 6 Q-04). Historical definitions were broader: the original whitepaper describes the absence of governance or multisig locks, and the Combined Technical Documentation discusses governance and pool-authority lock conditions (owner-supplied; DOCX originals unavailable for re-inspection). Whether UNCX-only detection is the intended canonical criterion or the implementation is incomplete relative to those historical definitions is an explicit owner decision (Q-04) and a publication and Mainnet-readiness blocker until resolved (C-07). Snapshot-side interaction: UNCX-locked LP is attributed to the beneficial owner in snapshots (D11), which is a claims-fairness rule independent of C5. [SRC] snapshotter/locked.rs [ADR] D11
 
 #### **Appendix B. Constants Reference**
 
@@ -818,7 +1003,7 @@ This document describes the GraveYield component map and end-to-end data flow fr
 | Dedicated indexer (grave-indexer) | GraveYield/grave-indexer | Discovery, provenance-preserving ingestion, C1 derivation/issuance, verifier, journal, health, deployment-state classification. | Evidence infrastructure; no eligibility or settlement authority; submits nothing. |
 | Snapshotter (grave-snapshotter) | graveyield-protocol/snapshotter | Pre-salvage LP-holder snapshot with supply-parity gate and sealed Merkle artifact. | Produces artifacts; salvage_pool pins them on chain. |
 | Ops services (@graveyield/ops) | graveyield-protocol/ops | Monitoring: vault observer, health, alerts, scenarios, Merkle service. | Read-only by default; submission contract under D3 review. |
-| Oracle keys (activity / launch-price) | operator custody | Sign C1 and C2 attestations; registered in ProtocolConfig. | Signing authority for evidence; governance-registered, operator-held. |
+| Oracle keys (activity / launch-price) | operator custody | Sign the activity and launch-price attestations; registered in ProtocolConfig. | Signing authority for evidence; governance-registered, operator-held. |
 | UNCX locker adapter | inside GraveScanner | C5 lock evidence (marker PDA + TokenLock validation). | Evidence input to the evaluator only. |
 
 #### **3. Authority Matrix**
@@ -830,7 +1015,7 @@ This document describes the GraveYield component map and end-to-end data flow fr
 | What the launch price is | GraveScanner LaunchPrice PDA (init-once, oracle-attested). | Immutable baseline after recording. | [SRC][DEP] |
 | Whether a pool is eligible now | GraveScanner evaluator (Phase 1 anchor / Phase 2 cert). | On-chain state only; indexer reports are observations. | [SRC] |
 | Whether a pool may be settled | GraveVault (valid live cert + registry/receipt checks). | On-chain checks only. | [SRC] |
-| What the last swap time is | The C1 attestation signed by the activity oracle (after approved D4 implementation: only verified economic swaps). | Valid until the SlotHashes window closes; freshness enforced on chain. | [SRC][SDK][ADR] |
+| What the last swap time is | The activity attestation signed by the activity oracle (after approved D4 implementation: only verified economic swaps). | Valid until the SlotHashes window closes; freshness enforced on chain. | [SRC][SDK][ADR] |
 | What the wire formats are | Core SDK. | Import, never re-implement. | [SDK] |
 | What the indexer reports | Dedicated indexer artifacts (bundles, snapshots, health). | Evidence with provenance and completeness labels; never authorization. | [SRC] |
 | Who may change oracles/thresholds/pause | ProtocolConfig governance authority. | Governance-controlled; devnet single governance key. | [SRC][DEP] |
@@ -838,7 +1023,7 @@ This document describes the GraveYield component map and end-to-end data flow fr
 
 #### **4. End-to-End Data Flow**
 
-Stage 0 - record launch price: the indexer derives the pre-first-swap reserve ratio from full-archive history (fail-closed on incomplete history), the launch-price oracle signs the 168-byte attestation, and record_launch_price writes the init-once LaunchPrice PDA. Stage 1 - Phase 1: anyone submits evaluate_pool_phase_1 with a fresh C1 attestation; the evaluator runs all six criteria (C5 evidence via the UNCX adapter); a full pass writes the EligibilityAnchor (first_eligible_epoch, bitmap 0x3F); any miss writes nothing. Stage 2 - waiting period: at least two Solana epochs elapse (approximately 4-6 days). Stage 3 - Phase 2: a fresh C1 attestation plus the full evaluator re-run must reproduce the anchor's bitmap; on success the EligibilityCert is written with its one-hour TTL (floored at ten minutes); expired certs reissue in place through the same path; live certs are immutable. Stage 4 - settlement: a salvor builds a snapshot (supply-parity gated), submits salvage_pool with the cert; the program validates cert freshness/binding/bitmap, pins snapshot supply against live LP supply, withdraws and converts via CPIs, and distributes 40/40/20 with remainder-based conservation; PoolRegistry and SalvageReceipt make it one-shot. Stage 5 - claims: holders claim pro-rata against the sealed Merkle root at any time, including during pause; unclaimed residual remains in the unsweepable vault. [SRC][SDK][ACC]
+Stage 0 - record launch price: the SDK's deriveLaunchPriceV4 derives the pre-first-swap reserve ratio from full-archive history (fail-closed on incomplete history), the launch-price oracle signs the 168-byte attestation, and record_launch_price writes the init-once LaunchPrice PDA. IMPLEMENTATION STATUS (C-04): on-chain verification (GraveScanner) and SDK derivation (deriveLaunchPriceV4) are implemented; the dedicated indexer's C2 issuance workflow is NOT wired into the pipeline (no derivation call sites, no CLI issuance path, no C2 evidence-bundle type, no dedicated launch-price key-custody procedure — audit F-H3; R-33). Stage 0 is the approved target flow, not an operational capability today. Stage 1 - Phase 1: anyone submits evaluate_pool_phase_1 with a fresh activity attestation; the evaluator runs all six criteria (C5 evidence via the UNCX adapter); a full pass writes the EligibilityAnchor (first_eligible_epoch, bitmap 0x3F); any miss writes nothing. Stage 2 - waiting period: at least two Solana epochs elapse (approximately 4-6 days). Stage 3 - Phase 2: a fresh activity attestation plus the full evaluator re-run must reproduce the anchor's bitmap; on success the EligibilityCert is written with its one-hour TTL (floored at ten minutes); expired certs reissue in place through the same path; live certs are immutable. Stage 4 - settlement: a salvor builds a snapshot (supply-parity gated), submits salvage_pool with the cert; the program validates cert freshness/binding/bitmap, pins snapshot supply against live LP supply, withdraws and converts via CPIs, and distributes 40/40/20 with remainder-based conservation; PoolRegistry and SalvageReceipt make it one-shot. Stage 5 - claims: holders claim pro-rata against the sealed Merkle root at any time, including during pause; unclaimed residual remains in the unsweepable vault. [SRC][SDK][ACC]
 
 **Table 4.1 Failure behavior at each hop (fail-closed everywhere)**
 
@@ -889,8 +1074,12 @@ GraveYield component and data-flow map (v1.0: Solana, Raydium V4)
  +--------------------------+ +---------------------------------+
  
  Oracle keys (operator custody, governance-registered in ProtocolConfig):
- activity_oracle 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o (signs C1)
- launch_price_oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee (signs C2)
+ activity_oracle 2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o (signs the activity attestation)
+ launch_price_oracle 97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee (signs the launch-price attestation)
+ Diagram shorthand "C1"/"C2" in attestation labels and "fresh C1" denotes the activity
+ and launch-price attestations consumed by criteria C1/C2 respectively (naming per C-11);
+ C2 issuance wiring into the dedicated indexer is incomplete (R-33) — the diagram shows
+ the target flow.
  Governed via update_protocol_config (devnet: governance authority BMnrpx...Uwf5).
  
  Boundary: the indexer and snapshotter NEVER submit transactions or hold eligibility
@@ -929,10 +1118,10 @@ flowchart LR
  SDK --> IDX
  K1 --> IDX
  K2 --> IDX
- IDX -- "C2 attestation (168 B)" --> LP
- IDX -- "C1 attestation (112 B)" --> E1
+ IDX -- "launch-price attestation (168 B; issuance wiring incomplete, R-33)" --> LP
+ IDX -- "activity attestation (112 B)" --> E1
  E1 --> AN
- AN -- ">= 2 epochs + fresh C1 + bitmap equal" --> E2
+ AN -- ">= 2 epochs + fresh activity attestation + bitmap equal" --> E2
  E2 --> CE
  SNAP --> SP
  CE -- "fresh, bitmap 0x3F" --> SP
@@ -960,8 +1149,8 @@ decision — each with its evidence source.
 | ID | Requirement / Component | Area | Classification | Evidence source(s) | Notes |
 | --- | --- | --- | --- | --- | --- |
 | R-01 | Six-criterion evaluator C1-C6 (single shared function, conjunction, bitmap 0x3F) | GraveScanner | Implemented & verified | programs/grave-scanner/src/criteria.rs + inline tests; live decode of all defaults 2026-11-13; fork suites | Thresholds governance-tunable within bounded ranges only. |
-| R-02 | C1 attestation verification chain (precompile pins, oracle equality, binding, freshness, 6024-6031) | GraveScanner | Implemented & verified | attestation.rs; live sims reproduced 6024/6025/6026 (verify-path-report.live.json); indexer verifier mirror tests | Domain separation is structural, not prefixed (recorded design note). |
-| R-03 | C2 attestation + record_launch_price (init-once LaunchPrice PDA, oracle-only acceptance) | GraveScanner | Implemented & verified | attestation.rs:101-189; live phase1-precondition case; SDK launchPriceAttestation tests | No SlotHashes freshness by design (time-invariant fact; init-once blocks replay). |
+| R-02 | Activity-attestation verification chain (criterion C1 input; precompile pins, oracle equality, binding, freshness, 6024-6031) | GraveScanner | Implemented & verified | attestation.rs; live sims reproduced 6024/6025/6026 (verify-path-report.live.json); indexer verifier mirror tests | Domain separation is structural, not prefixed (recorded design note). |
+| R-03 | Launch-price attestation + record_launch_price (criterion C2 input; init-once LaunchPrice PDA, oracle-only acceptance) | GraveScanner | Implemented & verified | attestation.rs:101-189; live phase1-precondition case; SDK launchPriceAttestation tests | No SlotHashes freshness by design (time-invariant fact; init-once blocks replay). |
 | R-04 | Two-phase lifecycle: anchor, epoch gap, bitmap equality, cert issuance/reissue (6011/6016/6034) | GraveScanner | Implemented & verified | evaluate_pool_phase1/2.rs; eligibility-anchors.md; scanner_windows fork suite; acceptance drills | MIN_EPOCH_CONFIRMATION=2 is compile-time, not config. |
 | R-05 | Anchor housekeeping (invalidate_anchor authority-gated; sweep_stale_anchor permissionless) | GraveScanner | Implemented & verified | invalidate_anchor.rs; sweep_stale_anchor.rs; inline tests; eligibility-anchors.md §5 | Sweep returns rent only; confers no salvage rights. |
 | R-06 | C5 lock detection via UNCX Raydium V4 adapter (marker-PDA gate + TokenLock evidence) | GraveScanner | Implemented & verified | adapters/locker.rs with mainnet vectors (125 locks / 74 pools); errors 6020-6023; LOCKER-001 retired | Scope limited to UNCX; other lockers undetected (R-18). |
@@ -1019,11 +1208,11 @@ decision — each with its evidence source.
 
 ## 8. Outstanding questions and risk register (Deliverable 6)
 
-Twenty outstanding questions (issue, why it matters, current evidence, possible
+Twenty-one outstanding questions (issue, why it matters, current evidence, possible
 interpretations, recommended resolution, owner-approval flag, block flag) and a twelve-entry
-risk register.
+risk register. Q-21 was added by corrective revision 2 (C-11 evidence-type naming).
 
-### 8.1 Outstanding questions (20)
+### 8.1 Outstanding questions (21)
 
 
 **GraveYield Outstanding Questions - GY-DOC-RECON-001 (items that cannot be resolved from approved decisions and available evidence)**
@@ -1031,9 +1220,9 @@ risk register.
 | ID | Issue | Why it matters | Current evidence | Possible interpretations | Recommended resolution | Owner approval required? | Blocks publication / implementation? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Q-01 | Authority and lineage of the "Whitepaper v4.0.1" artifact. The assigned whitepaper file is named v4_0_1 while its internal metadata reads Version 4.0; the file itself was not accessible in the working environment; program-source comments cite "Whitepaper v4.0.1"; the living markdown self-declares v4.0; no living v4.0.1 exists in either repo. | Determines which text is the historical record and what the revised draft must supersede; unresolvable version labels undermine the documentation lineage this assignment exists to fix. | whitepaper.md:1-8; criteria.rs:12 / errors.rs:4 / lib.rs:110 code comments; git history (no docx ever committed); docs/README canonical set. | (a) v4.0.1 was a real internal spec patch rendered only in the external docx, whose metadata was never bumped; (b) v4.0.1 is label drift and v4.0 is the sole canonical text. | Owner confirms the lineage; adopt Version 4.1.0 (draft absorbs the informal v4.0.1 references); publish a docx snapshot only after approval. | Yes | Blocks whitepaper publication (draft itself is complete). |
-| Q-02 | Canonical criterion label set: C4 "LP supply not burned" vs "LP not burned"; C5 "LP not locked" vs "No LP lock"; whitepaper bare numerals vs C1-C6. | Consistent numbering is an explicit completion standard of the assignment. | Matrix WP-03/WP-04; comparison across five sources (no ordering divergence found). | Adopt spec wording everywhere vs keep per-document variants. | Adopt the C1-C6 labels and Table 3.1 wording of Deliverable 3 across all documents. | Recommended (ratification) | Blocks sign-off of revised docs. |
-| Q-03 | C3 unit convention: raw units (500,000,000) vs "0.5 SOL" phrasing, and the KEYS-002 reform of the flat LP dust threshold. | The 0.5 SOL framing is wrong for non-WSOL quote mints; user-facing docs must not overstate precision. | criteria.rs:135-140; tech-doc §2 caveat + §10 blocker; live decode 500,000,000. | (a) document raw-unit semantics with WSOL caveat; (b) reform to a percent-of-supply or USD-normalized check on chain (behavior change). | Document the caveat now (done in Deliverables 2/3); decide KEYS-002 before mainnet. | Yes (for any on-chain reform) | Blocks mainnet docs; not devnet docs. |
-| Q-04 | Workstream D lock scope: should C5 eventually cover non-UNCX lockers, pool-authority status, or governance/multisig restrictions, and how should "locked" be defined? | Undetected lockers let locked pools pass C5; expanding scope changes eligibility behavior - explicitly out of scope without approval. | Advisory A (Appendix A of Deliverable 3); LOCKER-002 open; criteria.rs C5 semantics. | (a) keep UNCX-only scope and document it; (b) add adapters per locker; (c) redefine locked to include custody/governance mechanisms. | Keep the current scope, publish the taxonomy, schedule adapter work as v1.1 roadmap items. | Yes (for any expansion) | Blocks C5 expansion only, not documentation. |
+| Q-02 | Canonical criterion label set: C4 "LP supply not burned" vs "LP not burned"; C5 "LP not locked" vs "No LP lock"; whitepaper bare numerals vs C1-C6. PLUS (C-01): the frozen v3.0 DOCX Table 4 ordering (C1 No LP burn ... C6 Price decline) diverges from the canonical C1-C6 — how should historical labels be annotated where v3.0-era text is quoted? | Consistent numbering is an explicit completion standard of the assignment; misreading historical labels as current identifiers corrupts eligibility descriptions. | Matrix WP-03 (corrected); living-source comparison (aligned); owner-supplied v3.0 Table 4 ordering (DOCX unavailable for re-inspection); mapping table in spec §3.1. | Adopt spec wording everywhere + annotate historical mapping vs keep per-document variants. | Adopt the C1-C6 labels and Table 3.1 wording of Deliverable 3 across all documents; publish the Table 3.1a historical mapping wherever v3.0-era labels are quoted. | Recommended (ratification) | Blocks sign-off of revised docs. |
+| Q-03 | C3 unit convention: raw units (500,000,000) vs "0.5 SOL" phrasing, and the KEYS-002 reform of the flat LP dust threshold. CORRECTED units (C-06): for a 6-decimal quote mint the threshold is 500 display tokens = 500,000,000 raw units; the same raw count is applied to every quote mint without decimals/value normalization, so there is no universal 0.5 SOL-equivalent or USD minimum. | The 0.5 SOL framing is wrong for non-WSOL quote mints; user-facing docs must not overstate precision; whether a fixed raw-unit floor is the intended economic criterion across heterogeneous quote mints is an eligibility-design decision. | criteria.rs:135-140; evaluate_pool_phase1.rs:151 (quote reserve used directly); tech-doc §2 caveat + §10 blocker; live decode 500,000,000. | (a) document raw-unit semantics with WSOL caveat and per-mint implications (done in Deliverables 2/3); (b) reform to a percent-of-supply or USD/normalized check on chain (behavior change); (c) normalize by decimals while keeping a raw floor (behavior change). | Document the caveat now (done); owner decides the threshold semantics before Mainnet readiness. | Yes (for any on-chain reform) | Blocks mainnet docs; not devnet docs. |
+| Q-04 | Workstream D lock scope: should C5 eventually cover non-UNCX lockers, pool-authority status, or governance/multisig restrictions, and how should "locked" be defined? CORRECTED FRAMING (C-07): the original whitepaper describes the absence of governance or multisig locks, and the Combined Technical Documentation discusses governance and pool-authority lock conditions (both owner-supplied; DOCX originals unavailable for re-inspection), while the implemented detection scope is UNCX Raydium V4 locker locks ONLY. The owner decision is whether UNCX-only detection is the intended canonical criterion, or the implementation is incomplete relative to the historical governance/pool-authority lock requirement. | Undetected lockers let locked pools pass C5; a pool locked only by governance/multisig arrangements (or non-UNCX lockers) is eligible under the implemented criterion; expanding scope changes eligibility behavior - explicitly out of scope without approval. THIS IS A PUBLICATION AND MAINNET-READINESS BLOCKER UNTIL RESOLVED. | Advisory A (Appendix A of Deliverable 3); LOCKER-002 open; criteria.rs:153-158 + adapters/locker.rs (UNCX-only, verified); assignment statement (owner-supplied historical definitions). | (a) keep UNCX-only scope and document it as the canonical criterion; (b) treat UNCX-only as incomplete and add adapters per locker; (c) redefine locked to include custody/governance/pool-authority mechanisms. | Owner decides the canonical lock criterion scope before any revised documentation is signed off or Mainnet readiness is claimed; keep the current scope until then. | Yes (for any expansion or redefinition) | Blocks publication and Mainnet readiness until resolved. |
 | Q-05 | Fate of the core repo's overlapping indexer functionality (indexer/ submit path holding ACTIVITY_ORACLE_KEY; ops indexerService submission contract). | ADR D3 directs narrowing/migration/retirement; oracle-key custody in a candidate scanner widens the compromise surface and blurs the evidence/authority boundary. | submit.ts:140-141; OPS.md env table; ADR D3; Deliverable 3 §16 recommendation table. | (a) retire submit + reposition ops to monitoring-only; (b) migrate the funnel to a salvor tool; (c) retain both with custody compensations. | Adopt the Deliverable 3 §16 recommendation (retire submit path; migrate tracking; narrow funnel to read-only; ops to monitoring). | Yes | Blocks implementation of the repo split; not the documentation. |
 | Q-06 | Sequencing of SDK derivation fixes (ADR D4/D5), salvor-bots byte-equal mirror coordination, and the vendor/protocol re-pin (84 commits behind, zero wire drift). | D7 orders upstream correctness before re-pinning; unsynchronized mirrors reintroduce drift risk the SDK discipline exists to prevent. | audit §8.5/§12; ORACLE_PIPELINE §8.3 red line; commit 7ddf88c as the prior re-pin precedent. | Fix-first-then-repin vs re-pin-now-for-docs-freshness. | Implement D4/D5 in the SDK with fixture matrix + salvor-bots mirror, then re-pin and extend indexer tests (audit R2/R9/R10). | Yes | Blocks re-pin; not documentation. |
 | Q-07 | Backfill/scale policy (ADR D6): is bounded scanning (limit 1,000, no pagination) plus full re-enumeration acceptable at ~706k pools, or is a cursor/backfill subsystem required before mainnet? | Determines evidence completeness guarantees and RPC cost at scale; incomplete history must never seed inactivity claims. | config.ts:126; audit §5 (no cursor/backfill); discovery corpus size (706,002 raw accounts in the live artifact). | (a) keep bounded scans with explicit incompleteness labels; (b) build cursors + controlled backfill now; (c) hybrid (cursors only for C2-candidate pools). | Decide before mainnet funnel operation; until then, completeness labeling (R-37) is mandatory regardless. | Yes | Blocks mainnet evidence operations. |
@@ -1045,12 +1234,14 @@ risk register.
 | Q-13 | Single authoritative test-count source (668 total NS-1-era vs 367 Phase-12 gate vs SDK 108/102 vs dedicated indexer 78). | Conflicting counts across documents undermine the testing story. | Matrix TD-05; BASELINE_REPORT:226; Combined PDF Table 2; tech-doc §8.3; audit §11. | Per-repo baseline-pinned counts vs one aggregate. | Adopt per-repo counts pinned to commit hashes; update docs at next revision. | No | No. |
 | Q-14 | SDK error-mirror sync: add vault 7022 (code change), fix error_codes.md headings, combined-doc code range. | Mirror drift between on-chain enum, docs, and SDK confuses integrators. | Matrix EC-01/EC-02/CB-03; errors.rs self-tests pin 7000-7022. | Patch SDK + docs in one hygiene changeset. | Bundle into the first owner-approved changeset (with R-31/R-38 small fixes). | Yes (code change) | No (small, but blocks mirror-clean releases). |
 | Q-15 | CI posture: push-triggered devnet smoke uses the hardcoded public endpoint (not secret-gated) while the scheduled smoke is secret-gated. Intended asymmetry? | CI reliability and rate-limit exposure differ between the two workflows. | ci.yml job 2 (public endpoint); scheduled-evidence-smoke.yml gating. | Intended (PR runs need no secrets) vs oversight. | Document the asymmetry in the workflow comments or align them. | No | No. |
-| Q-16 | Economic-model question (tech-doc §10): who supplies the LP the salvor burns? The withdraw CPI burns LP held by the salvor; a derelict pool's LP is dispersed among absent holders, and locked LP belongs to lockers. | Determines whether permissionless settlement is achievable at all for a given pool; interacts with C5 gaps (undetected locks make settlement economically impossible even when it passes C5). | tech-doc §10 open question (verbatim); salvage_pool LP-burn design (cpi/mod.rs:32-39); fork harness uses a pre-funded salvor. | (a) salvor acquires LP on market pre-salvage; (b) future protocol-assisted acquisition; (c) partial-settlement redesign (behavior change). | Owner decision required before mainnet funnel design; document the current implicit answer (salvor-held LP) in the spec. | Yes | Blocks mainnet funnel design; not documentation. |
+| Q-16 | Economic-model question (tech-doc §10): who supplies the LP the salvor burns? The withdraw CPI burns LP held by the salvor (STRENGTHENED per C-08: `salvor_lp_token_account` with `token::authority = salvor`, `salvor_lp_amount > 0`, salvage_pool.rs:243-249,410-412); a derelict pool's LP is dispersed among absent holders, and locked LP belongs to lockers. The revised whitepaper previously described settlement as "anyone may permissionlessly settle" without disclosing this prerequisite — now disclosed throughout; whether permissionless settlement is achievable IN PRACTICE depends on the salvor sourcing LP. | Determines whether permissionless settlement is achievable at all for a given pool; interacts with C5 gaps (undetected locks make settlement economically impossible even when it passes C5). Classify as an important economic and operational design issue requiring owner review before the Mainnet funnel design is finalized. | tech-doc §10 open question (verbatim); salvage_pool.rs accounts struct (:243-249) and handler (:410-412); fork harness uses a pre-funded salvor. | (a) salvor acquires LP on market pre-salvage; (b) future protocol-assisted acquisition; (c) partial-settlement redesign (behavior change). | Owner decision required before mainnet funnel design; document the current implicit answer (salvor-held LP) in the spec. | Yes | Blocks mainnet funnel design; not documentation. |
 | Q-17 | Combined-document model: living markdown declares v3.0 while the published PDF is v4.0 (aligned to 27b57ac) - the md-wins contract is inverted for this document. | Precedence ambiguity risks readers trusting the older text. | combined md:8-18 vs docs/GraveScanner_GraveVault_CombinedTechnicalDocumentation_v4_0.pdf cover/§8. | (a) promote the v4.0 PDF content into the living md; (b) mark the PDF as current edition and the md as pending. | Adopt (a) at the next docs pass; fix docs/README canonical-set entries (SPC-01). | No (documentation decision) | No. |
 | Q-18 | Publication vehicle for the revised whitepaper: repo md + docx render cadence; the v4.0 docx snapshot whitepaper.md references does not exist in published/. | D2 requires preserving v4.0 as historical and preparing a revised draft without publishing; the render contract is currently broken (no whitepaper artifact). | whitepaper.md:3; docs/published/ inventory; docs/README render contract. | Publish 4.1.0 as md + docx together; or md-only with docx at the next quarterly render. | Owner chooses vehicle and timing; do not overwrite v4.0 artifacts (archive them as historical). | Yes | Blocks publication (draft complete). |
 | Q-19 | Cross-registering GY-ADR-001 in the repositories (DECISIONS.md / docs/README) so repo readers can find the binding architectural direction. | ADR D8/D1-D10 are binding but invisible inside the repos today. | DECISIONS.md (DR-001/DR-002 only); assignment §2.C. | Full ADR text vs pointer entry. | Add a pointer entry (or full text) in DECISIONS.md and docs/README. | Yes | No. |
 | Q-20 | Full-archive RPC provider and cost for C2 derivation (and its operational ownership: dedicated indexer vs salvor tooling). | C2 requires archive-grade history; ownership affects custody and D3 boundaries. | spec decision D9; launchPriceAttestation fail-closed requirement; H-3. | Dedicated indexer owns C2 issuance (with LAUNCH_PRICE_KEY_FILE custody) vs protocol-side ops service. | Assign to the dedicated indexer per D3; specify the archive provider in ORACLE-003. | Yes (ownership) | Blocks C2 pipeline completion (R-33). |
 
+
+| Q-21 | Evidence-type naming: the repo's PROTOCOL_SPEC.md §5 labels the two evidence rows "C1"/"C2", colliding with the criteria numbering C1-C6 (added in revision 2, C-11). | Reusing C1/C2 for both criteria and evidence types invites exactly the confusion this assignment fixes; the revised drafts now use "activity attestation" (SDK: `LastSwapAttestation`) and "launch-price attestation" (SDK: `LaunchPriceAttestation`). | sdk/src/lastSwapAttestation.ts:64; sdk/src/launchPriceAttestation.ts:58; PROTOCOL_SPEC.md:377-378. | (a) rename the §5 evidence rows in PROTOCOL_SPEC.md at the next spec pass; (b) keep C1/C2 evidence labels in the spec and rely on the drafts' terminology section. | Adopt (a) as a documentation-only change at the next spec revision; the revised drafts are already consistent. | No (documentation decision) | No. |
 
 ### 8.2 Risk register (12)
 
@@ -1064,7 +1255,7 @@ risk register.
 | RSK-03 | Evidence-content gaps H-1/H-2: non-swap AMM touches count as activity; unconfirmed signatures can seed evidence. | Evidence quality | High (documented) | Medium | None yet in code; SDK header documents the intended gate; approved direction D4/D5 names the fix. | Funnel false-negatives; cheap griefing can keep pools out of scope; reorg could invalidate attested facts. | Schedule the SDK fix with fixture matrix + salvor-bots mirror (Q-06); interim derivationKind labeling. |
 | RSK-04 | Devnet single-key concentration precedent (NS-1/NS-2 lost keys; NS-3 split keys but still devnet-only custody). | Operational | Low (devnet) | Low | DR-001/DR-002 records; custody policy (keys outside repos, never reused); honest authority-arrangement docs. | Devnet-only blast radius; mainnet transition not yet exercised. | Execute KEYS-003 custody program before mainnet; rehearse rotation. |
 | RSK-05 | Reserved/write-only timelock fields misread as enforced controls by external readers. | Communication | Medium | Medium | charter-invariants §4 honest split; PROTOCOL_SPEC D2; ORACLE_CUSTODY §2B 'NOT implemented' caveat; qualified language in revised drafts. | Over-trust in governance guarantees until GOV-001 lands. | Keep the qualified language in every future revision (proposed diffs preserve it). |
-| RSK-06 | C5 coverage gap: pools locked in undetected lockers pass C5, then settlement fails economically (locked LP cannot be burned by the salvor). | Completeness | Medium | Medium | LOCKER-002 tracked; scope qualified in Deliverables 2/3; UNCX adapter fail-closed evidence rules. | Salvage attempts on such pools fail at the withdraw CPI or are economically impossible; funnel noise. | Decide adapter roadmap (Q-04); cross-link with Q-16 (LP supply question). |
+| RSK-06 | C5 coverage gap: pools locked in undetected lockers pass C5, then settlement fails economically (locked LP cannot be burned by the salvor). Governance/multisig or pool-authority restrictions are also undetected, and the historical whitepaper/combined-doc lock definitions were broader than the UNCX-only implementation (C-07). | Completeness | Medium | Medium | LOCKER-002 tracked; scope qualified in Deliverables 2/3; UNCX adapter fail-closed evidence rules. | Salvage attempts on such pools fail at the withdraw CPI or are economically impossible; funnel noise; eligibility can be granted to pools whose LP is effectively immovable. | Owner decides the canonical lock-criterion scope (Q-04) — publication and Mainnet-readiness blocker until resolved; cross-link with Q-16 (LP supply question). |
 | RSK-07 | Conflicting test counts and stale statuses across documents mislead reviewers. | Communication | Medium | Low | Reconciliation matrix (TD-05 etc.); proposed documentation diffs; this assignment's canonical drafts. | Drift resumes without a doc-control process. | Adopt the doc-lineage control (R-63) and single test-count source (Q-13). |
 | RSK-08 | Submodule pin staleness (84 commits behind; acceptance report and layout tests only on main). | Maintenance | Medium | Low | Zero wire-format drift verified by tree diff; D7 orders re-pin after upstream fixes. | Docs inside the pin stay stale (Anchor.toml 'deployment pending'). | Re-pin at the owner-approved moment (Q-06). |
 | RSK-09 | Public-RPC fragility: no timeout/retry/failover outside the verifier; scheduled smoke depends on secrets. | Operational | High | Medium | Verifier's bounded step-backs; harness memoizer; scheduled smoke no-op-clean design; health registry. | Hung or 429ing endpoints stall cycles or fail jobs; monitoring false confidence if secrets absent (Q-09). | Implement the D10 resilience layer (R-35) before mainnet; verify smoke secrets now. |
@@ -1104,6 +1295,15 @@ implementation work.
 
 ### 9.2 Diffs (changes 1–10)
 
+Link validation (revision 2, C-12): every relative link in the added lines of changes 1–10
+was programmatically resolved against the actual repository trees at the PR head — 6 relative
+links total, all resolving from their target files' locations, 0 problems. The proposed
+DEVNET.md change links to a target of `w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`
+— already the correct directory-relative form for a file authored inside `docs/`; the
+`docs/w2-ns3-acceptance/` prefix appears only in the link's display text, not in its href.
+The proposed new whitepaper file (change 11, Section 9.3) contains no relative links. No link
+corrections were required.
+
 
 **Change 1 — `README.md`**
 
@@ -1116,7 +1316,9 @@ implementation work.
  GraveYield is the **settlement layer for derelict liquidity** on Solana. When AMM pools cross all
 -six derelict-pool criteria — long inactivity, ≥99% price collapse, low TVL, no LP burn or lock,
 +six derelict-pool criteria — long inactivity, ≥99% price collapse, minimum residual TVL at or above the floor, no LP burn or lock,
- and multi-epoch confirmation — anyone (the **salvor**) can permissionlessly settle the position:
++and multi-epoch confirmation — anyone (the **salvor**) holding the pool's LP tokens can settle
++the position permissionlessly (no protocol permission gate exists, but the withdraw burns LP
++from a salvor-controlled account — see the LP-token prerequisite in the revised whitepaper):
  remove the LP, swap the recovered tokens, and distribute the proceeds 40/40/20 to original LP
  holders, the salvor, and the protocol.
 @@ -122,8 +122,9 @@ requires one approving review.
@@ -1384,8 +1586,9 @@ implementation work.
 +there; live readback re-verified 2026-11-13). This document remains the
 +procedure for future registrations and rotations. Any attestation signed by a
 +key other than the configured oracles still fails closed with
- `6026 AttestationOracleMismatch` (check order in `attestation.rs`: sig/pk pin
- 6025 → oracle equality 6026 → message-span pin 6025).
+ `6026 AttestationOracleMismatch` (check order in `attestation.rs`, verified: offset
+ validity 6025 → oracle equality 6026 → message-span pin 6025 — the same
+ `InvalidAttestationOffsets` code guards both stages by design).
  
 @@ -30,7 +33,7 @@ canonical attestations verify. Until then every attestation fails closed with
  
@@ -1421,17 +1624,24 @@ in Section 4; see Appendix B (CF-03) before applying.
 ## 1. Premise
 
 GraveYield is the settlement layer for **derelict liquidity** on Solana. It is settlement
-infrastructure under maritime salvage framing — not a discretionary intervention. When an
-AMM liquidity pool crosses all six derelict-pool criteria — long inactivity, ≥99% price
-collapse from the recorded launch price, minimum residual TVL at or above the floor,
-LP supply not fully burned, LP not locked within the protocol's detection scope, and
-multi-epoch confirmation — anyone may permissionlessly settle the pool by removing the LP,
-swapping the recovered tokens, and distributing the proceeds 40 / 40 / 20 to the original
-LP holders, the salvor, and the protocol.
+infrastructure; maritime salvage is used in this draft only as an analytical analogy and a
+potential legal framing — not as settled legal treatment of GraveYield. When an AMM liquidity
+pool crosses all six derelict-pool criteria — long inactivity, ≥99% price collapse from the
+recorded launch price, minimum residual TVL at or above the floor, LP supply not fully burned,
+LP not locked within the protocol's detection scope, and multi-epoch confirmation — anyone may
+submit settlement permissionlessly, with one disclosed economic prerequisite: the settlement
+withdraw burns LP tokens from an account the salvor controls, so the salvor must hold or
+acquire the pool's LP tokens first (no protocol acquisition path exists). Settlement then
+removes the LP the salvor burns, swaps the recovered tokens, and distributes the proceeds
+40 / 40 / 20 to the original LP holders, the salvor, and the protocol.
 
-The actor performing the salvage is a **salvor** — a finder under maritime salvage law
-(1989 International Convention on Salvage). A salvor takes no discretion: eligibility is
-on-chain, distribution is on-chain, and compensation is by formula. Since v4.0, the evidence
+The actor performing the salvage is a **salvor**. Maritime-salvage concepts (such as the
+salvor-as-finder framing of the 1989 International Convention on Salvage) are used only as an
+analogy and a potential legal framing; the legal documentation governs, and no legal conclusion
+is drawn here. The discretion boundary is specific: the salvor does not determine eligibility
+outcomes (evaluated on chain from objective conditions) and does not determine the distribution
+formula (executed on chain), but retains ordinary discretion over which qualifying pool to
+pursue and whether to undertake the operation. Since v4.0, the evidence
 architecture has been implemented and accepted on Devnet: two dedicated oracle authorities
 sign the two evidence types the criteria consume (Section 5), and the two-phase lifecycle is
 enforced by deployed bytecode.
@@ -1451,7 +1661,10 @@ enforced by deployed bytecode.
 
 Canonical numbering C1–C6, used across the specification, technical documentation, and program
 source. The evaluator is a fixed sequential conjunction; the first miss aborts; a full pass is
-bitmap `0x3F`. Thresholds are governance-tunable only within bounded ranges.
+bitmap `0x3F`. Thresholds are governance-tunable only within bounded ranges. Historical note
+(C-01): the frozen Combined Technical Documentation v3.0 (Table 4) used a different historical
+numbering (its C1 "No LP burn" … C6 "Price decline"); those are historical labels only and must
+not be read as current identifiers.
 
 | ID | Criterion | Default threshold | Evidence source |
 |----|-----------|-------------------|-----------------|
@@ -1460,10 +1673,12 @@ bitmap `0x3F`. Thresholds are governance-tunable only within bounded ranges.
 | C3 | Minimum residual TVL | ≥ 500,000,000 raw units of the quote-side vault (equals 0.5 SOL when the quote mint is WSOL) | Quote-side vault balance read on-chain via the pool's own vault pointer |
 | C4 | LP supply not burned | `lp_supply > lp_burn_dust_threshold` (strict; default 1,000 raw LP units) | LP mint SPL supply read on-chain |
 | C5 | LP not locked | `lp_locked_amount == 0`, exactly | Locked LP attributable to supported locker adapters — currently the UNCX Raydium V4 locker only (marker-PDA gate + TokenLock evidence) |
-| C6 | Multi-epoch confirmation | ≥ 2 consecutive Solana epochs (~4–6 days) with identical criteria bitmap | `EligibilityAnchor` PDA (Phase 1) then `EligibilityCert` PDA (Phase 2), bitmap equality enforced |
+| C6 | Multi-epoch confirmation | Phase 2 occurs no earlier than two epochs after the Phase 1 EligibilityAnchor (`MIN_EPOCH_CONFIRMATION` = 2; ~4–6 days); at Phase 2 the protocol re-evaluates all eligibility criteria and requires the resulting criteria bitmap to match the Phase 1 bitmap. No per-epoch evaluation happens between the phases. | `EligibilityAnchor` PDA (Phase 1) then `EligibilityCert` PDA (Phase 2), bitmap equality enforced |
 
 Scope notes: (i) C3 is enforced in raw token units — "0.5 SOL" is exact only for WSOL-quoted
-pools (unit-convention reconciliation is an open pre-mainnet item). (ii) C5 is enforced only
+pools; for a 6-decimal quote mint the same raw count is 500 display tokens, and no decimals or
+value normalization is applied across quote mints (unit-convention reconciliation is an open
+pre-mainnet owner decision, Q-03). (ii) C5 is enforced only
 within the protocol's detection scope: PinkSale, Team Finance, Streamflow, and other lockers
 are not detected ("not detected" is not "not locked"); expanding the criterion requires owner
 approval. (iii) C6 is an on-chain requirement and is not replaced or weakened by any off-chain
@@ -1477,9 +1692,9 @@ launch price therefore arrive as Ed25519-signed attestations verified in-transac
 the `ed25519_program` precompile. There is no external price-feed dependency anywhere in the
 eligibility path: the implementation does not use Pyth or any other oracle network.
 
-## 5. Evidence model — C1 and C2
+## 5. Evidence model — activity and launch-price attestations
 
-**C1 activity evidence.** The dedicated indexer derives the pool's last qualifying economic
+**Activity attestation (criterion C1 input).** The dedicated indexer derives the pool's last qualifying economic
 swap time from Raydium V4 transaction history; the activity oracle signs a 112-byte message
 (`amm_program_id ‖ pool_address ‖ last_swap_unix_ts ‖ issued_slot ‖ slot_hash`). Approved
 direction (GY-ADR-001 D4): only verified economic swaps reset inactivity — liquidity
@@ -1488,7 +1703,7 @@ interactions must not count; ambiguous transactions remain unresolved and fail c
 canonical classification belongs in the core SDK. That classification is approved but not yet
 implemented; until it lands the attested timestamp must be read as "last AMM interaction".
 
-**C2 launch-price evidence.** The launch price is the quote-per-base price formed by the
+**Launch-price attestation (criterion C2 input).** The launch price is the quote-per-base price formed by the
 pool's vault balances immediately before its first successful swap. The launch-price oracle —
 deliberately a different key, because the baseline is init-once and permanently binding —
 signs a 168-byte message carrying pool and mint identities, the first-swap slot and timestamp,
@@ -1496,7 +1711,9 @@ the Q64.64 price, and the issuing slot. `record_launch_price` accepts the price 
 this attestation and writes the init-once `LaunchPrice` PDA; caller-supplied prices revert.
 Deriving the baseline requires sufficient historical coverage to reach the first qualifying
 price event; if the history cannot establish it, the evidence is incomplete or unavailable and
-no price is substituted.
+no price is substituted. Implementation status: on-chain verification and SDK derivation are
+implemented; the dedicated indexer's C2 issuance integration is incomplete (R-33) — the C2
+pipeline is not operationally complete.
 
 **Division of responsibility.** The dedicated indexer derives, attests, and reports — it is
 evidence infrastructure, never an eligibility or settlement authority, and submits no
@@ -1516,7 +1733,7 @@ cursors, and controlled backfill (approved, not yet implemented).
 
 ## 6. Two-phase eligibility lifecycle
 
-Phase 0 — `record_launch_price` writes the init-once `LaunchPrice` PDA from a C2 attestation.
+Phase 0 — `record_launch_price` writes the init-once `LaunchPrice` PDA from a launch-price attestation.
 
 Phase 1 — `evaluate_pool_phase_1` runs the full evaluator; a full pass writes an
 `EligibilityAnchor` PDA recording `first_eligible_epoch`, the criteria bitmap, the rent-paying
@@ -1527,7 +1744,7 @@ rights.
 
 Waiting period — at least `MIN_EPOCH_CONFIRMATION` (2) Solana epochs, approximately 4–6 days.
 
-Phase 2 — `evaluate_pool_phase_2` re-runs the identical evaluator with a fresh C1 attestation
+Phase 2 — `evaluate_pool_phase_2` re-runs the identical evaluator with a fresh activity attestation
 (the Phase 1 attestation has necessarily aged out of the SlotHashes window, so replay is
 structurally impossible) and requires the criteria bitmap to equal the anchor's. Any drift —
 thresholds, oracle keys, adapter behavior — fails certification entirely and the pool re-enters
@@ -1539,7 +1756,10 @@ any check.
 ## 7. Settlement and distribution — 40 / 40 / 20
 
 `salvage_pool` is permissionless and atomic: pre-flight validation, snapshot commitment,
-Raydium V4 withdraw CPI (burning the salvor's LP in place), Jupiter conversion with a
+Raydium V4 withdraw CPI (burning the salvor's LP in place — LP prerequisite: the burned LP
+comes from a salvor-controlled token account, so the salvor must hold or acquire the pool's LP
+tokens; no protocol acquisition path exists; original holders keep their snapshot-based claims;
+locked or inaccessible LP cannot be burned by the salvor — Q-16), Jupiter conversion with a
 protocol-checked slippage floor, and distribution of the recovered SOL.
 
 - **40%** → the per-pool `lp_holder_pool_vault` PDA, claimable pro-rata by original LP holders
@@ -1547,7 +1767,11 @@ protocol-checked slippage floor, and distribution of the recovered SOL.
 - **40%** → the salvor who submitted `salvage_pool`.
 - **20%** → the protocol treasury PDA. A **Charter ceiling**, not a target: governance may
   lower it; configuration rejects any raise (7005). The protocol share is the computed
-  remainder, so the three transfers exactly exhaust the proceeds.
+  remainder, so the three transfers exactly exhaust the proceeds. Per the original whitepaper
+  §3.4, the share is intended to fund: smart-contract security audits and bug bounties;
+  maintenance and upgrades; infrastructure; new protocol capabilities and DEX integrations;
+  and legal and compliance advisory — Charter commitments binding governance and treasury
+  controls, not bytecode-enforced restrictions (the program enforces only the cap).
 
 The LP-holder snapshot is taken off chain before settlement by a deterministic snapshotter:
 enumerate every LP-holder token account, hard-gate that enumerated balances equal the LP mint
@@ -1576,6 +1800,7 @@ bucket, no expiry, pause immunity — never an economic outcome.
 | Commitment | Enforcement | Mechanism |
 |---|---|---|
 | 20% protocol share is a ceiling | Bytecode | `update_protocol_config` rejects > 2,000 bps (7005); share computed as remainder |
+| 20% share spent per Charter purposes | Charter commitment — NOT bytecode | Purpose list (original whitepaper §3.4): audits/bounties, maintenance/upgrades, infrastructure, capabilities/DEX integrations, legal/compliance advisory; governance and treasury controls, not program logic |
 | `lp_holder_pool_vault` unsweepable | Bytecode (structural) | No debit path except Merkle-verified claims; 7006 is a reserved tripwire with no call site |
 | Claims live during pause | Bytecode | Claim path reads no pause flag |
 | One settlement per pool | Bytecode | Init-once PoolRegistry + SalvageReceipt |
@@ -1629,7 +1854,7 @@ allocation above — and must not be read as guaranteed recovery value.
 
 | Milestone | Scope | Status |
 |---|---|---|
-| m1–m8 | Mainnet-grade salvage on Raydium V4 | Implemented and Devnet-verified (W2 NS-3 acceptance 56/56); mainnet deployment pending, gated below |
+| m1–m8 | Mainnet-grade salvage on Raydium V4 | Source implemented; unit/integration and fork tests pass; Devnet deployment acceptance 56/56 (deployment + ELF checks only — it does not establish end-to-end lifecycle operation per W2 §9); no controlled real-pool Devnet salvage executed; independent audit not begun; Mainnet readiness not claimed; mainnet deployment pending, gated below (corrected C-10) |
 | m9 | Off-chain indexer | Delivered as the dedicated indexer (operational) with named gaps: SDK economic-swap classification and finalized gating (approved, unimplemented), C2 issuance path unwired, cursors/backfill unbuilt; core bundled indexer under D3 review |
 | m10 | Locker adapters | UNCX Raydium V4 implemented and verified; PinkSale / Team Finance open |
 | Additional AMMs | Raydium CLMM, Orca Whirlpool, PumpSwap, Meteora | Open (v1.1) |
@@ -1640,7 +1865,9 @@ allocation above — and must not be read as guaranteed recovery value.
 
 Canonical terms enforced by CI terminology lint: GraveYield; GraveScanner; GraveVault;
 EligibilityAnchor; EligibilityCert; SalvageReceipt; LaunchPrice; PoolRegistry; ClaimRecord;
-C1 activity evidence; C2 launch-price evidence; original LP holders; salvor; protocol
+the activity attestation (SDK type `LastSwapAttestation`, criterion C1 input) and the
+launch-price attestation (SDK type `LaunchPriceAttestation`, criterion C2 input); C1–C6 refer
+exclusively to the six eligibility criteria; original LP holders; salvor; protocol
 allocation; derelict pool; the deterministic lifecycle for abandoned liquidity. The lexeme
 forbidden by the glossary (spelled only in glossary.md and scripts/terminology-lint.sh) is
 not part of the project's vocabulary and is not reintroduced here. The maritime
@@ -1704,6 +1931,15 @@ using an owner-provided token:
 - Nothing in this report silently resolves the owner decisions enumerated in Section 8;
   all proposed changes remain reviewable proposals.
 
+**Corrective revision 2 (2026-11-13).** Prepared per the owner's corrective-revision
+assignment (Parts 1 and 2): only this report file's content was changed — no source, SDK,
+deployment, protocol, or repository file outside this report was touched. The whitepaper
+original DOCX uploaded by the owner was read (file inspection, not a preview); a fresh
+read-only RPC readback was performed for C-05. On 2026-11-14 the owner separately authorized
+publishing the revision ("Push these corrections to PR #104's current head"); the revision
+was committed and pushed to this PR branch as a single commit on top of its then-current
+head `2731b3d`, touching only this file. PR #104 remains an open draft; nothing was merged.
+
 ---
 
 ## Appendix A. Live devnet readback evidence (raw)
@@ -1737,6 +1973,27 @@ Scanner ProtocolConfig content checks (layout-robust):
 
 ```
 
+> **C-05 correction (revision 2).** The `reserved[64] all-zero: False` line above is a BUG
+> ARTIFACT in the readback script, not an account fact: the comparison was written as
+> `reserved == b'\x00' * 64`, where `b'\x00'` in Python source is the 4-character literal
+> (`\`, `x`, `0`, `0`) — not a NUL byte — so the comparison could never be true. A corrected
+> re-readback on 2026-11-13 (same read-only RPC, exact struct offsets) establishes:
+>
+> - GraveScanner ProtocolConfig `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe`, 252 bytes:
+>   reserved range [188..252) = 64 bytes, hex `00`x64, nonzero count 0 → **all-zero: TRUE**.
+> - GraveVault ProtocolConfig `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda`, 210 bytes:
+>   reserved range [114..210) = 96 bytes (`_reserved: [u8; 96]`), nonzero count 0 →
+>   **all-zero: TRUE**.
+> - Offsets verified against the struct definitions (scanner: ... activity_oracle [123..155),
+>   launch_price_oracle [155..187), bump [187..188), `_reserved` [188..252); vault: ... paused
+>   [112..113), bump [113..114), `_reserved` [114..210)); bump bytes read 0xFF on both.
+> - Root cause classification (C-05 item 7): incorrect verification script (comparison
+>   literal), NOT an incorrect decoder, NOT a stale layout, NOT actual non-zero account
+>   state. `initialize` writes `_reserved = [0u8; 64]` (initialize.rs:107) and Anchor `init`
+>   zero-fills the allocation, consistent with the observed zeros.
+
+---
+
 ## Appendix B. Consolidation findings and corrections
 
 Findings made while consolidating the six deliverables and the proposed-doc-changes area into
@@ -1763,3 +2020,78 @@ this single report, each resolved inside the report itself:
 - **CF-04 — index wording corrected.** The original change index called the markdown a
   "mirror" of Deliverable 2; per CF-03 the accurate description is "second rendering of the
   same draft", and Section 9.1 uses that description.
+
+---
+
+## Appendix C. Corrective revision validation record (revision 2)
+
+Validation performed before reporting completion (assignment §8), with method and outcome:
+
+1. **Full re-read.** The revised report was re-read section by section after all edits;
+   the heading structure (Contents, §0-§10, Appendices A-C) was re-derived and checked
+   against the actual headings.
+2. **Stale-phrase search.** Programmatic search for every incorrect phrase named in C-01
+   through C-14: "same semantic order/ordering … no ordering divergence" (§3.1, WP-03,
+   Q-02 — corrected), "an expired one is required for settlement" (corrected), "≥ 2
+   consecutive Solana epochs … identical criteria bitmap" (§9.3 Table C6 — corrected; the
+   remaining "consecutive"/"4-6 days" occurrences are qualified approximations of the gap
+   length, not per-epoch claims), "500 raw display units" (corrected), "reserved … False"
+   (annotated + corrected readback), "Implemented and Devnet-verified (W2 NS-3 acceptance
+   56/56)" for m1-m8 (both roadmap tables corrected), "C1 activity evidence"/"C2 launch-price
+   evidence" as evidence-type labels (renamed; criteria-only C1-C6 kept), "docs/w2-ns3-
+   acceptance/" as a proposed relative href (validated correct — display text only),
+   "sig/pk pin 6025 → … → message-span pin 6025" (rewritten to the verified order), maritime
+   "finder under maritime salvage law" / "takes no discretion" (narrowed in both renderings).
+3. **Contradiction scan.** The specific contradictions named by the assignment were checked
+   after correction: certificate-validity statements now agree across §4 (whitepaper draft),
+   §5 Table 5.1/4.1, §6, the architecture flow, and both whitepaper renderings; C2 pipeline
+   descriptions now carry the implemented-vs-incomplete split everywhere C2 is described
+   (whitepaper §4.2, spec §6, architecture Stage 0, diagrams, exec summary, R-33/R-24);
+   reserved-byte statements agree (all-zero, with the script-artifact explanation).
+4. **Implementation claims re-verified against source.** criteria.rs (bitmap bits 1<<0..1<<5,
+   fixed-order conjunction, Phase-2 gap `current_epoch - anchor_epoch >= 2` + bitmap
+   equality), evaluate_pool_phase2.rs (fresh-attestation gate, CriteriaBitmapMismatch 6011),
+   errors.rs scanner (6024/6025/6026 texts; 6034 CertStillValid) and vault (7001
+   InvalidEligibilityCert / 7002 EligibilityCertExpired; self-test pins), salvage_pool.rs
+   (cert `is_expired` gate :300-303; `salvor_lp_token_account` authority :243-249;
+   `salvor_lp_amount > 0` :410-412; snapshot supply pin; no cert consumption), attestation.rs
+   check order :254-329, evaluate_pool_phase1.rs:151 (quote reserve as TVL), initialize.rs:107
+   (`_reserved = [0u8; 64]`), SDK lastSwapAttestation.ts / launchPriceAttestation.ts type
+   names, SDK errors.ts 6024-6026 names, indexer src (no C2 derivation call sites;
+   evidencePath.ts is a live verification harness).
+5. **Account-layout and byte-offset claims.** Scanner ProtocolConfig layout re-derived from
+   state/protocol_config.rs (252 bytes; reserved [188..252)); vault layout (210 bytes;
+   reserved [114..210)); live-verified by fresh readback (bump 0xFF both; reserved all-zero
+   both; timelock 259,200 s decoded from bytes; paused 0x00).
+6. **Error-code references.** 6024/6025/6026 verified in errors.rs + errors.ts; the C-13
+   sequence corrected to source order; 7001/7002 semantics corrected; 6034 text matches
+   errors.rs:200-211; no other code references were altered.
+7. **Proposed relative links.** All links in the added lines of proposed changes 1-10
+   resolved programmatically against both repository trees (6/6 ok); the proposed new
+   whitepaper file contains no relative links (C-12).
+8. **GhostPools r3.** r3 remains UNAVAILABLE (exhaustive repo search; owner transfer
+   required). r4's changelog r3-row was used to describe r3's scope; no r4 content was
+   presented as r3 content; the report's GhostPools rows cite r4 with the paper's own
+   qualifications and the r3-vs-r4 differential is marked INCOMPLETE.
+9. **Original whitepaper economic and Charter provisions.** Verified present in the revised
+   drafts: §3.4 purpose list (both renderings, C-09); 40/40/20 with remainder conservation;
+   unsweepable LP-holder vault; no-expiry pause-immune claims; no-token commitments;
+   multisig thresholds; maritime framing reduced to analogy with the original's own
+   "not a fully settled legal framework" concession noted. The original's unsupported claims
+   (Pyth, entire-LP-supply redemption, LP acquisition, on-chain timelock enforcement,
+   guaranteed restitution) are documented as discrepancies, not carried into the revised
+   drafts.
+10. **No source/protocol changes.** Confirmed: the corrective-revision commit touches only
+    this report file; `git status` in both clones shows no other content change (plus
+    pre-existing sandbox mode-artifacts with zero content diff); the commit was pushed to
+    PR #104's branch on the owner's 2026-11-14 authorization, on top of head `2731b3d`;
+    the PR remains draft and nothing was merged.
+
+**Remaining unverified / open after this revision:** the three assigned DOCX originals other
+than the whitepaper (transfer required; their reconciliations are marked INCOMPLETE); the
+r3-vs-r4 differential; the combined-doc Table 4 ordering (owner-supplied, DOCX unavailable);
+CI-secrets configuration (Q-09, unverifiable from a sandbox); scheduled-smoke posture; and
+every decision explicitly reserved to the owner (Q-01 ratification of 4.1.0, Q-03 threshold
+semantics, Q-04 lock-criterion scope — publication and Mainnet-readiness blocker, Q-05,
+Q-06, Q-07, Q-08, Q-11 r5 authoring, Q-16 LP operational model, Q-18 publication vehicle,
+Q-21 spec evidence-label rename).
