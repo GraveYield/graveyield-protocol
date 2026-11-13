@@ -38,6 +38,8 @@ export * from "./errors.js";
 export * from "./accountDecoders.js";
 export * from "./raydiumV4.js";
 export * from "./raydiumV4Constants.js";
+export * from "./raydiumV4Evidence.js";
+export * from "./base58.js";
 export * from "./merkle.js";
 export * from "./snapshot.js";
 export * from "./simulation.js";

@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased — IMPL-001: canonical last-swap evidence (D4/D5)]
+
+### Changed
+
+- **`sdk/src/lastSwapAttestation.ts` — `deriveLastSwapV4` corrected and a
+  richer `deriveLastSwapEvidenceV4` added (ADR D4/D5; Deliverable 3 §6-§8;
+  audit H-1/H2/P4-B5).** Only a FINALIZED, VERIFIED economic swap can now
+  produce a last-swap value: candidates are classified through the new
+  canonical Raydium V4 evidence classifier (`sdk/src/raydiumV4Evidence.ts`),
+  gated on `finalized` confirmation status (with an optional
+  `finalizedDepthSlots` margin), required to carry a valid block time, and
+  corroborated by opposite-direction, nonzero movement of both authoritative
+  pool vaults (from the on-chain AmmInfo). Liquidity, administrative,
+  initialization, removed-tag and unknown-tag V4 interactions, failed
+  transactions, and every ambiguous/malformed/conflicting/incomplete case
+  are recorded per candidate as `not_economic_swap` or `unresolved` — never
+  silently skipped, never converted into an inactivity determination. The
+  derivation result carries an explicit completeness status
+  (`verified` / `no_swap_in_scan` / `incomplete`) plus honest scan counts;
+  an unresolved candidate newer than the newest verified swap, an empty
+  signature response, and a bounded scan that did not reach history end all
+  report `incomplete`. `deriveLastSwapV4` keeps its exact return contract
+  (derivation or `null`) on top of the corrected logic. Account keys now
+  resolve through `getAccountKeys({ accountKeysFromLookups })` — version-0
+  ALT transactions no longer crash the derivation and version-1
+  transactions are fetched and classified instead of being rejected by the
+  RPC (`maxSupportedTransactionVersion: 4` with a version-0 fallback).
+
+### Added
+
+- **`sdk/src/raydiumV4Evidence.ts`** — the canonical D4 classifier: single
+  source of truth for economic-swap classification (swap tags 9/11/16/17
+  from the authoritative Raydium V4 instruction table, including the
+  orderbook-disabled V2 entrypoints that dominate current mainnet traffic;
+  liquidity 3/4; initialization 1; admin/upkeep 6/7/14/15/18; removed tags
+  0/2/5/8/10/12/13 fail closed). Base58 instruction-data decoding
+  (`sdk/src/base58.ts`) covers the RPC's base58 inner-instruction surface.
+- **`sdk/test/lastSwapEvidence.test.ts` + fixture corpus** — real mainnet
+  fixtures (documented provenance in
+  `sdk/test/fixtures/lastSwap/PROVENANCE.md`: direct V2 swap, inner CPI
+  swaps in version-1 transactions, a failed swap transaction, a version-0
+  ALT transaction, the pool AmmInfo) plus clearly-labeled synthetic
+  mutations for the non-economic, ambiguous, conflicting, incomplete and
+  finality branches.
+
 ## [Unreleased — NS-3 identity synchronization (DR-002; deployment pending)]
 
 ### Changed
