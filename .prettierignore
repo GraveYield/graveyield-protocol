@@ -16,3 +16,9 @@ pnpm-lock.yaml
 # committed byte-exact on purpose; reformatting would break the verbatim
 # provenance claim, and every future re-run would re-trip `fmt:ts:check`.
 docs/**/run-report-*.json
+
+# IMPL-001 evidence fixtures are reduced copies of real mainnet RPC
+# responses, committed byte-exact on purpose (see
+# sdk/test/fixtures/lastSwap/PROVENANCE.md); reformatting would churn the
+# evidence files for no semantic change.
+sdk/test/fixtures/lastSwap/*.json

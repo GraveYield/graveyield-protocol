@@ -320,6 +320,11 @@ export class GraveYieldClient {
     );
 
     // --- C1: inactivity via deriveLastSwapV4 ---
+    // Correction 001 §1 contract: a returned value is a verified swap,
+    // `null` is a DEFINITIVE no_swap_in_scan (complete scan, every
+    // candidate provably not a swap — treated conservatively here as
+    // before: C1 stays false), and INCOMPLETE evidence throws
+    // LastSwapEvidenceIncompleteError, which fails C1 closed below.
     let c1Inactivity = false;
     try {
       const lastSwap = await deriveLastSwapV4(this.connection, ammProgramId, poolAddress);
@@ -331,7 +336,9 @@ export class GraveYieldClient {
         c1Inactivity = elapsed >= Number(scanner.inactivitySeconds);
       }
     } catch {
-      // deriveLastSwapV4 throws on incomplete history — fail closed.
+      // Incomplete history (LastSwapEvidenceIncompleteError) or any RPC
+      // failure must never pass C1 — the criterion stays false until the
+      // evidence is complete.
       c1Inactivity = false;
     }
 

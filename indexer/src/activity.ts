@@ -7,10 +7,23 @@
 // program on this pool.
 //
 // This module wraps the SDK's `deriveLastSwapV4` (the same function the
-// salvor bot uses for C1 attestation derivation). The indexer caches
-// results per pool address and only re-scans when the cache expires
-// (default: 1 hour). A pool that has not swapped in 90+ days is
-// unlikely to swap in the next hour, so the cache is safe.
+// salvor bot uses for C1 attestation derivation) and relies on its
+// Correction 001 §1 compatibility contract:
+//
+//   verified        → ActivityRecord with the swap fields + noSwapFound=false
+//   no_swap_in_scan → ActivityRecord with noSwapFound=TRUE (definitive: the
+//                     scan covered the pool's full available history and
+//                     every candidate is provably not an economic swap)
+//   incomplete      → deriveLastSwapV4 throws LastSwapEvidenceIncompleteError
+//                     → ActivityRecord with unresolved=TRUE and
+//                     noSwapFound=FALSE. This record can NEVER back a C1
+//                     inactivity pass (eligibility.ts), and it is NOT
+//                     cached so the next cycle re-scans when the evidence
+//                     may be complete.
+//
+// The indexer caches results per pool address and only re-scans when the
+// cache expires (default: 1 hour). A pool that has not swapped in 90+ days
+// is unlikely to swap in the next hour, so the cache is safe.
 //
 // ORACLE-002 / ORACLE-003: the activity record produced here is the
 // seed for the on-chain C1 attestation. The indexer's activity oracle
@@ -19,7 +32,11 @@
 // the precompile instruction that the on-chain GraveScanner verifies.
 
 import { Connection } from "@solana/web3.js";
-import { deriveLastSwapV4, RAYDIUM_V4_PROGRAM_ID } from "@graveyield/sdk";
+import {
+  deriveLastSwapV4,
+  LastSwapEvidenceIncompleteError,
+  RAYDIUM_V4_PROGRAM_ID,
+} from "@graveyield/sdk";
 import type { ActivityRecord, DiscoveredPool } from "./types.js";
 
 /** Cache entry for a pool's activity record. */
@@ -50,6 +67,13 @@ export class ActivityIndexer {
    * Index the last-swap activity for a discovered pool. Returns from
    * cache if fresh; otherwise scans signature history via
    * `deriveLastSwapV4`.
+   *
+   * Correction 001 §1: `deriveLastSwapV4` returns a value only for a
+   * verified swap, returns `null` ONLY for a definitive no_swap_in_scan
+   * (complete scan, every candidate provably not an economic swap), and
+   * THROWS `LastSwapEvidenceIncompleteError` for incomplete evidence.
+   * Incomplete evidence becomes an explicit `unresolved` record — never
+   * `noSwapFound: true`, never cached, so the next cycle re-scans.
    */
   async indexActivity(
     connection: Connection,
@@ -64,27 +88,61 @@ export class ActivityIndexer {
     }
 
     const scanLimit = opts?.scanLimit ?? 1000;
-    const derivation = await deriveLastSwapV4(connection, RAYDIUM_V4_PROGRAM_ID, pool.poolAddress, {
-      scanLimit,
-    });
+    let record: ActivityRecord;
+    try {
+      const derivation = await deriveLastSwapV4(
+        connection,
+        RAYDIUM_V4_PROGRAM_ID,
+        pool.poolAddress,
+        {
+          scanLimit,
+        },
+      );
+      record = derivation
+        ? {
+            poolAddress: pool.poolAddress,
+            lastSwapUnixTs: derivation.lastSwapUnixTs,
+            lastSwapSlot: derivation.slot,
+            lastSwapSignature: derivation.signature,
+            noSwapFound: false,
+            unresolved: false,
+          }
+        : {
+            // Definitive: the scan covered the pool's full available
+            // history and every candidate is provably not an economic
+            // swap (deriveLastSwapV4 returns null only in this state).
+            poolAddress: pool.poolAddress,
+            lastSwapUnixTs: 0,
+            lastSwapSlot: 0,
+            lastSwapSignature: "",
+            noSwapFound: true,
+            unresolved: false,
+          };
+    } catch (err) {
+      if (!(err instanceof LastSwapEvidenceIncompleteError)) {
+        // RPC/network/decoding failures are NOT evidence states — keep the
+        // existing propagation behavior so operators see them.
+        throw err;
+      }
+      // D5 / Correction 001: incomplete evidence stays explicitly
+      // unresolved. It must never become `noSwapFound: true`, and the C1
+      // pre-filter refuses to pass inactivity from it.
+      record = {
+        poolAddress: pool.poolAddress,
+        lastSwapUnixTs: 0,
+        lastSwapSlot: 0,
+        lastSwapSignature: "",
+        noSwapFound: false,
+        unresolved: true,
+      };
+    }
 
-    const record: ActivityRecord = derivation
-      ? {
-          poolAddress: pool.poolAddress,
-          lastSwapUnixTs: derivation.lastSwapUnixTs,
-          lastSwapSlot: derivation.slot,
-          lastSwapSignature: derivation.signature,
-          noSwapFound: false,
-        }
-      : {
-          poolAddress: pool.poolAddress,
-          lastSwapUnixTs: 0,
-          lastSwapSlot: 0,
-          lastSwapSignature: "",
-          noSwapFound: true,
-        };
-
-    this.cache.set(key, { record, cachedAtMs: now });
+    // Only resolved evidence is cached. An unresolved record re-scans on
+    // the next cycle (the evidence may be complete by then); caching it
+    // would freeze the unresolved state for the whole TTL.
+    if (!record.unresolved) {
+      this.cache.set(key, { record, cachedAtMs: now });
+    }
     return record;
   }
 

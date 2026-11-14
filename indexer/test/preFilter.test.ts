@@ -34,13 +34,18 @@ const DEFAULT_THRESHOLDS: PreFilterThresholds = {
   lpBurnDustThreshold: 1_000n,
 };
 
-function makeActivity(opts: { lastSwapUnixTs?: number; noSwapFound?: boolean }): ActivityRecord {
+function makeActivity(opts: {
+  lastSwapUnixTs?: number;
+  noSwapFound?: boolean;
+  unresolved?: boolean;
+}): ActivityRecord {
   return {
     poolAddress: POOL,
     lastSwapUnixTs: opts.lastSwapUnixTs ?? 0,
     lastSwapSlot: 0,
     lastSwapSignature: "",
     noSwapFound: opts.noSwapFound ?? false,
+    unresolved: opts.unresolved ?? false,
   };
 }
 
