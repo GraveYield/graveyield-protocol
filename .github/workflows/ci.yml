@@ -128,10 +128,25 @@ jobs:
   # push/PR whose branch name also exists on GraveYield/salvor-bots, the
   # mirror is validated against THAT branch so the two companion PRs can
   # travel through review in tandem (e.g. ns3/devnet-preparation exists
-  # on both repos). Otherwise — pushes and crons on main — the check
-  # enforces main == main with the same strict byte-equality as before.
-  # A red main build after a protocol-side merge means: merge the
-  # salvor-bots companion PR first (the mirror drifted or is mid-sync).
+  # on both repos). Otherwise — pushes, scheduled runs and dispatches on
+  # main, and PRs whose branch has no salvor-bots companion — the check
+  # runs against salvor-bots@main with the same strict byte-equality.
+  #
+  # Merge-window handling (PR #106): the canonical tree and its mirror
+  # travel as companion PRs in two repos, so immediately after a
+  # protocol-side merge of sdk/src the vendored copy on salvor-bots@main
+  # is briefly behind while the companion mirror PR is still open. That
+  # window red-lit run 43557866701 (job 132334700749) right after PR
+  # #105 merged: the diff failed against the stale mirror even though
+  # the open companion (salvor-bots PR #3) was already byte-identical
+  # to the new sdk/src. Whenever the resolved mirror is salvor-bots@main
+  # and it diverges, the job therefore also probes the open salvor-bots
+  # PRs and passes iff one of their head trees is byte-identical to
+  # sdk/src, emitting a notice naming the PR to merge. The invariant is
+  # unchanged — main's sdk/src must always have a byte-identical
+  # counterpart that is either merged into salvor-bots@main or pending
+  # merge there — so a red build still means real drift with no
+  # companion PR open (policy: sdk/README.md).
   sdk-sync-check:
     name: sdk sync (salvor-bots mirror)
     runs-on: ubuntu-latest
@@ -145,15 +160,66 @@ jobs:
             SALVOR_REF="main"
           fi
           echo "salvor-bots mirror ref: $SALVOR_REF"
+          echo "SALVOR_REF=$SALVOR_REF" >> "$GITHUB_ENV"
           git clone --depth 1 --branch "$SALVOR_REF" https://github.com/GraveYield/salvor-bots.git _salvor-bots
       - name: Fail on any SDK divergence
         run: |
           set -euo pipefail
           echo "Enforcing byte-equality of the shared SDK modules:"
           echo "  graveyield-protocol/sdk/src  (single source of truth)"
-          echo "  salvor-bots/src              (vendored mirror)"
-          diff -r sdk/src _salvor-bots/src
-          echo "in sync: sdk/src == salvor-bots/src (policy: sdk/README.md)"
+          echo "  salvor-bots/src@${SALVOR_REF}  (vendored mirror)"
+          if diff -r sdk/src _salvor-bots/src; then
+            echo "in sync: sdk/src == salvor-bots/src@${SALVOR_REF} (policy: sdk/README.md)"
+            exit 0
+          fi
+          # The failing diff above carries the divergence detail.
+          if [ "${SALVOR_REF}" != "main" ]; then
+            # A same-named companion branch exists (tandem companion PRs):
+            # it takes precedence and must itself be fixed, so no fallback
+            # probe here.
+            echo "::error::companion branch '${SALVOR_REF}' on salvor-bots diverges from sdk/src; mirror the change into that branch."
+            exit 1
+          fi
+          # Merge window (see job comment): salvor-bots@main is behind
+          # while the companion mirror PR is still open. Accept the mirror
+          # from an open salvor-bots PR targeting main iff its tree is
+          # byte-identical to sdk/src.
+          API="https://api.github.com/repos/GraveYield/salvor-bots/pulls?state=open&per_page=100"
+          CURL_AUTH=()
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            CURL_AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+          fi
+          CANDIDATES="$(curl -fsSL --max-time 60 "${CURL_AUTH[@]}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$API" \
+            | jq -r '(if type == "array" then . else [] end)
+                     | map(select(.base.ref == "main"
+                                  and .head.repo.full_name == "GraveYield/salvor-bots"))
+                     | sort_by(.updated_at) | reverse
+                     | .[] | "\(.number)\t\(.head.sha)\t\(.head.ref)"')"
+          MATCH_PR=""
+          while IFS=$'\t' read -r PR_NUM PR_SHA PR_REF; do
+            [ -n "${PR_NUM:-}" ] || continue
+            echo "probing pending companion: salvor-bots PR #${PR_NUM} (${PR_REF} @ ${PR_SHA:0:7})"
+            rm -rf _salvor-candidate
+            if git init -q -b main _salvor-candidate \
+              && git -C _salvor-candidate fetch -q --depth 1 \
+                   https://github.com/GraveYield/salvor-bots.git "refs/pull/${PR_NUM}/head" \
+              && git -C _salvor-candidate checkout -q FETCH_HEAD \
+              && diff -r sdk/src _salvor-candidate/src; then
+              MATCH_PR="${PR_NUM}"
+              MATCH_REF="${PR_REF}"
+              MATCH_SHA="${PR_SHA}"
+              break
+            fi
+          done <<< "${CANDIDATES}"
+          rm -rf _salvor-candidate
+          if [ -n "${MATCH_PR:-}" ]; then
+            echo "::notice::salvor-bots@main is mid-sync: sdk/src is byte-identical to open companion PR #${MATCH_PR} (${MATCH_REF} @ ${MATCH_SHA:0:7}). Merge it to restore main == main."
+            echo "in sync: sdk/src == pending salvor-bots companion PR #${MATCH_PR} (policy: sdk/README.md)"
+            exit 0
+          fi
+          echo "::error::sdk/src diverges from salvor-bots@main and no open salvor-bots companion PR is byte-identical (see the diff above). Open or fix the salvor-bots companion PR."
+          exit 1
 
   anchor-build:
     name: anchor build
