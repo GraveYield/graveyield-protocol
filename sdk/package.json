@@ -28,7 +28,7 @@
     "test": "node --test --import tsx/esm --test-reporter=spec --test-name-pattern='.*' 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@solana/web3.js": "^3.1.1",
+    "@solana/web3.js": "^3.2.1",
     "@solana/spl-token": "^0.4.6",
     "bn.js": "^5.2.1"
   },
