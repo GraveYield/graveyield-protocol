@@ -1,5 +1,83 @@
 # Changelog
 
+## [Unreleased — IMPL-001 Correction 001: core SDK evidence safety]
+
+### Changed
+
+- **`sdk/src/lastSwapAttestation.ts` — `deriveLastSwapV4` legacy
+  compatibility contract made evidence-safe (Correction 001 §1).** The
+  legacy three-call surface previously returned `result.lastSwap`, which
+  collapsed DEFINITIVE `no_swap_in_scan` and INCOMPLETE evidence into the
+  same `null`; the legacy indexer then set `noSwapFound: true` from that
+  null and passed C1 inactivity on incomplete history. The corrected
+  contract: `verified` returns the newest verified derivation; `null` is
+  returned ONLY for a definitive `no_swap_in_scan` (complete scan, every
+  candidate provably not an economic swap); an INCOMPLETE result (an
+  unresolved candidate, an empty/pruned signature response, or a bounded
+  scan that did not reach history end) THROWS the new
+  `LastSwapEvidenceIncompleteError` carrying the full three-state
+  `LastSwapEvidenceResult`. Consumers that need the three states consume
+  `deriveLastSwapEvidenceV4` directly (unchanged).
+- **`sdk/src/lastSwapAttestation.ts` — transaction metadata is now
+  REQUIRED evidence (Correction 001 §2).** The normalizer's
+  `tx.meta?.err ?? null` and `tx.meta?.innerInstructions ?? []` patterns
+  turned missing metadata into apparently-valid values (missing status →
+  "success"; missing CPI list → "no inner instructions"). Now: only an
+  explicit `meta.err === null` establishes success — an absent status is
+  unresolved `transaction_status_missing`; and `meta.innerInstructions`
+  preserves its three states — an array (recorded, possibly empty) or
+  `null`/absent (recording unavailable), which the classifier reports as
+  `inner_instructions_unavailable` for every candidate without a
+  directly-proven outer swap: without recorded inner instructions a
+  same-transaction inner-CPI swap cannot be ruled out, so no definitive
+  non-swap conclusion is possible. Outer-proven swaps (tag + vault
+  corroboration) still verify without inner evidence.
+- **`sdk/src/lastSwapAttestation.ts` — transaction-version contract
+  corrected (Correction 001 §3).** `getTransaction` advertised
+  `maxSupportedTransactionVersion: 4` — versions 2–4 have no fixture
+  coverage for decoding or account-key resolution. The request now
+  advertises exactly the highest VALIDATED version, `1`, per the
+  @solana/web3.js 3.1.1 contract ("Fetching v1 transactions over RPC
+  requires passing `maxSupportedTransactionVersion: 1`") and the real
+  fixture corpus (legacy, v0+ALT, three v1 transactions in
+  `sdk/test/fixtures/lastSwap/PROVENANCE.md`). Version-0 fallback for
+  endpoints that cap the parameter and the finalized commitment are
+  unchanged.
+- **`sdk/src/raydiumV4Evidence.ts`** — `classifySwapCandidate` enforces
+  the two new fail-closed rules (explicit status required; unrecorded
+  inner instructions block definitive non-swap conclusions); new
+  `UnresolvedEvidenceReason` members `transaction_status_missing` and
+  `inner_instructions_unavailable` (additive — no removals); the
+  canonical classifier itself is UNCHANGED in its swap semantics.
+- **`indexer/src/` — legacy indexer consumer updated (Correction 001
+  §1).** `ActivityRecord` gained an explicit `unresolved` flag;
+  `ActivityIndexer.indexActivity` maps `LastSwapEvidenceIncompleteError`
+  to `noSwapFound: false` + `unresolved: true` (never `noSwapFound:
+  true`) and does not cache unresolved records (the next cycle re-scans);
+  `preFilterPool` refuses C1 for unresolved evidence
+  (`C1-evidence-unresolved`); `scoreCandidate` gives unresolved evidence
+  zero inactivity margin. Non-evidence RPC failures still propagate.
+- **`sdk/src/client.ts` — `evaluatePool` C1 comment aligned** with the
+  throwing contract (the catch already fails C1 closed; the previously
+  stale "throws on incomplete history" comment is now true).
+
+### Added
+
+- **`sdk/test/lastSwapEvidence.test.ts`** — Correction 001 suites: the
+  legacy `deriveLastSwapV4` contract (verified / definitive-null /
+  incomplete-throws across missing tx data, missing block time, missing
+  metadata, empty responses, bounded scans; the thrown error carries the
+  full evidence result), transaction-metadata requirements (explicit
+  success, explicit failure, missing `meta.err`, null/absent inner
+  instructions vs recorded-empty, outer-proven swap without inner
+  evidence, inner-CPI swap with recorded evidence), and the
+  transaction-version contract (version-1 request assertion, legacy/v0+ALT/v1
+  fixtures, version-0 fallback, unfetchable-transaction fail-closed).
+- **`indexer/test/activity.test.ts`** — the legacy indexer must never
+  produce `noSwapFound: true` from incomplete evidence, must not cache
+  unresolved records, must not pass C1 from an unresolved record, and
+  must still propagate non-evidence RPC failures.
+
 ## [Unreleased — IMPL-001: canonical last-swap evidence (D4/D5)]
 
 ### Changed

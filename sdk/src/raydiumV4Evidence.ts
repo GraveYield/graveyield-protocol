@@ -125,6 +125,12 @@ export type UnresolvedEvidenceReason =
   | "transaction_data_missing"
   /** Transaction metadata absent. */
   | "transaction_meta_missing"
+  /**
+   * `meta.err` is absent — the RPC response does not record whether the
+   * transaction succeeded or failed. Only an EXPLICIT `meta.err === null`
+   * may establish transaction success (Correction 001 §2).
+   */
+  | "transaction_status_missing"
   /** blockTime absent from the signature status or the transaction. */
   | "block_time_missing"
   /** blockTime present but not a valid unix timestamp. */
@@ -137,6 +143,14 @@ export type UnresolvedEvidenceReason =
   | "conflicting_evidence"
   /** Pool AmmInfo unavailable — vault corroboration impossible. */
   | "pool_vaults_unavailable"
+  /**
+   * `meta.innerInstructions` is missing or null — the RPC did not record
+   * the transaction's inner (CPI) instructions. Unavailable inner evidence
+   * is NOT proof that no inner instructions occurred (Correction 001 §2):
+   * without it, a same-transaction inner-CPI swap on this pool cannot be
+   * ruled out, so no definitive non-swap conclusion is possible.
+   */
+  | "inner_instructions_unavailable"
   /** pre/post token balance data not returned by the RPC. */
   | "incomplete_rpc_response";
 
@@ -192,10 +206,23 @@ export interface SwapCandidateTx {
   accountKeys: ReadonlyArray<PublicKey>;
   /** Message-level (outer) instructions in execution order. */
   messageInstructions: ReadonlyArray<CompiledInstructionView>;
-  /** Inner (CPI) instruction groups from transaction metadata. */
-  innerInstructions: ReadonlyArray<ReadonlyArray<CompiledInstructionView>>;
-  /** `null` when the transaction succeeded; otherwise the failure. */
-  err: unknown | null;
+  /**
+   * Inner (CPI) instruction groups from transaction metadata.
+   * THREE distinct states (Correction 001 §2):
+   *   - an array (possibly empty): the RPC RECORDED the inner-instruction
+   *     list; empty means genuinely no inner instructions occurred;
+   *   - `null`: the RPC did not record inner instructions for this
+   *     transaction. Absence of the list is NOT evidence that no inner
+   *     instructions occurred — candidates without a directly-provable
+   *     outer swap stay unresolved.
+   */
+  innerInstructions: ReadonlyArray<ReadonlyArray<CompiledInstructionView>> | null;
+  /**
+   * `null` only when the response EXPLICITLY records success
+   * (`meta.err === null`). `undefined` means the status was not recorded
+   * at all and can never be interpreted as success.
+   */
+  err: unknown | null | undefined;
   preTokenBalances: ReadonlyArray<TokenBalanceView> | null | undefined;
   postTokenBalances: ReadonlyArray<TokenBalanceView> | null | undefined;
 }
@@ -269,7 +296,13 @@ function collectV4Hits(tx: SwapCandidateTx, ammProgramId: PublicKey): V4Hit[] {
     }
   };
   scan(tx.messageInstructions, false);
-  for (const set of tx.innerInstructions) scan(set, true);
+  // `innerInstructions === null` means the RPC did not RECORD the inner
+  // instruction list (Correction 001 §2). Scanning nothing would silently
+  // equate "recording unavailable" with "genuinely empty" — the empty
+  // array is the only representation of a recorded, empty inner list.
+  if (tx.innerInstructions !== null) {
+    for (const set of tx.innerInstructions) scan(set, true);
+  }
   return hits;
 }
 
@@ -319,10 +352,18 @@ function vaultAmount(
  *
  * Returns the D4 outcome for the candidate: `verified_swap` only when a
  * swap-tagged V4 instruction on this pool is corroborated by opposite,
- * nonzero movement of both authoritative pool vaults in a successful
- * transaction; `not_economic_swap` when the candidate provably did not
- * swap on this pool; `unresolved` when the evidence cannot be reliably
- * established (fail-closed).
+ * nonzero movement of both authoritative pool vaults in a transaction
+ * whose success is EXPLICITLY recorded; `not_economic_swap` when the
+ * candidate provably did not swap on this pool; `unresolved` when the
+ * evidence cannot be reliably established (fail-closed).
+ *
+ * Inner-instruction evidence (Correction 001 §2): a `null`
+ * `innerInstructions` list means the RPC did not record the CPI
+ * instruction surface. A swap directly proven by an OUTER instruction
+ * (tag + corroboration) is still verifiable; but WITHOUT that direct
+ * proof, unavailable inner evidence leaves the candidate unresolved —
+ * the transaction could still contain an inner-CPI swap on this pool,
+ * so no definitive non-swap conclusion is possible.
  */
 export function classifySwapCandidate(
   tx: SwapCandidateTx,
@@ -330,8 +371,14 @@ export function classifySwapCandidate(
 ): SwapCandidateOutcome {
   const { ammProgramId, poolAddress, coinVault, pcVault } = opts;
 
+  // The transaction status must be EXPLICITLY recorded (Correction 001
+  // §2): only `meta.err === null` establishes success; an absent status
+  // can never be normalized into success.
+  if (tx.err === undefined) {
+    return { kind: "unresolved", reason: "transaction_status_missing" };
+  }
   // A failed transaction has no economic effect (Solana reverts atomically).
-  if (tx.err !== null && tx.err !== undefined) {
+  if (tx.err !== null) {
     return { kind: "not_economic_swap", reason: "failed_transaction" };
   }
 
@@ -396,6 +443,13 @@ export function classifySwapCandidate(
 
   // --- non-swap V4 interactions on this pool ------------------------------
   if (poolHits.length > 0) {
+    // Correction 001 §2: the outer instruction proves the tx touched this
+    // pool through the AMM program, but without recorded inner
+    // instructions a same-transaction inner-CPI swap cannot be ruled
+    // out — no definitive non-swap conclusion is possible.
+    if (tx.innerInstructions === null) {
+      return { kind: "unresolved", reason: "inner_instructions_unavailable" };
+    }
     // Undecodable or empty V4 instruction data, and tags the deployed
     // program rejects (removed/`unimplemented!`) — contradictory evidence
     // in a successful transaction; fail closed, never guess away.
@@ -424,5 +478,13 @@ export function classifySwapCandidate(
   }
 
   // --- no AMM-program invocation of this pool ------------------------------
+  // Correction 001 §2: the pool APPEARS in the transaction (the candidate
+  // came from the pool's signature history), so an unrecorded inner CPI
+  // from a router/aggregator program could still have swapped on this
+  // pool. Only a RECORDED (possibly empty) inner list proves the pool was
+  // not invoked by the AMM program.
+  if (tx.innerInstructions === null) {
+    return { kind: "unresolved", reason: "inner_instructions_unavailable" };
+  }
   return { kind: "not_economic_swap", reason: "pool_not_invoked_by_amm_program" };
 }

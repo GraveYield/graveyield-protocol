@@ -308,7 +308,7 @@ type LastSwapTxResponse = {
         accounts?: ReadonlyArray<number | PublicKey>;
         data: Uint8Array | string;
       }>;
-    }>;
+    }> | null;
     loadedAddresses?: {
       writable?: ReadonlyArray<PublicKey | string>;
       readonly?: ReadonlyArray<PublicKey | string>;
@@ -328,11 +328,27 @@ function toPublicKey(key: PublicKey | string): PublicKey {
  * `getAccountKeys({ accountKeysFromLookups })` — the canonical web3.js
  * path for address-lookup-table (v0) and inlined-key (v1/legacy)
  * transactions.
+ *
+ * Metadata strictness (Correction 001 §2):
+ *   - `meta.err` is passed through AS RECORDED. Only an explicit `null`
+ *     establishes success; an absent `err` property normalizes to
+ *     `undefined`, which the classifier treats as unresolved
+ *     `transaction_status_missing` — never as success.
+ *   - `meta.innerInstructions` is passed through with its three states
+ *     intact: an array (recorded, possibly empty) or `null`/absent
+ *     (recording unavailable — never normalized into an empty list).
  */
 function normalizeSwapCandidateTx(tx: LastSwapTxResponse): SwapCandidateTx {
+  const meta = tx.meta;
+  if (!meta) {
+    // The derivation loop already rejects meta-less responses as
+    // `transaction_meta_missing`; this guard keeps the adapter safe for
+    // direct use.
+    throw new Error("transaction meta missing");
+  }
   const message = tx.transaction.message;
   const accountKeys = message
-    .getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses ?? undefined })
+    .getAccountKeys({ accountKeysFromLookups: meta.loadedAddresses ?? undefined })
     .keySegments()
     .flat()
     .map(toPublicKey);
@@ -343,24 +359,31 @@ function normalizeSwapCandidateTx(tx: LastSwapTxResponse): SwapCandidateTx {
     data: ci.data,
   }));
 
-  const innerSets = [...(tx.meta?.innerInstructions ?? [])].sort(
-    (a, b) => (a.index ?? 0) - (b.index ?? 0),
-  );
-  const innerInstructions = innerSets.map((set) =>
-    set.instructions.map((ix): CompiledInstructionView => ({
-      programIdIndex: ix.programIdIndex,
-      accounts: (ix.accounts ?? []) as ReadonlyArray<number | PublicKey>,
-      data: ix.data,
-    })),
-  );
+  // `null`/absent inner instructions are PRESERVED as `null` (recording
+  // unavailable) — they are never silently converted into an empty list.
+  const rawInner = meta.innerInstructions;
+  const innerSets =
+    rawInner === null || rawInner === undefined
+      ? null
+      : [...rawInner].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const innerInstructions =
+    innerSets === null
+      ? null
+      : innerSets.map((set) =>
+          set.instructions.map((ix): CompiledInstructionView => ({
+            programIdIndex: ix.programIdIndex,
+            accounts: (ix.accounts ?? []) as ReadonlyArray<number | PublicKey>,
+            data: ix.data,
+          })),
+        );
 
   return {
     accountKeys,
     messageInstructions,
     innerInstructions,
-    err: tx.meta?.err ?? null,
-    preTokenBalances: tx.meta?.preTokenBalances ?? null,
-    postTokenBalances: tx.meta?.postTokenBalances ?? null,
+    err: meta.err,
+    preTokenBalances: meta.preTokenBalances ?? null,
+    postTokenBalances: meta.postTokenBalances ?? null,
   };
 }
 
@@ -369,6 +392,18 @@ function normalizeSwapCandidateTx(tx: LastSwapTxResponse): SwapCandidateTx {
  * support (version-1 transactions exist on 2026 mainnet and are rejected
  * by the RPC when `maxSupportedTransactionVersion` is 0). Falls back to
  * version 0 for endpoints that cap the parameter.
+ *
+ * Version contract (Correction 001 §3, verified 2026-11-14 against
+ * @solana/web3.js 3.1.1 `GetVersionedTransactionConfig` — typed `number`,
+ * "If the requested transaction is a higher version, an error will be
+ * returned" — and the SDK's own documentation: "Fetching v1 transactions
+ * over RPC requires passing `maxSupportedTransactionVersion: 1`"):
+ * the request advertises exactly the highest transaction version the
+ * implementation has VALIDATED against real fixtures — legacy, v0 (with
+ * ALT lookups) and v1 (`sdk/test/fixtures/lastSwap/PROVENANCE.md`).
+ * Versions above 1 are NOT advertised: there is no fixture coverage for
+ * their decoding or account-key resolution, and requesting them would
+ * trade a typed, resolved outcome for an unvalidated guess.
  */
 async function fetchCandidateTx(
   connection: Connection,
@@ -376,7 +411,7 @@ async function fetchCandidateTx(
 ): Promise<LastSwapTxResponse | null> {
   try {
     return (await connection.getTransaction(signature, {
-      maxSupportedTransactionVersion: 4,
+      maxSupportedTransactionVersion: 1,
       commitment: "finalized",
     })) as unknown as LastSwapTxResponse | null;
   } catch (err) {
@@ -394,11 +429,13 @@ async function fetchCandidateTx(
  * signature history, with explicit per-candidate outcomes and an explicit
  * completeness status.
  *
- * Fail-closed guarantees (D4/D5, Deliverable 3 §6-§8):
+ * Fail-closed guarantees (D4/D5, Deliverable 3 §6-§8; Correction 001):
  *   * only verified economic swaps can produce `lastSwap`;
  *   * non-finalized signatures, missing transaction data, missing/invalid
- *     block times, malformed metadata, ambiguous and conflicting evidence
- *     remain `unresolved` and are recorded per candidate;
+ *     block times, absent transaction status, malformed metadata,
+ *     ambiguous and conflicting evidence, and transactions whose inner
+ *     instructions were not recorded (absent direct outer proof) remain
+ *     `unresolved` and are recorded per candidate;
  *   * an unresolved candidate NEWER than the newest verified swap makes
  *     the result `incomplete` (the true last swap could be that
  *     candidate) — `lastSwap` stays null and no inactivity claim is safe;
@@ -578,6 +615,35 @@ export async function deriveLastSwapEvidenceV4(
 }
 
 /**
+ * Typed failure for INCOMPLETE last-swap evidence (Correction 001 §1).
+ *
+ * `deriveLastSwapV4` throws this instead of returning a value whenever
+ * the scan cannot establish activity either way: an unresolved candidate,
+ * an empty signature response, or a bounded scan that did not reach the
+ * end of the pool's available history. A caught instance must never be
+ * interpreted as "the pool has no swaps" — the full three-state evidence
+ * (`evidence.status === "incomplete"`, per-candidate outcomes, scan
+ * counts) is attached for callers that need the detail.
+ */
+export class LastSwapEvidenceIncompleteError extends Error {
+  override readonly name = "LastSwapEvidenceIncompleteError";
+
+  /** The full derivation result whose status was `incomplete`. */
+  readonly evidence: LastSwapEvidenceResult;
+
+  constructor(evidence: LastSwapEvidenceResult) {
+    super(
+      "last-swap evidence incomplete — activity cannot be established from this scan " +
+        `(status=incomplete, candidates=${evidence.candidates.length}, ` +
+        `signaturesReturned=${evidence.scan.signaturesReturned}, ` +
+        `reachedHistoryEnd=${String(evidence.scan.reachedHistoryEnd)}); ` +
+        "this is NEVER a definitive inactivity determination (D4/D5, Correction 001)",
+    );
+    this.evidence = evidence;
+  }
+}
+
+/**
  * Derive a Raydium V4 pool's last swap from RPC transaction history
  * (indexer/operator tooling — the authoritative input for attestations).
  *
@@ -585,13 +651,25 @@ export async function deriveLastSwapEvidenceV4(
  * economic swap (canonical Raydium V4 classification + opposite-direction
  * vault corroboration) is returned; liquidity, administrative, crank,
  * initialization and other non-economic V4 interactions never qualify;
- * failed transactions never qualify; ambiguous, malformed, conflicting or
- * incomplete evidence never qualifies.
+ * failed transactions never qualify.
  *
- * Return contract: the newest verified swap, or `null`. `null` means
- * "no verified swap available" — it does NOT distinguish "provably no
- * swap in the covered history" from "incomplete/unresolved evidence".
- * Callers that must represent that distinction (the dedicated indexer)
+ * Compatibility contract (Correction 001 §1 — the legacy three-call
+ * surface; every consumer MUST be able to rely on it):
+ *
+ *   | evidence status      | return                                   |
+ *   |----------------------|------------------------------------------|
+ *   | `verified`           | the newest verified `LastSwapDerivation` |
+ *   | `no_swap_in_scan`    | `null` — DEFINITIVE: the scan covered the pool's full available history and every candidate is provably not an economic swap |
+ *   | `incomplete`         | THROWS `LastSwapEvidenceIncompleteError` carrying the full `LastSwapEvidenceResult` |
+ *
+ * `null` therefore means exactly "provably no swap in the covered
+ * history" and nothing else. Incomplete evidence — unresolved candidates
+ * (missing transaction data, missing/invalid block time, absent
+ * transaction status, unrecorded inner instructions, malformed, ambiguous
+ * or conflicting evidence), an empty signature response, or a bounded
+ * scan that did not reach history end — is NEVER converted into `null`
+ * and can never be mistaken for a definitive inactivity determination.
+ * Consumers that need the three states (or the per-candidate detail)
  * consume `deriveLastSwapEvidenceV4` directly.
  *
  * Operational requirements (spec §6.3): run against a trusted RPC
@@ -605,7 +683,17 @@ export async function deriveLastSwapV4(
   opts?: { scanLimit?: number },
 ): Promise<LastSwapDerivation | null> {
   const result = await deriveLastSwapEvidenceV4(connection, ammProgramId, poolAddress, opts);
-  return result.lastSwap;
+  if (result.status === "verified") {
+    // The evidence contract guarantees `lastSwap` is set exactly when the
+    // status is `verified`.
+    return result.lastSwap;
+  }
+  if (result.status === "no_swap_in_scan") {
+    // Definitive: complete scan, every candidate provably not a swap.
+    return null;
+  }
+  // Incomplete — an explicit typed failure, never a silent null.
+  throw new LastSwapEvidenceIncompleteError(result);
 }
 
 /**

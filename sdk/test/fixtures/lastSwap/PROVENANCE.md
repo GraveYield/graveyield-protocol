@@ -63,3 +63,19 @@ as if it were production evidence. Mutation inventory:
   `malformed_transaction_metadata`;
 * missing transaction (fake RPC returns null) — validates
   `transaction_data_missing`.
+
+Correction 001 additions (metadata-strictness surface):
+
+* `meta.err` property removal (metadata otherwise intact) — validates
+  `transaction_status_missing`: success is never inferred from an absent
+  status;
+* `meta.innerInstructions` set to `null` / property removal — validates
+  `inner_instructions_unavailable` (unrecorded CPI surface) and that a
+  directly-proven OUTER swap still verifies without inner evidence;
+* recorded-empty inner list (`[]`) on the program-replaced response —
+  validates that only a RECORDED empty list supports
+  `pool_not_invoked_by_amm_program`;
+* fake-RPC version behavior (`reject-nonzero-version`,
+  `reject-all`) — validates the version-1 request contract, the
+  version-0 fallback, and that an unfetchable transaction stays
+  `transaction_data_missing`.

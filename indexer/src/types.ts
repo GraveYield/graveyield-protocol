@@ -37,7 +37,15 @@ export interface DiscoveredPool {
   fetchedAtSlot: number;
 }
 
-/** Last-swap activity record from signature history. */
+/**
+ * Last-swap activity record from signature history.
+ *
+ * Correction 001 §1: the record distinguishes DEFINITIVE "no swap in the
+ * covered history" (`noSwapFound`, only set on a complete scan where every
+ * candidate is provably not an economic swap) from INCOMPLETE evidence
+ * (`unresolved`). The eligibility pre-filter must never pass C1 from an
+ * unresolved record.
+ */
 export interface ActivityRecord {
   poolAddress: PublicKey;
   /** Unix timestamp (seconds) of the pool's most recent swap. */
@@ -46,8 +54,20 @@ export interface ActivityRecord {
   lastSwapSlot: number;
   /** Signature of the most recent swap transaction (audit anchor). */
   lastSwapSignature: string;
-  /** True if the scan exhausted all signatures without finding a swap. */
+  /**
+   * True only when the scan covered the pool's full available signature
+   * history and every candidate is provably not an economic swap (SDK
+   * `no_swap_in_scan`, definitive). Never true for incomplete evidence.
+   */
   noSwapFound: boolean;
+  /**
+   * True when the last-swap evidence is incomplete/unresolved (D5,
+   * Correction 001): the scan could not establish the pool's activity
+   * either way (unresolved candidates, empty/pruned signature response,
+   * bounded scan that did not reach history end, or an RPC failure).
+   * C1 inactivity MUST NOT pass from such a record.
+   */
+  unresolved: boolean;
 }
 
 /** Vault reserves + LP supply read from SPL token accounts. */

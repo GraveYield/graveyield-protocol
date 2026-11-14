@@ -62,14 +62,22 @@ export function preFilterPool(
   const failed: string[] = [];
 
   // C1 — inactivity.
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  const elapsed = activity.noSwapFound
-    ? thresholds.inactivitySeconds * 10n // very old if no swap found
-    : now - BigInt(activity.lastSwapUnixTs);
-  if (elapsed >= thresholds.inactivitySeconds) {
-    bitmap |= CRITERION_INACTIVITY;
+  // Correction 001 §1: incomplete/unresolved last-swap evidence can never
+  // establish inactivity, so it can never pass C1 — not even through the
+  // `noSwapFound` shortcut below, which is reserved for a DEFINITIVE
+  // "complete scan, every candidate provably not an economic swap".
+  if (activity.unresolved) {
+    failed.push("C1-evidence-unresolved");
   } else {
-    failed.push("C1-inactivity");
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const elapsed = activity.noSwapFound
+      ? thresholds.inactivitySeconds * 10n // very old if no swap found
+      : now - BigInt(activity.lastSwapUnixTs);
+    if (elapsed >= thresholds.inactivitySeconds) {
+      bitmap |= CRITERION_INACTIVITY;
+    } else {
+      failed.push("C1-inactivity");
+    }
   }
 
   // C2 — price collapse. The pre-filter does NOT have the recorded

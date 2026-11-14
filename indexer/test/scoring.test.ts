@@ -14,6 +14,7 @@ import type { Candidate } from "../src/index.js";
 function makeCandidate(opts: {
   lastSwapUnixTs?: number;
   noSwapFound?: boolean;
+  unresolved?: boolean;
   tvlLamports?: bigint;
   coinReserve?: bigint;
   pcReserve?: bigint;
@@ -39,6 +40,7 @@ function makeCandidate(opts: {
       lastSwapSlot: 0,
       lastSwapSignature: "",
       noSwapFound: opts.noSwapFound ?? false,
+      unresolved: opts.unresolved ?? false,
     },
     reserves: {
       poolAddress: pool,

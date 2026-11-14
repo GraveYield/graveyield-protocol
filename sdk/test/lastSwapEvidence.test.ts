@@ -16,6 +16,7 @@ import {
   encodeBase58,
   deriveLastSwapEvidenceV4,
   deriveLastSwapV4,
+  LastSwapEvidenceIncompleteError,
 } from "../src/index.js";
 
 import {
@@ -25,6 +26,10 @@ import {
   POOL,
   loadPoolAccountBytes,
   loadTxFixture,
+  withErr,
+  withErrMetaRemoved,
+  withInnerInstructionsNull,
+  withInnerInstructionsRemoved,
   withMetaRemoved,
   withOobProgramIdIndex,
   withSwapAccountsInLoadedKeys,
@@ -152,14 +157,94 @@ describe("D4 classification — verified economic swaps (real fixtures)", () => 
     );
   });
 
-  test("deriveLastSwapV4 keeps its contract: derivation for verified, null otherwise", async () => {
+  test("deriveLastSwapV4: derivation for verified, null ONLY for a definitive no_swap_in_scan", async () => {
     const ok = new LastSwapFakeRpc([CAND(swapV2Outer)]);
     const derivation = await deriveLastSwapV4(ok.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
     assert.equal(derivation?.lastSwapUnixTs, swapV2Outer.blockTime);
     assert.equal(derivation?.signature, swapV2Outer.signature);
 
-    const blocked = new LastSwapFakeRpc([CAND(swapV2Outer, { confirmationStatus: "confirmed" })]);
-    assert.equal(await deriveLastSwapV4(blocked.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL), null);
+    // Definitive: complete scan, every candidate provably not an economic
+    // swap (a deposit with recorded inner instructions) — the legacy null
+    // shape is retained for exactly this state.
+    const none = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withV4InstructionData(swapV2Outer, v4TagData(3)) }),
+    ]);
+    assert.equal(await deriveLastSwapV4(none.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL), null);
+  });
+});
+
+describe("Correction 001 §1 — legacy deriveLastSwapV4 compatibility contract", () => {
+  test("a non-finalized signature throws LastSwapEvidenceIncompleteError (never null)", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer, { confirmationStatus: "confirmed" })]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("missing transaction data throws (never null, never noSwapFound)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: null, blockTime: swapV2Outer.blockTime }),
+    ]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("missing block time throws (never null)", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer, { blockTime: null })]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("missing transaction metadata throws (never null)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withMetaRemoved(swapV2Outer) }),
+    ]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("an empty signature response throws (a pruned RPC can never look inactive)", async () => {
+    const rpc = new LastSwapFakeRpc([]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("a bounded scan that did not reach history end throws (never null)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withV4InstructionData(swapV2Outer, v4TagData(3)) }),
+      CAND(swapV1Inner, { response: withV4InstructionData(swapV1Inner, v4TagData(4)) }),
+      CAND(swapV2InnerV1, { response: withV4InstructionData(swapV2InnerV1, v4TagData(6)) }),
+    ]);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL, { scanLimit: 2 }),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("the thrown error carries the full three-state evidence result", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer, { confirmationStatus: "confirmed" })]);
+    try {
+      await deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+      assert.fail("expected LastSwapEvidenceIncompleteError");
+    } catch (err) {
+      assert.ok(err instanceof LastSwapEvidenceIncompleteError);
+      assert.equal(err.evidence.status, "incomplete");
+      assert.equal(err.evidence.definitive, false);
+      assert.equal(err.evidence.lastSwap, null);
+      assert.equal(err.evidence.candidates.length, 1);
+      const outcome = err.evidence.candidates[0]?.outcome;
+      assert.equal(outcome?.kind === "unresolved" ? outcome.reason : "", "signature_not_finalized");
+      assert.match(err.message, /incomplete/);
+    }
   });
 });
 
@@ -349,6 +434,215 @@ describe("D5 finalized-only evidence", () => {
         ? result.candidates[0].outcome.reason
         : "",
       "transaction_meta_missing",
+    );
+  });
+});
+
+describe("Correction 001 §2 — required transaction metadata", () => {
+  test("missing meta.err stays unresolved — success is never inferred (Correction 001 §2)", async () => {
+    // SYNTHETIC (labeled): meta present, `err` property removed — the RPC
+    // response records neither success nor failure. Normalizing this into
+    // "success" was the old `tx.meta?.err ?? null` behavior.
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withErrMetaRemoved(swapV2Outer) }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "unresolved"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "transaction_status_missing",
+    );
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.lastSwap, null);
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
+    );
+  });
+
+  test("an explicitly recorded failure is a failed transaction (not unresolved)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withErr(swapV2Outer, { InstructionError: [0, "Custom"] }) }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "not_economic_swap"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "failed_transaction",
+    );
+    // Complete scan of one provable non-swap — definitive.
+    assert.equal(result.status, "no_swap_in_scan");
+  });
+
+  test("null innerInstructions do not hide a directly-proven outer swap (Correction 001 §2)", async () => {
+    // SYNTHETIC (labeled): the real outer SwapBaseInV2 swap with the inner
+    // list unrecorded. The outer instruction + vault corroboration prove
+    // the swap on their own — verification must survive unavailable inner
+    // evidence.
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withInnerInstructionsNull(swapV2Outer) }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.candidates[0]?.outcome.kind, "verified_swap");
+  });
+
+  test("absent innerInstructions are not an empty list — outer swap still verifies", async () => {
+    // SYNTHETIC (labeled): property removed entirely (some encodings omit
+    // it). Same contract as null: unavailable, never "recorded empty".
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withInnerInstructionsRemoved(swapV2Outer) }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+  });
+
+  test("null innerInstructions: an outer liquidity op can no longer be proven non-economic", async () => {
+    // SYNTHETIC (labeled): outer Deposit (tag 3) with the inner list
+    // unrecorded. The old `?? []` normalization called this
+    // liquidity_addition — but a same-tx unrecorded CPI swap cannot be
+    // ruled out, so the candidate must stay unresolved.
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, {
+        response: withInnerInstructionsNull(withV4InstructionData(swapV2Outer, v4TagData(3))),
+      }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "unresolved"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "inner_instructions_unavailable",
+    );
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.lastSwap, null);
+  });
+
+  test("null innerInstructions: no outer AMM invocation stays unresolved (an unrecorded CPI could have swapped)", async () => {
+    // SYNTHETIC (labeled): the V4 program replaced by the token program
+    // (no outer AMM invocation) AND the inner list unrecorded. The old
+    // normalization returned pool_not_invoked_by_amm_program — but the
+    // pool appears in this transaction (it came from its signature
+    // history), so an unrecorded router CPI could have swapped.
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer, {
+        response: withInnerInstructionsNull(withV4ProgramReplaced(swapV2Outer)),
+      }),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "unresolved"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "inner_instructions_unavailable",
+    );
+    assert.equal(result.status, "incomplete");
+  });
+
+  test("a RECORDED empty inner list proves pool_not_invoked_by_amm_program", async () => {
+    // SYNTHETIC (labeled): same shape as above, but the RPC explicitly
+    // recorded an EMPTY inner list — genuinely no inner instructions
+    // occurred, so the definitive non-swap conclusion is sound.
+    const response = withV4ProgramReplaced(swapV2Outer);
+    (response.meta as Record<string, unknown>).innerInstructions = [];
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer, { response })]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "not_economic_swap"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "pool_not_invoked_by_amm_program",
+    );
+    assert.equal(result.status, "no_swap_in_scan");
+  });
+
+  test("a genuine inner-CPI swap with RECORDED inner evidence verifies (real v1 fixture)", async () => {
+    // tx_swap_base_in_inner_v1: real mainnet version-1 transaction whose
+    // SwapBaseIn (tag 9) lives in the RECORDED inner instruction list.
+    const rpc = new LastSwapFakeRpc([CAND(swapV1Inner)]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    const outcome = result.candidates[0]?.outcome;
+    assert.equal(
+      outcome?.kind === "verified_swap" ? outcome.routedViaInnerInstruction : null,
+      true,
+    );
+  });
+});
+
+describe("Correction 001 §3 — transaction version contract", () => {
+  test("candidate fetches advertise exactly the validated max version 1, finalized commitment", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer)]);
+    await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(rpc.txFetches.length, 1);
+    assert.equal(rpc.txFetches[0]?.maxSupportedTransactionVersion, 1);
+    assert.equal(rpc.txFetches[0]?.commitment, "finalized");
+  });
+
+  test("supported legacy transaction verifies", async () => {
+    // tx_swap_base_in_v2_outer_legacy — real legacy-encoding swap fixture.
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer)]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+  });
+
+  test("supported version-0 transaction with ALT-loaded accounts verifies key resolution", async () => {
+    // Real v0 + ALT fixture (plus the labeled synthetic ALT-segment view).
+    const real = new LastSwapFakeRpc([CAND(swapV0Alt)]);
+    const realResult = await deriveLastSwapEvidenceV4(
+      real.asConnection(),
+      RAYDIUM_V4_PROGRAM_ID,
+      POOL,
+    );
+    assert.equal(realResult.candidates[0]?.outcome.kind, "not_economic_swap");
+    const synthetic = new LastSwapFakeRpc([
+      CAND(swapV2Outer, { response: withSwapAccountsInLoadedKeys(swapV2Outer) }),
+    ]);
+    const syntheticResult = await deriveLastSwapEvidenceV4(
+      synthetic.asConnection(),
+      RAYDIUM_V4_PROGRAM_ID,
+      POOL,
+    );
+    assert.equal(syntheticResult.status, "verified");
+  });
+
+  test("supported version-1 transactions verify (real v1 fixtures)", async () => {
+    for (const fixture of [swapV1Inner, swapV2InnerV1]) {
+      const rpc = new LastSwapFakeRpc([CAND(fixture)]);
+      const result = await deriveLastSwapEvidenceV4(
+        rpc.asConnection(),
+        RAYDIUM_V4_PROGRAM_ID,
+        POOL,
+      );
+      assert.equal(result.status, "verified");
+    }
+  });
+
+  test("an endpoint that caps the parameter falls back to version 0 and still verifies", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer)], {
+      versionBehavior: "reject-nonzero-version",
+    });
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(rpc.txFetches[0]?.maxSupportedTransactionVersion, 1);
+    assert.equal(rpc.txFetches[1]?.maxSupportedTransactionVersion, 0);
+  });
+
+  test("an unfetchable transaction stays unresolved (no silent skip, no crash)", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(swapV2Outer)], { versionBehavior: "reject-all" });
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(
+      result.candidates[0]?.outcome.kind === "unresolved"
+        ? result.candidates[0].outcome.reason
+        : "",
+      "transaction_data_missing",
+    );
+    assert.equal(result.status, "incomplete");
+    await assert.rejects(
+      deriveLastSwapV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL),
+      LastSwapEvidenceIncompleteError,
     );
   });
 });

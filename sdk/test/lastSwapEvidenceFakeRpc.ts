@@ -340,6 +340,59 @@ export function withMetaRemoved(tx: LoadedTx): Record<string, unknown> {
   return clone;
 }
 
+/**
+ * Sources accepted by the Correction 001 §2 mutations: a loaded fixture
+ * (uses its `response`) or an already-built response object — so the
+ * mutations compose (`withInnerInstructionsNull(withV4ProgramReplaced(tx))`).
+ */
+type ResponseSource = LoadedTx | Record<string, unknown>;
+
+function toResponse(source: ResponseSource): Record<string, unknown> {
+  return "response" in source ? (source.response as Record<string, unknown>) : source;
+}
+
+/** Shallow-clone a plain response with a fresh top-level meta object. */
+function shallowClonePlain(response: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...response,
+    meta: response.meta === null ? null : { ...(response.meta as Record<string, unknown>) },
+  };
+}
+
+/**
+ * SYNTHETIC (labeled, Correction 001 §2): remove `meta.err` while keeping
+ * the rest of the metadata — the RPC response does not record whether the
+ * transaction succeeded or failed. Success can never be inferred here.
+ */
+export function withErrMetaRemoved(source: ResponseSource): Record<string, unknown> {
+  const clone = shallowClonePlain(toResponse(source));
+  delete (clone.meta as Record<string, unknown>).err;
+  return clone;
+}
+
+/**
+ * SYNTHETIC (labeled, Correction 001 §2): `meta.innerInstructions = null`
+ * — the RPC recorded the transaction but NOT its inner (CPI) instruction
+ * list. Absence of the list is never proof that no inner instructions
+ * occurred.
+ */
+export function withInnerInstructionsNull(source: ResponseSource): Record<string, unknown> {
+  const clone = shallowClonePlain(toResponse(source));
+  (clone.meta as Record<string, unknown>).innerInstructions = null;
+  return clone;
+}
+
+/**
+ * SYNTHETIC (labeled, Correction 001 §2): remove `meta.innerInstructions`
+ * entirely (some encodings omit the property instead of nulling it).
+ * Equivalent to null: recording unavailable, never "empty".
+ */
+export function withInnerInstructionsRemoved(source: ResponseSource): Record<string, unknown> {
+  const clone = shallowClonePlain(toResponse(source));
+  delete (clone.meta as Record<string, unknown>).innerInstructions;
+  return clone;
+}
+
 // ---------------------------------------------------------------------------
 
 export interface FakeCandidate {
@@ -354,23 +407,46 @@ export interface FakeCandidate {
 }
 
 /**
+ * How the fake's `getTransaction` reacts to the requested
+ * `maxSupportedTransactionVersion` (Correction 001 §3):
+ *   - "accept" (default): serve the response for any request (the fake
+ *     is version-agnostic, like the real duck-typed response surface);
+ *   - "reject-nonzero-version": throw a provider-style version error for
+ *     every request whose max version is above 0 (an endpoint that caps
+ *     the parameter) — exercises the version-0 fallback;
+ *   - "reject-all": throw for every request (the tx cannot be fetched at
+ *     all) — the candidate must stay unresolved, never silently skipped.
+ */
+type VersionBehavior = "accept" | "reject-nonzero-version" | "reject-all";
+
+interface RecordedTxFetch {
+  signature: string;
+  maxSupportedTransactionVersion: number | undefined;
+  commitment: string | undefined;
+}
+
+/**
  * In-memory Connection covering the D4/D5 derivation surface: bounded
  * signature scans, per-candidate transaction fetches, the pool AmmInfo
  * account, and the finalized slot for depth-margin tests.
  */
 export class LastSwapFakeRpc {
   private readonly poolBytes: Uint8Array | null;
+  private readonly versionBehavior: VersionBehavior;
   finalizedSlot: number | null = null;
   scanLimits: number[] = [];
+  /** Every getTransaction call, with the requested version + commitment. */
+  readonly txFetches: RecordedTxFetch[] = [];
 
   constructor(
     private readonly candidates: FakeCandidate[],
-    opts?: { poolAccountData?: Uint8Array | null },
+    opts?: { poolAccountData?: Uint8Array | null; versionBehavior?: VersionBehavior },
   ) {
     this.poolBytes =
       opts !== undefined && "poolAccountData" in opts
         ? opts.poolAccountData
         : loadPoolAccountBytes();
+    this.versionBehavior = opts?.versionBehavior ?? "accept";
   }
 
   asConnection(): Connection {
@@ -408,7 +484,22 @@ export class LastSwapFakeRpc {
     }));
   }
 
-  async getTransaction(signature: string): Promise<Record<string, unknown> | null> {
+  async getTransaction(
+    signature: string,
+    opts?: { maxSupportedTransactionVersion?: number; commitment?: string },
+  ): Promise<Record<string, unknown> | null> {
+    this.txFetches.push({
+      signature,
+      maxSupportedTransactionVersion: opts?.maxSupportedTransactionVersion,
+      commitment: opts?.commitment,
+    });
+    const version = opts?.maxSupportedTransactionVersion;
+    if (this.versionBehavior === "reject-nonzero-version" && version !== 0) {
+      throw new Error(`Transaction version (${String(version)}) is not supported by this endpoint`);
+    }
+    if (this.versionBehavior === "reject-all") {
+      throw new Error(`Transaction version (${String(version)}) is not supported by this endpoint`);
+    }
     const candidate = this.candidates.find((c) => c.signature === signature);
     return candidate?.response ?? null;
   }

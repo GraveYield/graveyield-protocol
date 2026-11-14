@@ -34,6 +34,7 @@ function makeCandidate(poolByte: number): Candidate {
       lastSwapSlot: 0,
       lastSwapSignature: "",
       noSwapFound: false,
+      unresolved: false,
     },
     reserves: {
       poolAddress: pool,
