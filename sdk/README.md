@@ -138,8 +138,12 @@ Rules:
    a canonical-side merge, `salvor-bots@main` is briefly behind while
    the mirror's companion PR is still open; in that state the job passes
    only if an open salvor-bots PR targeting `main` is byte-identical to
-   `sdk/src/` (it emits a notice naming the PR to merge). With no merged
-   or pending byte-identical counterpart, CI still fails.
+   `sdk/src/` (it emits a notice naming the PR to merge). The probe's
+   API request is always authenticated — `SALVOR_SYNC_TOKEN` (a
+   read-only credential for `GraveYield/salvor-bots`) when configured,
+   otherwise the workflow's `github.token` — so the shared anonymous API
+   rate limit cannot fail the job; a rejected request still does. With
+   no merged or pending byte-identical counterpart, CI still fails.
 4. The test directories MAY diverge (protocol-side vectors live here;
    fleet-side harnesses live there) — the gate covers `src/` only.
 

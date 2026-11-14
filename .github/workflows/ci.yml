@@ -163,6 +163,20 @@ jobs:
           echo "SALVOR_REF=$SALVOR_REF" >> "$GITHUB_ENV"
           git clone --depth 1 --branch "$SALVOR_REF" https://github.com/GraveYield/salvor-bots.git _salvor-bots
       - name: Fail on any SDK divergence
+        env:
+          # Merge-window probe credentials (PR #106 review, Finding 1):
+          # SALVOR_SYNC_TOKEN is the explicitly configured read-only
+          # credential for GraveYield/salvor-bots (fine-grained PAT or
+          # GitHub App installation token, stored as a repository
+          # secret; repository secrets are absent on fork pull_request
+          # runs). GITHUB_TOKEN — the workflow's own github.token,
+          # already constrained to the top-level `permissions:
+          # contents: read` — is only a last-resort fallback and must
+          # not be assumed to authorize cross-repository access, so the
+          # probe announces the fallback in the log and a rejected or
+          # rate-limited request still hard-fails the job (curl -f).
+          SALVOR_SYNC_TOKEN: ${{ secrets.SALVOR_SYNC_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           echo "Enforcing byte-equality of the shared SDK modules:"
@@ -185,9 +199,18 @@ jobs:
           # from an open salvor-bots PR targeting main iff its tree is
           # byte-identical to sdk/src.
           API="https://api.github.com/repos/GraveYield/salvor-bots/pulls?state=open&per_page=100"
-          CURL_AUTH=()
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
+          # Never probe unauthenticated (Finding 1, PR #106 review): the
+          # anonymous API limit is 60 req/h per runner egress IP and is
+          # shared, so an exhausted limit would fail this job for reasons
+          # unrelated to SDK drift.
+          if [ -n "${SALVOR_SYNC_TOKEN:-}" ]; then
+            CURL_AUTH=(-H "Authorization: Bearer ${SALVOR_SYNC_TOKEN}")
+          elif [ -n "${GITHUB_TOKEN:-}" ]; then
+            echo "::warning::SALVOR_SYNC_TOKEN is not configured; probing the salvor-bots API with the workflow's github.token. Configure SALVOR_SYNC_TOKEN (read-only credential for GraveYield/salvor-bots) — this fallback works only while that repository stays publicly readable."
             CURL_AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+          else
+            echo "::error::no credential available for the salvor-bots API probe (SALVOR_SYNC_TOKEN unset and github.token unavailable)."
+            exit 1
           fi
           CANDIDATES="$(curl -fsSL --max-time 60 "${CURL_AUTH[@]}" \
               -H "X-GitHub-Api-Version: 2022-11-28" "$API" \
