@@ -129,9 +129,21 @@ Rules:
    repos' test suites before pushing either side.
 3. CI enforces byte-equality: the `sdk-sync-check` job in
    `.github/workflows/ci.yml` diffs `sdk/src/` against a fresh clone of
-   `salvor-bots@main` on every push/PR, plus a weekly scheduled run that
-   also catches salvor-side-only edits (a push there cannot trigger this
-   workflow). Any divergence fails CI.
+   `salvor-bots` — the same-named companion branch when one exists (the
+   two companion PRs travel review in tandem), otherwise
+   `salvor-bots@main` — on every push/PR, plus a weekly scheduled run
+   that also catches salvor-side-only edits (a push there cannot trigger
+   this workflow). Any divergence fails CI. One merge-window exception
+   keeps the gate honest across the two-repo companion flow: right after
+   a canonical-side merge, `salvor-bots@main` is briefly behind while
+   the mirror's companion PR is still open; in that state the job passes
+   only if an open salvor-bots PR targeting `main` is byte-identical to
+   `sdk/src/` (it emits a notice naming the PR to merge). The probe's
+   API request is always authenticated — `SALVOR_SYNC_TOKEN` (a
+   read-only credential for `GraveYield/salvor-bots`) when configured,
+   otherwise the workflow's `github.token` — so the shared anonymous API
+   rate limit cannot fail the job; a rejected request still does. With
+   no merged or pending byte-identical counterpart, CI still fails.
 4. The test directories MAY diverge (protocol-side vectors live here;
    fleet-side harnesses live there) — the gate covers `src/` only.
 
