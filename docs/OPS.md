@@ -122,7 +122,7 @@ The roadmap's closing Phase 11 row. Run after the services are up:
 ```bash
 graveyield-ops scenario sc-01   # lifecycle sweep (read-only, live)
 graveyield-ops scenario sc-02   # vault audit (read-only, live)
-graveyield-ops scenario sc-03   # local deploy + drill rehearsal
+graveyield-ops scenario sc-03   # currently unavailable — see SC-03 below
 ```
 
 - **SC-01 lifecycle-sweep** — one indexer cycle + one observer sweep +
@@ -132,20 +132,45 @@ graveyield-ops scenario sc-03   # local deploy + drill rehearsal
 - **SC-02 vault-audit** — the deep audit: R1/R2 receipt invariants,
   C1–C3 claim accounting, failed-tx sweep, ProtocolConfig readback.
   This is the standing answer to "is settlement accounting healthy?"
-- **SC-03 local-rehearsal** — re-runs the executed devnet rehearsal
-  (deploy → init → pause drill) on `solana-test-validator` via
-  `scripts/devnet/local_rehearsal.sh`. This is the **funded** salvage
-  path: controlled salvage scenarios with real pool state run here on a
-  local validator. Devnet attestation-gated evaluation additionally
-  requires an operated oracle signer (ORACLE-003); the NS-1/NS-2 custody
-  history is recorded in `docs/LEGACY_DEPLOYMENTS.md`.
-  Prerequisites: Solana CLI 3.0.10 and the io_uring
-  seccomp wrapper (`gcc -O2 -o scripts/no_uring scripts/no_uring.c`);
-  the scenario checks both and never auto-installs. The wrapper
-  executes exactly one program — `solana-test-validator`, a fixed
-  compile-time constant; any other argv is refused (exit 2) before the
-  filter is installed, so no command-line data can ever select what it
-  runs.
+- **SC-03 local-rehearsal** — **currently unavailable as an executable
+  rehearsal scenario.** The SC-03 implementation (`ops/src/scenarios.ts`)
+  still constructs and invokes the superseded
+  `scripts/devnet/local_rehearsal.sh`; the SC-03 wrapper does **not**
+  invoke the NS-3 replacement script. The superseded script intentionally
+  refuses execution under the NS-3 safety gates (it prints a refusal and
+  exits with code 2), so `graveyield-ops scenario sc-03` ends in a
+  failed scenario report — never in a rehearsal. Re-pointing SC-03 at
+  the replacement script is a pending implementation follow-up; this
+  runbook does not assume that fix. Its prerequisite checks (Solana CLI
+  3.0.10 and the io_uring seccomp wrapper `gcc -O2 -o scripts/no_uring
+  scripts/no_uring.c` — checked, never auto-installed; the wrapper
+  executes exactly one program, `solana-test-validator`, a fixed
+  compile-time constant, and refuses any other argv before the filter
+  is installed) still run before the refused script is spawned. Devnet
+  attestation-gated evaluation additionally requires an operated oracle
+  signer (ORACLE-003, §7); the NS-1/NS-2 custody history is recorded in
+  `docs/LEGACY_DEPLOYMENTS.md`.
+
+### Direct NS-3 local rehearsal — `scripts/devnet/local_rehearsal_ns3.sh`
+
+The repository also provides `scripts/devnet/local_rehearsal_ns3.sh`,
+the replacement NS-3 local rehearsal. It is run directly, separately
+from the scenario runner — the SC-03 wrapper does not invoke it, and
+the existence of this script does not fix the SC-03 implementation. It
+exercises the NS-3 production initialization shape on a local
+`solana-test-validator`: locally built ELFs loaded at the NS-3 program
+IDs, initialization with a **temporary governance authority**,
+emergency-control drills, and dedicated-oracle registration — all with
+**temporary test identities** (throwaway keypairs minted into a temp
+directory and discarded with it; the permanent governance key never
+enters the local validator state). It operates against the local
+validator only: no Devnet or Mainnet RPC is contacted and nothing is
+deployed to Devnet or Mainnet. It is a local initialization-sequence
+rehearsal with throwaway keys — **not** a funded salvage scenario,
+**not** a completed end-to-end GraveYield salvage lifecycle, and
+**not** a re-execution of the recorded NS-3 Devnet deployment.
+Prerequisites and the exact sequence are documented in the script
+header.
 
 Reports persist to `ops-state/scenario-<id>-<ts>.json` and exit `0`/`1`,
 so cron/CI can gate on them.
@@ -168,8 +193,9 @@ or the packed tarball.
   obsolete NS-1-era "wiped deployer key" limitation no longer applies —
   the lost-key history is in `docs/LEGACY_DEPLOYMENTS.md`). Every
   command in this runbook stays read-only — SC-01/SC-02 are built for
-  that; funded salvage rehearsal runs on SC-03 against a local
-  validator.
+  that; the funded salvage rehearsal scenario (SC-03) is currently
+  unavailable (see §5 for the SC-03 status and the direct NS-3 local
+  rehearsal).
 - The Merkle service schedules by pool list; `all` wires an empty list
   until discovery populates it. Use `graveyield-ops merkle --pool P`
   for explicit pool snapshots.

@@ -1,17 +1,23 @@
 # Legacy Devnet Deployments — Historical Record
 
-> The program IDs in this document are **legacy**. NS-2 is **confirmed
-> deployed and executable on devnet** (read-only verification
-> 2026-11-03, §3), but it is **superseded**: its authority key was lost
-> (§4), and it is not the active deployment target. The NS-1 deployment
-> is retained in this document as a **historical deployment record**;
-> its current on-chain status has not been established here. References
-> to the legacy deployments remain valid for historical documentation
-> and on-chain verification. NS-3 is the **active deployment**: the
-> owner executed it on 2026-11-12 and the recorded W2 post-deployment
-> acceptance passed (see `docs/DEVNET.md` and
-> [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md));
-> this file remains the home of the NS-1/NS-2 historical records only.
+> The NS-1/NS-2 program IDs in this document are **legacy**. NS-2 is
+> **confirmed deployed and executable on devnet** (read-only
+> verification 2026-11-03, §3), but it is **superseded**: its authority
+> key was lost (§4), and it is not the active deployment target. The
+> NS-1 deployment is retained in this document as a **historical
+> deployment record**; its current on-chain status has not been
+> established here. References to the legacy deployments remain valid
+> for historical documentation and on-chain verification.
+>
+> Scope of this file: the detailed historical deployment records kept
+> here remain those of **NS-1 and NS-2 only**. NS-3 is the **active
+> deployment** — the owner executed it on 2026-11-12 and the recorded
+> W2 post-deployment acceptance passed — and it has **no detailed
+> deployment record in this file**: it appears here as the
+> current-generation row of the §1 lineage table and in the
+> reconciliation notes, while the canonical NS-3 deployment and
+> acceptance documentation is `docs/DEVNET.md` and
+> [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md).
 > Decision record: **DR-002** in
 > [`docs/DECISIONS.md`](DECISIONS.md).
 
