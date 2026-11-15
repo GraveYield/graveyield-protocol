@@ -693,9 +693,13 @@ async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
     // program-test installs a default logger (message_processor=debug)
     // that prints all program logs to stderr, and the panic carries the
     // error payload.
-    send(&mut client, &h.salvor, &[salvage_ix(&h, &default_salvage_opts(&h, h.lp_burn_plan))])
-        .await
-        .unwrap_or_else(|e| panic!("salvage_pool against real Raydium V4 bytecode failed: {e:?}"));
+    send(
+        &mut client,
+        &h.salvor,
+        &[salvage_ix(&h, &default_salvage_opts(&h, h.lp_burn_plan))],
+    )
+    .await
+    .unwrap_or_else(|e| panic!("salvage_pool against real Raydium V4 bytecode failed: {e:?}"));
 
     // -------- LP burn is real and exact
     let supply_after = mint_supply(&acct(&mut client, &h.lp_mint).await);
