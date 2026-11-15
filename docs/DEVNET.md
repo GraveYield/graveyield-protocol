@@ -8,7 +8,12 @@
 > [`docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md).
 > The W2 post-deployment acceptance verifier PASSED 29/29 deployment
 > checks and the deployed-ELF digest verifier PASSED 27/27 — combined
-> 56/56, 0 failed, 0 unverified. Recorded acceptance is a Devnet record
+> 56/56, 0 failed, 0 unverified. A follow-up independent read-only
+> verification on 2026-11-15 re-confirmed the live deployment — 14/14
+> checks at finalized slot 522363929 (epoch 1209), plain JSON-RPC only —
+> recorded in
+> [`docs/w2-ns3-acceptance/INDEPENDENT_READONLY_VERIFICATION_2026-11-15.md`](w2-ns3-acceptance/INDEPENDENT_READONLY_VERIFICATION_2026-11-15.md).
+> Recorded acceptance is a Devnet record
 > only: it is not Mainnet approval, not a security audit, and not evidence
 > that a controlled end-to-end salvage has run.
 >
