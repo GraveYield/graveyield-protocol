@@ -54,7 +54,7 @@ marks unresolved.
 | Off-chain SDK | Implemented as a workspace package: instruction builders, PDA/account helpers, attestation builders, snapshot/Merkle helpers, simulation/fee utilities. | SDK is not a substitute for an operated oracle service, production key custody, or a published end-user application. |
 | Off-chain indexer | Implemented for Raydium V4 discovery, activity derivation, reserves/metadata, pre-filter/scoring, queue, optional Phase 1 submission and tracking. | Production oracle operations, reliable historical archive access, key custody/rotation and service monitoring remain unresolved. |
 | LP snapshotter | Rust grave-snapshotter builds deterministic LP-holder snapshots, Merkle trees and sealed JSON artifacts; completeness/reconciliation checks are included. | The chain verifies the Merkle proof and pins total LP supply, but does not independently enumerate every holder or prove that holder balances have not changed since the off-chain snapshot. |
-| Deployment and CI | Both programs are deployed to devnet; configs initialized; pause / unauthorized-pause rejection / unpause drill passed 9 October 2026. Latest listed CI and CodeQL runs passed. | Devnet uses a single deployer authority. Fresh mainnet program keys, mainnet authority custody, production oracle operations and pre-mainnet checklist closure are still required. |
+| Deployment and CI | Both NS-3 programs are deployed to devnet; configs initialized; governance drills passed; the recorded W2 post-deployment acceptance passed (29/29 deployment checks + 27/27 ELF-digest checks, 0 failed/unverified). Latest listed CI and CodeQL runs passed. | Devnet uses a single deployer authority. Fresh mainnet program keys, mainnet authority custody, production oracle operations and pre-mainnet checklist closure are still required. |
 
 ## 1. System scope and architecture
 
@@ -434,24 +434,38 @@ requirement in the current build notes.
 
 ## 9. Devnet deployment status
 
-As recorded in [`DEVNET.md`](DEVNET.md), the NS-1 deployment's
-emergency-control drill was executed on 9 October 2026 (authority pause,
-readback, rejection of an intruder pause attempt, authority unpause, and
-state readback on both programs); NS-2 repeated the drill on 2026-10-25.
-For NS-3 the drill is part of the owner's post-deployment acceptance —
-it has NOT been executed yet.
+> **Reconciliation note (2026-11-15, documentation-only).** This section
+> previously described NS-3 as assigned but not yet deployed. That
+> preparation-era wording is obsolete: the owner executed the deployment
+> and the acceptance was recorded. The rest of this document still
+> describes its original baseline (`main @ 5cc46cdce13e`, 9 October
+> 2026).
 
-| Program | NS-3 devnet program ID (assigned; deployment pending) |
+As recorded in [`DEVNET.md`](DEVNET.md) and
+[`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md),
+the NS-1 deployment's emergency-control drill was executed on 9 October
+2026 (authority pause, readback, rejection of an intruder pause attempt,
+authority unpause, and state readback on both programs); NS-2 repeated
+the drill on 2026-10-25. For NS-3 the owner executed the Devnet
+deployment, initialization, governance drills, and GraveScanner oracle
+registration on 2026-11-12, and the recorded W2 post-deployment
+acceptance passed: 29/29 deployment checks, 27/27 deployed-ELF digest
+checks — combined 56/56, 0 failed, 0 unverified.
+
+| Program | NS-3 devnet program ID (deployed; acceptance recorded) |
 |---------|-------------------|
 | GraveScanner | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` |
 | GraveVault | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` |
 
-> **NS-3 redeployment (assigned 2026-11-04, deployment PENDING).** Per
-> `docs/DECISIONS.md` (DR-002) the NS-3 identities are owner-generated and
-> owner-held; the table above names the assigned program IDs, but NS-3 is
-> NOT deployed or initialized yet — see the NS-3 preparation record at the
-> top of [`DEVNET.md`](DEVNET.md). Until the owner executes the deployment,
-> no address above is live.
+> **NS-3 deployment (recorded, Devnet only).** Per `docs/DECISIONS.md`
+> (DR-002) the NS-3 identities are owner-generated and owner-held; the
+> table names the deployed program IDs. The deployment, ProtocolConfig
+> initialization, governance drills, and oracle registration are recorded
+> with their transaction signatures in
+> [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md)
+> (see also the NS-3 record at the top of [`DEVNET.md`](DEVNET.md)).
+> Recorded acceptance does not establish Mainnet readiness, security-audit
+> completion, or a completed end-to-end salvage lifecycle.
 >
 > **Historical deployments (preserved, untouched):** the NS-2 refresh
 > (`CuQZes…Ao54` / `Bd5smh…s7rg`, deployed 2026-10-25, authority key lost

@@ -135,9 +135,11 @@ graveyield-ops scenario sc-03   # local deploy + drill rehearsal
 - **SC-03 local-rehearsal** — re-runs the executed devnet rehearsal
   (deploy → init → pause drill) on `solana-test-validator` via
   `scripts/devnet/local_rehearsal.sh`. This is the **funded** salvage
-  path: controlled salvage scenarios with real pool state run here
-  while the devnet oracle keys remain de-pointed (see the custody note
-  in `DEVNET.md`). Prerequisites: Solana CLI 3.0.10 and the io_uring
+  path: controlled salvage scenarios with real pool state run here on a
+  local validator. Devnet attestation-gated evaluation additionally
+  requires an operated oracle signer (ORACLE-003); the NS-1/NS-2 custody
+  history is recorded in `docs/LEGACY_DEPLOYMENTS.md`.
+  Prerequisites: Solana CLI 3.0.10 and the io_uring
   seccomp wrapper (`gcc -O2 -o scripts/no_uring scripts/no_uring.c`);
   the scenario checks both and never auto-installs. The wrapper
   executes exactly one program — `solana-test-validator`, a fixed
@@ -159,10 +161,15 @@ or the packed tarball.
 
 ## 7. Known limits (flagged, by design)
 
-- Devnet attestation-signed submissions remain unverifiable until the
-  owner re-points the oracles (deployer keys were throwaways, wiped per
-  custody policy). Every devnet run is effectively read-only — which
-  SC-01/SC-02 are built for; funded salvage scenarios run on SC-03.
+- Devnet attestation-gated submissions remain unexercised: the recorded
+  NS-3 deployment registered the dedicated GraveScanner activity and
+  launch-price oracle addresses on-chain (W2 acceptance), but no
+  production oracle-signing service is operated yet (ORACLE-003; the
+  obsolete NS-1-era "wiped deployer key" limitation no longer applies —
+  the lost-key history is in `docs/LEGACY_DEPLOYMENTS.md`). Every
+  command in this runbook stays read-only — SC-01/SC-02 are built for
+  that; funded salvage rehearsal runs on SC-03 against a local
+  validator.
 - The Merkle service schedules by pool list; `all` wires an empty list
   until discovery populates it. Use `graveyield-ops merkle --pool P`
   for explicit pool snapshots.

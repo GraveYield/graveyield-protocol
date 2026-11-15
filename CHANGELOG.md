@@ -123,10 +123,21 @@
   mutations for the non-economic, ambiguous, conflicting, incomplete and
   finality branches.
 
-## [Unreleased — NS-3 identity synchronization (DR-002; deployment pending)]
+## [Unreleased — NS-3 identity synchronization and recorded Devnet deployment (DR-002)]
 
 ### Changed
 
+- **NS-3 Devnet deployment recorded (owner-executed; W2 acceptance)** —
+  the owner deployed both NS-3 programs on Devnet (2026-11-12),
+  initialized both ProtocolConfig accounts, completed the governance
+  drills, and registered the GraveScanner activity and launch-price
+  oracles. `docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`
+  records the deployment and initialization transaction signatures and
+  the acceptance results: deployment-acceptance verifier PASS 29/29,
+  deployed-ELF digest verifier PASS 27/27 — combined 56/56, 0 failed,
+  0 unverified. Devnet scope only: this is not Mainnet approval, not a
+  security-audit certification, and not evidence of a completed
+  end-to-end salvage lifecycle.
 - **NS-3 identity sync (one atomic change window)** — every active
   identity surface now names the owner-generated, owner-held NS-3
   program IDs: both `declare_id!` calls, `Anchor.toml` (localnet +
@@ -135,9 +146,11 @@
   `pin_elfs.mjs`, `prepare_local_accounts.mjs`), the SDK defaults
   (`sdk/src/client.ts`), the indexer and ops defaults, all six
   grave-vault fork suites, the SDK PDA/devnet-smoke vectors, the
-  adversary and ops test fixtures. NS-3 is **assigned but NOT deployed**:
-  until the owner executes the deployment recorded in `docs/DEVNET.md`,
-  nothing on devnet answers at the new addresses. The NS-2 and NS-1
+  adversary and ops test fixtures. NS-3 is **deployed and
+  acceptance-recorded**: the owner-executed Devnet deployment,
+  initialization, drills, and oracle registration are recorded in
+  `docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md` and
+  `docs/DEVNET.md`. The NS-2 and NS-1
   historical records are preserved verbatim
   (`docs/LEGACY_DEPLOYMENTS.md`, `docs/DECISIONS.md`, `docs/DEVNET.md`
   historical sections, `BASELINE_REPORT.md`, assessments, live example
@@ -173,16 +186,16 @@
   pre-deployment ELF-source policy (provenance honestly recorded as
   "local build"); after the owner's deployment the default devnet-dump
   provenance path applies unchanged.
-- **Documentation status flip (preparation language)** — `docs/DEVNET.md`
-  carries the NS-3 preparation record (identities, pre-deployment
-  derivations, authority arrangement) above the preserved NS-2 record;
+- **Documentation status flip (preparation → deployed)** — `docs/DEVNET.md`
+  carries the NS-3 record (identities, pinned derivations, authority
+  arrangement) above the preserved NS-2 record;
   `docs/technical-documentation.md`, `sdk/README.md`,
   `docs/PRE_MAINNET_CHECKLIST.md` (KEYS-003) and the
-  `docs/LEGACY_DEPLOYMENTS.md` NS-3 lineage row state assignment +
-  pending-deployment status. The NS-3 ProtocolConfig PDAs
-  (`5PK9pz…kKKe` / `5aocH2…nda`, bump 255) are pre-deployment
-  derivations, not on-chain facts; ProgramData addresses remain PENDING
-  until read from the deployed program accounts.
+  `docs/LEGACY_DEPLOYMENTS.md` NS-3 lineage row state the recorded
+  deployment and acceptance. The NS-3 ProtocolConfig PDAs
+  (`5PK9pz…kKKe` / `5aocH2…nda`, bump 255) and the ProgramData addresses
+  are on-chain facts read back from the deployed program accounts
+  (recorded W2 acceptance).
 
 ## [Unreleased — NS-2 devnet refresh executed (DR-001)]
 
