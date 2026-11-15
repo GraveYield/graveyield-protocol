@@ -157,7 +157,7 @@ behavior. The three fixes were backported here verbatim on 2026-10-24
 the salvor-bots suite, and the drift gate above now makes any future
 divergence a CI failure.
 
-## NS-3 devnet program IDs (assigned; deployment PENDING)
+## NS-3 devnet program IDs (deployed; acceptance recorded)
 
 | Program | NS-3 ID |
 |---|---|
@@ -166,16 +166,19 @@ divergence a CI failure.
 | Scanner ProtocolConfig PDA | `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe` |
 | Vault ProtocolConfig PDA | `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` |
 
-The config PDAs are the pre-deployment derivations of `['protocol_config']`
-under the assigned IDs (bump 255; `node scripts/devnet/ns3_derive_pdas.mjs`
-reproduces them). They become on-chain facts only after the owner executes
-the NS-3 deployment recorded in `docs/DEVNET.md` — until then nothing on
-devnet answers at these addresses. Historical deployments (NS-2
-`CuQZes…Ao54` / `Bd5smh…s7rg`, NS-1 `5JiCVx…zvNF` / `HUyoG5…ox3v6`) are
-preserved in `docs/LEGACY_DEPLOYMENTS.md`.
+The config PDAs are the derivations of `['protocol_config']` under the
+NS-3 IDs (bump 255; `node scripts/devnet/ns3_derive_pdas.mjs` reproduces
+them). The owner-executed NS-3 Devnet deployment recorded in
+`docs/DEVNET.md` and `docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`
+initialized both, and the recorded W2 post-deployment acceptance passed
+29/29 deployment checks and 27/27 ELF-digest checks — a Devnet record
+only, not a Mainnet, security-audit, or full-lifecycle claim. Historical
+deployments (NS-2 `CuQZes…Ao54` / `Bd5smh…s7rg`, NS-1 `5JiCVx…zvNF` /
+`HUyoG5…ox3v6`) are preserved in `docs/LEGACY_DEPLOYMENTS.md`.
 
-The devnet smoke tests assert the NS-3 derivations and (once the deployment
-exists) decode the live ProtocolConfigs against the spec default tables
+The devnet smoke tests assert the NS-3 derivations and, when a Devnet RPC
+endpoint is configured (`DEVNET_RPC_URL`), decode the live ProtocolConfigs
+against the spec default tables
 (`SCANNER_PROTOCOL_CONFIG_DEFAULTS` / `VAULT_PROTOCOL_CONFIG_DEFAULTS`).
 
 ## LOCKER-002

@@ -1,11 +1,16 @@
 # Devnet Runbook — GraveYield Protocol
 
-> **NS-3 PREPARATION RECORD (assigned, NOT yet deployed — 2026-11-04).**
-> The NS-3 identities below are owner-generated, owner-held public keys
-> (DR-002); the repository synchronization is complete and the deployment
-> itself is **PENDING** — nothing on devnet answers at these addresses
-> until the owner executes the deployment. Do not treat any
-> NS-3 address as live until this file records the deployment signatures.
+> **NS-3 DEPLOYED — recorded Devnet deployment and post-deployment
+> acceptance.** The NS-3 identities below are owner-generated, owner-held
+> public keys (DR-002). The owner executed the Devnet deployment,
+> initialization, governance drills, and GraveScanner oracle registration
+> on 2026-11-12; the transaction signatures are recorded in
+> [`docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md).
+> The W2 post-deployment acceptance verifier PASSED 29/29 deployment
+> checks and the deployed-ELF digest verifier PASSED 27/27 — combined
+> 56/56, 0 failed, 0 unverified. Recorded acceptance is a Devnet record
+> only: it is not Mainnet approval, not a security audit, and not evidence
+> that a controlled end-to-end salvage has run.
 >
 > | NS-3 role | Public key |
 > |---|---|
@@ -16,8 +21,8 @@
 > | Activity oracle (dedicated, C1) | `2ZygwHNXUBm3ESuvzxqL8ywdqKo8pkkcS6XfXQoZqf8o` |
 > | Launch-price oracle (dedicated, C2) | `97JVKVd6E8Tmax8AciUNA4U92hwEQxN9MpeAessQBcee` |
 >
-> Pre-deployment derivations (byte-exact, locally computed — must match
-> the on-chain readbacks): scanner ProtocolConfig PDA
+> Pinned derivations (byte-exact, locally computed — matched by the
+> on-chain readbacks): scanner ProtocolConfig PDA
 > `5PK9pz4FcmiWGG3h81WquD2QpwuEj2GeAXxLGGMJkKKe`, vault ProtocolConfig
 > PDA `5aocH2UAFixQneb5LzoNf2m3b92AUc9zFP6oWEh6Vnda` (both
 > `['protocol_config']`, bump 255; reproduce with
@@ -736,7 +741,11 @@ other's presence. Historical note: the W2 exercise performed the same
 loaded-byte procedure with a one-off supplemental collector that was
 NOT committed ([`W2_ACCEPTANCE_REPORT.md`](w2-ns3-acceptance/W2_ACCEPTANCE_REPORT.md)
 §5); this utility is the reproducible replacement. It was NOT part of
-the W2 run — the W2 REJECTED classification stands exactly as recorded.
+that original W2 run — the run's REJECTED classification stands exactly
+as recorded as a historical record of its own run; the owner's
+subsequent deployment passed the recorded post-deployment acceptance
+(see the NS-3 record at the top of this file and
+[`W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md)).
 
 ## 6. Deliberately out of scope here
 

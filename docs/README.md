@@ -47,6 +47,7 @@ canon outside this list is either superseded or unrelated to the project.
 |-------|----------|
 | Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
 | Phase 0 baseline (verified on-chain + repo state, 2026-10-24; blocker register, devnet usability decision, next steps) | [`BASELINE_REPORT.md`](BASELINE_REPORT.md) |
+| W2 NS-3 Devnet deployment acceptance (owner-executed 2026-11-12; recorded 29/29 + 27/27 verifier results, tx signatures, scope limits) | [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md) |
 | W1 NS-3 lifecycle-rehearsal inspection (pre-modification harness inspection: works / NS-2-specific / NS-3-ready / adapt / missing / mocked / owner-gated) | [`W1_NS3_REHEARSAL_INSPECTION.md`](W1_NS3_REHEARSAL_INSPECTION.md) |
 
 ## Session assessments and handoff volumes

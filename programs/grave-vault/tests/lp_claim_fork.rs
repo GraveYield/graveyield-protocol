@@ -1115,21 +1115,21 @@ async fn salvage_and_seal(
         route: Some(route),
         merkle_root: root,
     };
-    let res = client
-        .process_transaction_with_metadata(Transaction::new_signed_with_payer(
-            &[salvage_ix(env, &opts)],
-            Some(&salvor.pubkey()),
-            &[salvor],
-            client.get_latest_blockhash().await.unwrap(),
-        ))
+    // Submit through the server's SERIALIZED processing loop (send →
+    // process_transaction), not through the direct synchronous metadata
+    // path: a metadata-path transaction locks accounts on the working bank
+    // immediately and can collide with the not-yet-released locks of the
+    // just-committed previous transaction — whose status the poll-based
+    // path can observe a hair before its locks drop (AccountInUse; fork-
+    // harness CI job 132656651349). The loop releases every transaction's
+    // locks before it picks up the next one, so the collision cannot
+    // happen here. A failed salvage is still fully diagnosable: solana-
+    // program-test installs a default logger (message_processor=debug)
+    // that prints all program logs to stderr, and the panic carries the
+    // error payload.
+    send(client, salvor, &[salvage_ix(env, &opts)])
         .await
-        .unwrap();
-    if let Err(e) = res.result {
-        for l in res.metadata.map(|m| m.log_messages).unwrap_or_default() {
-            eprintln!("LOG: {l}");
-        }
-        panic!("full-pipeline salvage failed: {e:?}");
-    }
+        .unwrap_or_else(|e| panic!("full-pipeline salvage failed: {e:?}"));
 
     let rd = &acct(client, &env.salvage_receipt).await.data;
     let lp_amt = read_u64(rd, R_LP);

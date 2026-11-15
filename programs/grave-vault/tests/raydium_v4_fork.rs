@@ -680,21 +680,26 @@ async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
         eprintln!("DEBUG target owner==v4: {}", t.owner == h.amm_program);
     }
 
-    // -------- the real salvage (with logs on failure)
-    let bh = client.get_latest_blockhash().await.unwrap();
-    let tx = Transaction::new_signed_with_payer(
+    // -------- the real salvage
+    // Submit through the server's SERIALIZED processing loop (send →
+    // process_transaction), not through the direct synchronous metadata
+    // path: a metadata-path transaction locks accounts on the working bank
+    // immediately and can collide with the not-yet-released locks of the
+    // just-committed previous transaction — whose status the poll-based
+    // path can observe a hair before its locks drop (AccountInUse; fork-
+    // harness CI job 132656651349). The loop releases every transaction's
+    // locks before it picks up the next one, so the collision cannot
+    // happen here. A failed salvage is still fully diagnosable: solana-
+    // program-test installs a default logger (message_processor=debug)
+    // that prints all program logs to stderr, and the panic carries the
+    // error payload.
+    send(
+        &mut client,
+        &h.salvor,
         &[salvage_ix(&h, &default_salvage_opts(&h, h.lp_burn_plan))],
-        Some(&h.salvor.pubkey()),
-        &[&h.salvor],
-        bh,
-    );
-    let res = client.process_transaction_with_metadata(tx).await.unwrap();
-    if let Err(e) = res.result {
-        for l in res.metadata.map(|m| m.log_messages).unwrap_or_default() {
-            eprintln!("LOG: {l}");
-        }
-        panic!("salvage_pool against real Raydium V4 bytecode failed: {e:?}");
-    }
+    )
+    .await
+    .unwrap_or_else(|e| panic!("salvage_pool against real Raydium V4 bytecode failed: {e:?}"));
 
     // -------- LP burn is real and exact
     let supply_after = mint_supply(&acct(&mut client, &h.lp_mint).await);

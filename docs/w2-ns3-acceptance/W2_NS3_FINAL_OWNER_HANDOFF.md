@@ -1,5 +1,21 @@
 # W2 — NS-3 Final Owner Handoff (Independent Challenge and Deployment Decision)
 
+> **Reconciliation note (added 2026-11-15, documentation-only).** This
+> handoff is preserved verbatim as a dated historical record: it
+> describes the pre-deployment state as of its 2026-11-12 review window
+> ("all six NS-3 addresses … still absent", verifiers FAIL). The owner
+> subsequently executed the deployment, initialization, governance
+> drills, and GraveScanner oracle registration on 2026-11-12, and the
+> recorded W2 post-deployment acceptance PASSED (29/29 deployment
+> checks, 27/27 deployed-ELF digest checks — combined 56/56, 0 failed,
+> 0 unverified):
+> [`W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md)
+> (see also the NS-3 record at the top of [`../DEVNET.md`](../DEVNET.md)).
+> The deployment-state statements below were accurate for their recorded
+> window and are superseded for current status by that acceptance
+> record. Devnet scope only: no Mainnet-readiness, security-audit, or
+> full-lifecycle claim follows.
+
 **Prepared for:** the GraveYield owner (sole reviewer; sole custody holder)
 **Author role:** independent senior security reviewer / deployment-readiness assessor (second pair of eyes on the preflight)
 **Input treated as untrusted draft:** `docs/w2-ns3-acceptance/W2_NS3_PREFLIGHT_COMPLETION_REPORT.md` @ `12c9c82` and its addendum `W2_NS3_PREFLIGHT_CORRECTIONS.md` @ `5b4b81d` (both on PR #102).

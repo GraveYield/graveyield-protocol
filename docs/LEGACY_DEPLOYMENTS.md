@@ -1,14 +1,24 @@
 # Legacy Devnet Deployments — Historical Record
 
-> The program IDs in this document are **legacy**. NS-2 is **confirmed
-> deployed and executable on devnet** (read-only verification
-> 2026-11-03, §3), but it is **superseded**: its authority key was lost
-> (§4), and it is not the active deployment target. The NS-1 deployment
-> is retained in this document as a **historical deployment record**;
-> its current on-chain status has not been established here. References
-> to the legacy deployments remain valid for historical documentation
-> and on-chain verification; NS-3 is the next supported deployment
-> (§1, §6). Decision record: **DR-002** in
+> The NS-1/NS-2 program IDs in this document are **legacy**. NS-2 is
+> **confirmed deployed and executable on devnet** (read-only
+> verification 2026-11-03, §3), but it is **superseded**: its authority
+> key was lost (§4), and it is not the active deployment target. The
+> NS-1 deployment is retained in this document as a **historical
+> deployment record**; its current on-chain status has not been
+> established here. References to the legacy deployments remain valid
+> for historical documentation and on-chain verification.
+>
+> Scope of this file: the detailed historical deployment records kept
+> here remain those of **NS-1 and NS-2 only**. NS-3 is the **active
+> deployment** — the owner executed it on 2026-11-12 and the recorded
+> W2 post-deployment acceptance passed — and it has **no detailed
+> deployment record in this file**: it appears here as the
+> current-generation row of the §1 lineage table and in the
+> reconciliation notes, while the canonical NS-3 deployment and
+> acceptance documentation is `docs/DEVNET.md` and
+> [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md).
+> Decision record: **DR-002** in
 > [`docs/DECISIONS.md`](DECISIONS.md).
 
 ## 1. Deployment lineage at a glance
@@ -17,7 +27,7 @@
 |---|---|---|---|---|---|
 | NS-1 | 2026-10-09 | `5JiCVxES6RYcrFGnFkqKyDmr7fc3EkYaSCbfgJq7zvNF` | `HUyoG5vUmYZJDjdBCxRLLAfm98vEXh63WL3pLARox3v6` | single key (`GCCuhCXd…68yk`) | Legacy — retained as a historical deployment record (DR-001 2026-10-25: authority key dead); current on-chain status not established in this document |
 | **NS-2 (DR-001 refresh)** | **2026-10-25** | **`CuQZesHk8eHvaoNTFiTr1hUjfVKGCqDZHTTe8HkJAo54`** | **`Bd5smhQgMrvcRw9j659MNTKySpBJsKZLBKtinCAGs7rg`** | **`AsB5uPtT7S6FB9G7nGp58nWA8iPFaH3bDuj49ss1EWXa`** | **Legacy — confirmed deployed and executable (§3); authority key permanently lost (DR-002); authority not revoked on-chain** |
-| NS-3 | — (deployment pending) | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` (assigned) | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` (assigned) | owner deployer key `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` (initial upgrade authority, owner-held) | Preparation — identities assigned (DR-002); repository sync complete; NOT deployed or initialized yet. Becomes the active deployment once recorded in `docs/DEVNET.md` |
+| **NS-3 (DR-002 refresh) — active** | 2026-11-12 (deploy txs recorded in `docs/w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`) | `EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL` | `7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya` | owner deployer key `cfJKAzSpYhoKheLWzx7miTHp6HCt46E3oeU3CBo4831` (initial upgrade authority, owner-held) | **Active** — deployed, initialized, drilled, GraveScanner oracles registered; W2 post-deployment acceptance PASS (29/29 + 27/27). Recorded in `docs/DEVNET.md`; this file keeps only the NS-1/NS-2 historical records |
 
 ## 2. NS-2 deployment record (legacy)
 
@@ -136,13 +146,16 @@ verification. They appear in:
 - `docs/LEGACY_DEPLOYMENTS.md` (this file — the sole home of the NS-1/NS-2
   execution records),
 - `docs/DECISIONS.md` (decision records),
-- the supersession banner of `docs/DEVNET.md` (which points here; the
+- the history note of `docs/DEVNET.md` (which points here; the
   NS-3-only runbook body preserves no NS-2 narrative),
 - historical evidence artifacts (forensic reports, worklog entries,
   assessment records, bundles/patches of frozen commits),
-- the inert ID constants in the tree pending the NS-3 ID sync (§8).
+- legacy-record mentions and negative-check fixtures in the tree
+  (catalogue: `docs/DECISIONS.md` DR-001 consequence 4) — the NS-3 ID
+  sync has landed, so no active identity surface names the legacy IDs
+  (`scripts/devnet/test/ns3_sync.test.mjs` asserts the sync).
 
-Once NS-3 is recorded in `docs/DEVNET.md`, active code paths and active
+With NS-3 recorded in `docs/DEVNET.md`, active code paths and active
 documentation point at the NS-3 IDs (the same acceptance rule NS-2
 applied to NS-1's IDs, DR-001 consequence 4).
 
@@ -151,14 +164,15 @@ exposed in agent output.
 
 ## 8. How to tell legacy from active
 
-- **Active deployment** = the one recorded at the top of
-  `docs/DEVNET.md` with a deployment date after 2026-11-03, using
-  program IDs different from every ID in this file. Until the NS-3
-  entry exists, build and test against localnet
-  (`scripts/devnet/local_rehearsal.sh` / `solana-test-validator`).
-- Any constant in the tree still naming `CuQZes…` / `Bd5smh…` refers to
-  the LEGACY deployment. Those constants are inert placeholders pending
-  the NS-3 ID sync (catalogue: `docs/DECISIONS.md` DR-001 consequence 4
+- **Active deployment** = the NS-3 deployment recorded at the top of
+  `docs/DEVNET.md` (deployed and acceptance-recorded after 2026-11-03,
+  using program IDs different from every ID in this file). Legacy
+  generations are never build or test targets; local rehearsal stays on
+  `scripts/devnet/local_rehearsal_ns3.sh` / `solana-test-validator`.
+- Any constant in the tree naming `CuQZes…` / `Bd5smh…` refers to the
+  LEGACY deployment. After the completed NS-3 ID sync these appear only
+  as legacy-record mentions and negative-check fixtures, never as active
+  identity constants (catalogue: `docs/DECISIONS.md` DR-001 consequence 4
   — `declare_id!` ×2, `Anchor.toml` `[programs.*]`,
   `deploy_devnet.sh` expected IDs, `protocol_admin.mjs`, SDK constants,
   `indexer/src/config.ts`, `ops/src/config.ts`, console `data.ts`, and
