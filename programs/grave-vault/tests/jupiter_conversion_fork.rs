@@ -732,7 +732,24 @@ async fn send(
 ) -> Result<(), BanksClientError> {
     let blockhash = client.get_latest_blockhash().await.unwrap();
     let tx = Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &[payer], blockhash);
-    client.process_transaction(tx).await
+    // Flake fix (fork-harness CI job 132656651349, AccountInUse on the
+    // full-pipeline salvage): do not submit through `process_transaction`.
+    // It completes as soon as the server's status poll observes the
+    // signature status, and the runtime makes that status visible inside
+    // commit_transactions — a hair BEFORE the TransactionBatch drops the
+    // account locks. A transaction submitted afterwards through the direct
+    // synchronous path (`process_transaction_with_metadata`, used by the
+    // full-pipeline salvage in this suite) locks accounts on the working
+    // bank immediately instead of queuing on the server's serialized
+    // processing loop, so it can collide with the lingering locks and fail
+    // with AccountInUse. Routing every transaction through the synchronous
+    // metadata path closes that window: locks are released before the
+    // response is sent, and this client is strictly sequential. The error
+    // payload is unchanged — the TransactionError is wrapped in the same
+    // BanksClientError::TransactionError variant `process_transaction`
+    // produces.
+    let res = client.process_transaction_with_metadata(tx).await?;
+    res.result.map_err(BanksClientError::from)
 }
 
 fn expect_custom(err: BanksClientError, want: u32, ctx: &str) {
