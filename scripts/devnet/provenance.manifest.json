@@ -10,16 +10,32 @@
     "If a legitimate source/dependency/toolchain change shifts the ELF bytes, the",
     "deployment gate STAYS CLOSED until the new build has been independently",
     "reviewed and the new digests deliberately re-pinned here in a reviewed PR.",
-    "Never update a digest merely to make a build green."
+    "Never update a digest merely to make a build green.",
+    "2026-11-16 re-pin (PR #111, deliberate + reviewed, per docs/DEVNET.md §1):",
+    "the Phase 0 reconciliation pass in the same PR edits comments/docs only — no",
+    "codegen change — but comment lines move source line numbers and the SBF",
+    "ELFs embed line/panic-location metadata, so the rebuilt bytes differ from",
+    "the 2026-11-12 deployment build. Two independent pinned-toolchain rebuilds",
+    "agree byte-for-byte — CI run 43907738016 and a local deploy_devnet.sh",
+    "--build-only run, both on the hash-verified platform-tools v1.54 archive —",
+    "and both pass the SBPF v0 architecture gate and the structural NS-3",
+    "identity gate; only the digest pins moved (scanner",
+    "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98 ->",
+    "ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b; vault",
+    "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83 ->",
+    "6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c).",
+    "The bytes actually deployed on-chain on 2026-11-12 remain the pre-re-pin",
+    "build until the owner deliberately redeploys; no deployment was executed",
+    "as part of this re-pin."
   ],
   "programs": {
     "grave_scanner": {
       "artifact": "target/deploy/grave_scanner.so",
-      "sha256": "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98"
+      "sha256": "ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b"
     },
     "grave_vault": {
       "artifact": "target/deploy/grave_vault.so",
-      "sha256": "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83"
+      "sha256": "6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c"
     }
   },
   "toolchain": {

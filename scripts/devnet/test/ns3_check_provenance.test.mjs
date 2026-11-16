@@ -55,11 +55,11 @@ describe("provenance manifest validation (fail-closed)", () => {
     assert.equal(m.toolchain.platform_tools.version, "1.54");
     assert.equal(
       m.programs.grave_scanner.sha256,
-      "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+      "ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b",
     );
     assert.equal(
       m.programs.grave_vault.sha256,
-      "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83",
+      "6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c",
     );
     assert.equal(
       m.toolchain.platform_tools.sha256,
