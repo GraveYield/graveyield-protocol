@@ -174,20 +174,62 @@ script and CI (PR #82 provenance, values recorded verbatim):
 > **Deferred Rust-source comment corrections (PR #111 revision, owner
 > decision 2026-11-16).** The Phase 0 reconciliation register (P-02, P-03,
 > P-07, P-08, P-09) also corrects comments inside the program Rust
-> sources. Those edits change no executable code, but ANY edit to the
-> Rust sources — comments included — moves source line numbers and with
-> them the SBF ELFs' embedded line/panic-location metadata, shifting the
-> built digests away from the pins above (empirically confirmed: the
-> comment-edited tree failed this exact gate in CI run 43907738016 with
-> digests different from the pins). Per the owner's decision the deployed provenance
-> above stays authoritative: PR #111 therefore intentionally leaves the
-> Rust source-comment corrections out (they remain open in the Phase 0
-> register) and restricts itself to doc/config changes that cannot
-> affect the built bytes. Those corrections can only land in a reviewed
-> PR that deliberately re-pins the digests per the procedure below,
-> followed by an owner-executed redeployment. Until then, do not edit
-> the program Rust sources while expecting the fail-closed gate to stay
-> green.
+> sources. Those edits change no executable code — the revision's
+> Rust-source delta is comment-only, verified hunk by hunk — yet the tree
+> built from it produced digests that differed from the pins above,
+> reproducibly across three independent builds of the same tree (CI run
+> 43907738016 plus two local `--build-only` rebuilds on the pinned
+> toolchain, agreeing byte-for-byte). The digests that tree produced —
+> `ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b`
+> (scanner) / `6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c`
+> (vault) — were never deployed and were never approved; the interim
+> re-pin that recorded them was withdrawn, and the manifest still pins the
+> deployed digests in the table above.
+>
+> What is verified vs. inferred here. VERIFIED: (a) the Rust-source delta
+> of that revision was comment-only; (b) the tree built from it produced
+> those two different digests reproducibly on the pinned toolchain; (c)
+> reverting the comment edits restored digests byte-identical to the
+> deployed pins (the fail-closed gate passes on this tree); (d) the
+> deployed ELFs demonstrably embed compiler-generated source-location
+> metadata — the source-path strings are visible in the artifacts, and
+> panic/error `Location` records carry file, line and column for the
+> `error!`/panic paths. IDENTIFIED MECHANISM (evidence-supported, not
+> byte-level-proven): the comment blocks in that revision added and
+> removed lines, shifting the numbers of the location-bearing lines that
+> followed them, perturbing the embedded location metadata and with it
+> the built bytes. No archived copy of the comment-edited ELFs was
+> retained, so the byte-level diff behind the digest shift could not be
+> inspected directly. This observation is NOT a general law: a comment or
+> source edit that shifts no location-bearing line may leave the ELF
+> unchanged, and other edit kinds change the bytes for other reasons.
+> The only reliable arbiter is a rebuild run through the fail-closed gate
+> below — the edit type never is.
+>
+> Four distinct things must not be conflated:
+>
+> 1. **The deployed ELF artifacts** — the bytes live on Devnet since the
+>    2026-11-12 NS-3 deployment (56/56 W2 acceptance; independently
+>    re-verified 2026-11-15). They are historical fact, already on chain,
+>    and not revisable by any build.
+> 2. **The approved SHA-256 provenance pins** — the manifest values in
+>    the table above, the authority the fail-closed gate enforces. These
+>    stay authoritative per the owner's decision.
+> 3. **Locally rebuilt ELF artifacts** — the output of any local or CI
+>    build. A rebuild from THIS tree matches the pins (the gate passes);
+>    the rebuild from the comment-edited tree did not.
+> 4. **The documented process for legitimate future ELF changes** — the
+>    digest re-pin procedure below: a deliberate, reviewed re-pin
+>    followed by an owner-executed redeployment. A change that genuinely
+>    alters deployed program bytes can only land through that transition;
+>    a digest is never updated merely to make a red build green.
+>
+> PR #111 therefore intentionally leaves the Rust source-comment
+> corrections out (they remain open in the Phase 0 register) and
+> restricts itself to doc/config changes that cannot affect the built
+> bytes. Those corrections can only land through item 4. Until then,
+> treat any edit to the program Rust sources as capable of changing the
+> built bytes until a rebuild against the pins proves otherwise.
 
 `scripts/devnet/ns3_check_provenance.mjs` enforces, fail-closed:
 
