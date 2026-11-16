@@ -11,9 +11,10 @@ resolution = true
 skip-lint = false
 
 # Program IDs. NS-3 devnet deployment (DR-002): owner-generated, owner-held
-# program keypairs held outside git in the owner's custody. Deployment and
-# on-chain acceptance are PENDING — until the owner executes the NS-3
-# deployment recorded in docs/DEVNET.md, build and test against localnet.
+# program keypairs held outside git in the owner's custody. The NS-3
+# deployment was executed and accepted on 2026-11-12 (56/56 W2 acceptance;
+# see docs/DEVNET.md and docs/w2-ns3-acceptance/, re-verified independently
+# on 2026-11-15). Build and test against localnet or the fork harness.
 # The NS-2 deployment (CuQZes…Ao54 / Bd5smh…s7rg) and the NS-1 frozen static
 # reference (5JiCV…zvNF / HUyoG5…ox3v6) are preserved in
 # docs/LEGACY_DEPLOYMENTS.md. Mainnet ships with fresh keypairs under
@@ -34,7 +35,18 @@ cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'"
+# NOTE (Phase 0 reconciliation, P-04): the `tests/` directory currently holds
+# only README.md — the ts-mocha harness referenced below never landed, so this
+# script target would find no tests. The real suites are the Rust host tests
+# (`cargo test -p grave-scanner --lib`, `cargo test -p grave-vault --lib`,
+# `cargo test -p grave-snapshotter`), the Raydium V4 fork harness
+# (`bash scripts/build_fork_harness.sh`), and the workspace `node:test`
+# batteries (`pnpm -r test` over sdk/, indexer/, ops/, adversary/, and the
+# scripts/devnet devnet-tools). With no [scripts] test entry, `anchor test`
+# (1.2.2) only builds the programs and exits — it runs no suite. The command
+# is commented out rather than replaced with an unverified substitute. A
+# verified harness command can re-enable this line.
+# test = "pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'"
 
 [test.validator]
 url = "https://api.mainnet-beta.solana.com"

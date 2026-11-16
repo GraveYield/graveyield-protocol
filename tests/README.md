@@ -384,8 +384,30 @@ pnpm -r test
 bash scripts/build_fork_harness.sh
 ```
 
-`anchor test` runs 0 tests today: `Anchor.toml`'s test script matches zero
-files while this directory awaits the m1 ts-mocha harness (register item
-D5). Do not read a successful `anchor test` exit as coverage. Once
-`tests/package.json` exists this directory will join the pnpm workspace
-(see `pnpm-workspace.yaml`).
+Four distinct test surfaces exist today — they are not interchangeable:
+
+1. **Rust host unit tests** — the `cargo test` suites above (scanner /
+   vault / snapshotter `#[cfg(test)]` modules and property tests): no
+   network, no fixtures, run in CI's `cargo test (host)` job. Counted in
+   the "Host unit tests today" section above.
+2. **TypeScript workspace suites** — `sdk/test/` (108 tests),
+   `indexer/test/` (29 tests) and the ops / adversary / `scripts/devnet`
+   devnet-tools batteries, all via `pnpm -r test` (`node:test` + `tsx`;
+   the SDK `devnetSmoke` suite skips unless `DEVNET_RPC_URL` is set — see
+   the Phase 8–9 addendum above).
+3. **Solana program fork harnesses** — the seven `--test` suites in
+   `programs/grave-vault/tests/` executed against real mainnet bytecode
+   (the harness sections above; 47 tests). They SKIP without fixtures so
+   CI stays green and run fully via `bash scripts/build_fork_harness.sh`.
+4. **The Anchor test harness** — **not configured**. The pinned anchor
+   CLI (1.2.2) has no `[scripts] test` entry to run: the ts-mocha harness
+   this directory awaits never landed (register item D5), and the entry
+   is commented out in `Anchor.toml` rather than replaced with an
+   unverified substitute. With no active `[scripts] test` entry and no
+   `[[test]]` / `Test.toml` suites, `anchor test` builds the programs and
+   exits successfully — it starts no validator and runs no suite
+   (behavior verified against the anchor 1.2.2 CLI: with no script and no
+   `Test.toml`, the test runner is never invoked; a passing exit only
+   proves the build). Do not read a successful `anchor test` exit as
+   coverage. Once `tests/package.json` exists this directory will join
+   the pnpm workspace (see `pnpm-workspace.yaml`).
