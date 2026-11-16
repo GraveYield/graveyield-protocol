@@ -45,8 +45,17 @@ anchor build                       # build Anchor programs
 pnpm -r typecheck                  # TypeScript typecheck
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-anchor test                        # localnet integration tests
+cargo test -p grave-scanner --lib   # GraveScanner host tests
+cargo test -p grave-vault --lib     # GraveVault host tests
+cargo test -p grave-snapshotter     # snapshotter tests
+pnpm -r test                        # TS workspace tests (node:test)
+bash scripts/build_fork_harness.sh  # fork harness (fetches mainnet fixtures)
 ```
+
+Note: `anchor test` is not a test runner in this repo yet — with the
+current `Anchor.toml` (no `[scripts] test` entry) it only builds the
+programs and runs no suite. See `tests/README.md` for the planned m1+
+integration harness.
 
 Required toolchain (pinned in `rust-toolchain.toml`, `Anchor.toml`, `package.json`):
 

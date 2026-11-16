@@ -102,13 +102,10 @@ const W2_RECORDED_PD = {
   scanner: "FxYDhTruh16EoKBgiJaWZCQ9QojWQZGS8J1dXyfSt9dG",
   vault: "9wyRhAC8Sasb46bhWW4jxsK6rGKpEGXf6Riz2ibKZgC4",
 };
-// The approved digests (docs/DEVNET.md §1 provenance; the handoff pins).
-// Re-pinned 2026-11-16 (PR #111) after the behavior-identical comment/doc
-// source pass shifted the ELF bytes via embedded line metadata — see the
-// DEVNET.md §1 re-pin record.
+// The approved digests (docs/DEVNET.md § provenance; the handoff pins).
 const APPROVED_DIGESTS = {
-  grave_scanner: "ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b",
-  grave_vault: "6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c",
+  grave_scanner: "e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98",
+  grave_vault: "8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83",
 };
 
 // ------------------------------------------------------------ fixtures

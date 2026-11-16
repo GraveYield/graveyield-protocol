@@ -167,31 +167,27 @@ script and CI (PR #82 provenance, values recorded verbatim):
 
 | Artifact | SHA-256 |
 |---|---|
-| `target/deploy/grave_scanner.so` | `ae777eb3b3753109773cdc4fe1891c2865c627fe384b2ec7d01bc81f8787004b` |
-| `target/deploy/grave_vault.so` | `6fd86675f7976840ed4be4d57ea1bf446dec21bcd17bfad79e8af57f2076199c` |
+| `target/deploy/grave_scanner.so` | `e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98` |
+| `target/deploy/grave_vault.so` | `8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83` |
 | platform-tools v1.54 tarball (linux-x86_64) | `fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e` |
 
-**Re-pin record (2026-11-16, PR #111 — deliberate, reviewed, per the
-re-pin procedure below).** The Phase 0 reconciliation comment/doc pass
-in that PR edits no executable code, but comment lines move source line
-numbers and the SBF ELFs embed line/panic-location metadata, so
-behavior-identical comment edits still change the built bytes. Two
-independent rebuilds on the pinned toolchain produced byte-identical
-ELFs — CI `anchor build` run 43907738016 and a local
-`deploy_devnet.sh --build-only` run, both on the hash-verified
-platform-tools v1.54 archive — with the SBPF v0 architecture and the
-structural NS-3 identity verdicts unchanged, and the table above records
-those digests. The bytes actually deployed on-chain on 2026-11-12 remain
-the pre-re-pin build — scanner
-`e24ddc5ea3fbfe13f5732166a6a3c68d91fdc6de98b4046e05d35f4483cd6c98`,
-vault `8c71fe9d8d02c0adc8006f3616b984fc57b4a6c01f37f371b850bfd2ec033e83`
-(W2 acceptance and the 2026-11-15 independent verification stand as
-historical records, unchanged) — until the owner deliberately redeploys.
-Until that redeployment `verify_ns3_elf_digests.mjs` legitimately
-reports `digest_match: false` against the re-pinned manifest ("right
-shape, wrong bytes" — the designed, non-contradictory outcome). No
-deployment, transaction, or authority change was executed as part of
-this re-pin.
+> **Deferred Rust-source comment corrections (PR #111 revision, owner
+> decision 2026-11-16).** The Phase 0 reconciliation register (P-02, P-03,
+> P-07, P-08, P-09) also corrects comments inside the program Rust
+> sources. Those edits change no executable code, but ANY edit to the
+> Rust sources — comments included — moves source line numbers and with
+> them the SBF ELFs' embedded line/panic-location metadata, shifting the
+> built digests away from the pins above (empirically confirmed: the
+> comment-edited tree failed this exact gate in CI run 43907738016 with
+> digests different from the pins). Per the owner's decision the deployed provenance
+> above stays authoritative: PR #111 therefore intentionally leaves the
+> Rust source-comment corrections out (they remain open in the Phase 0
+> register) and restricts itself to doc/config changes that cannot
+> affect the built bytes. Those corrections can only land in a reviewed
+> PR that deliberately re-pins the digests per the procedure below,
+> followed by an owner-executed redeployment. Until then, do not edit
+> the program Rust sources while expecting the fail-closed gate to stay
+> green.
 
 `scripts/devnet/ns3_check_provenance.mjs` enforces, fail-closed:
 

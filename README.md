@@ -65,9 +65,25 @@ pnpm -r typecheck
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 
-# Run Anchor tests (devnet localnet)
-anchor test
+# Run the Rust host test suites (same commands as the CI "cargo test (host)" job)
+cargo test -p grave-scanner --lib
+cargo test -p grave-vault --lib
+cargo test -p grave-snapshotter
+
+# Run the workspace TypeScript tests (sdk, indexer, ops, adversary, devnet-tools)
+pnpm -r test
+
+# Run the Raydium V4 fork harness — 7 suites against real mainnet fixtures
+# (fetches multi-MB fixture data; needs a mainnet RPC endpoint)
+bash scripts/build_fork_harness.sh
 ```
+
+> **Note on `anchor test`:** with the current `Anchor.toml` there is no
+> `[scripts] test` entry (the ts-mocha harness in `tests/` has not landed —
+> see the note in `Anchor.toml`), so `anchor test` only builds the programs
+> and exits: it runs **no** test suite. The suites above are the real test
+> surfaces; the `[[test]]`-style integration harness will replace this note
+> when it lands (m1+, see `tests/README.md`).
 
 ## Canonical specifications
 

@@ -37,11 +37,15 @@ wallet = "~/.config/solana/id.json"
 [scripts]
 # NOTE (Phase 0 reconciliation, P-04): the `tests/` directory currently holds
 # only README.md — the ts-mocha harness referenced below never landed, so this
-# script target would find no tests. The real suites are the Rust fork tests
-# and the workspace `node:test` batteries (`pnpm -r test` over sdk/ and
-# indexer/). The command is commented out rather than replaced with an
-# unverified substitute; `anchor test` users should run the Rust fork suites
-# directly. A verified harness command can re-enable this line.
+# script target would find no tests. The real suites are the Rust host tests
+# (`cargo test -p grave-scanner --lib`, `cargo test -p grave-vault --lib`,
+# `cargo test -p grave-snapshotter`), the Raydium V4 fork harness
+# (`bash scripts/build_fork_harness.sh`), and the workspace `node:test`
+# batteries (`pnpm -r test` over sdk/, indexer/, ops/, adversary/, and the
+# scripts/devnet devnet-tools). With no [scripts] test entry, `anchor test`
+# (1.2.2) only builds the programs and exits — it runs no suite. The command
+# is commented out rather than replaced with an unverified substitute. A
+# verified harness command can re-enable this line.
 # test = "pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'"
 
 [test.validator]

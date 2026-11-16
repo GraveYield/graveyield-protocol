@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// update_protocol_config — governance-authority-gated. Multisig (Squads v4
-// 3-of-5) + 72h timelock are the committed Mainnet Charter posture; they are
-// not enforced by the current programs. Updates GraveScanner thresholds and
-// the staleness window.
+// update_protocol_config — multisig-only, 72h-timelocked at the GraveVault
+// Charter level. Updates GraveScanner thresholds and the staleness window.
 
 use anchor_lang::prelude::*;
 
