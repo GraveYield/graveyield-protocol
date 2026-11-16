@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// initialize — multisig-only at launch. Creates the singleton
+// initialize — governance-authority-gated. Creates the singleton
 // `ProtocolConfig` PDA. Called once per program deployment; a second
 // call reverts at the `init` constraint (PDA already exists).
 //
 // Zero-means-default convention: every numeric param field uses `0` as
 // the "accept the constant from `constants.rs`" sentinel. This lets the
-// multisig initialize with all-zeros to take the canonical 40/40/20
-// split and the documented operational defaults, or override individual
-// fields without re-stating the rest.
+// governance authority initialize with all-zeros to take the canonical
+// 40/40/20 split and the documented operational defaults, or override
+// individual fields without re-stating the rest.
 //
 // Charter invariants validated at write time (and re-validated by
 // `update_protocol_config` on every subsequent change):

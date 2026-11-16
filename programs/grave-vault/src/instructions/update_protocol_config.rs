@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// update_protocol_config — multisig-only, 72h-timelocked. Enforces:
+// update_protocol_config — governance-authority-gated. Enforces:
 //
 //   * `protocol_share_bps` cannot be raised above PROTOCOL_SHARE_BPS_CEILING.
 //   * Splits (LP / salvor / protocol) must sum to exactly 10_000.
 //
-// The timelock itself is enforced by the multisig (Squads v4) via its
-// transaction-buffer scheduling; this instruction trusts that scheduling and
+// Multisig (Squads v4) + 72h timelock are the committed Mainnet posture;
+// the timelock itself is expected to be enforced by the multisig's
+// transaction-buffer scheduling — not by this program. This instruction
 // validates the new values on apply.
 //
 // PRE-MAINNET-TODO(GOV): pending_authority, pending_authority_eta, and

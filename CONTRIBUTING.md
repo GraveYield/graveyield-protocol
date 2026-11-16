@@ -51,7 +51,7 @@ anchor test                        # localnet integration tests
 Required toolchain (pinned in `rust-toolchain.toml`, `Anchor.toml`, `package.json`):
 
 - Solana CLI **3.0.10**
-- Anchor **0.32.1**
+- Anchor **1.2.2**
 - Rust **1.91.1** stable
 - Node **24 LTS**
 - pnpm **9**

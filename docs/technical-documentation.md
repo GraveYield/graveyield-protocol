@@ -60,7 +60,7 @@ marks unresolved.
 
 ### 1.1 Implemented v1 scope
 
-- Chain: Solana. Program framework: Anchor 0.32.1.
+- Chain: Solana. Program framework: Anchor 1.2.2.
 - AMM withdrawal adapter: Raydium AMM V4 only. A pool must be parsed as the
   expected Raydium V4 AmmInfo account and meet the protocol's on-chain checks.
 - Salvage conversion: WSOL-side recovery and an opaque Jupiter v6 route
@@ -393,7 +393,7 @@ independent audit, or mainnet readiness.
 | Tool | Repository pin / requirement |
 |------|-------------------------------|
 | Solana CLI | 3.0.10 |
-| Anchor CLI / framework | 0.32.1 |
+| Anchor CLI / framework | 1.2.2 |
 | Rust host toolchain | 1.91.1 stable (rustfmt and clippy components) |
 | Node.js | 24 or later |
 | pnpm | 9.x; root package manager field pins pnpm 9.12.0 |

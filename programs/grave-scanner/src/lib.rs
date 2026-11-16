@@ -13,14 +13,14 @@
 //   - docs/architecture/eligibility-anchors.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
+// The pinned Anchor line's `#[program]` macro expansion calls the deprecated
 // `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
 // 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
 // crate level so `cargo clippy -D warnings` stays green. The deprecation
 // does not affect runtime behaviour — `realloc` is still available, just
 // discouraged.
 #![allow(deprecated)]
-// Anchor 0.32.x's `#[program]` macro and Solana's
+// The pinned Anchor line's `#[program]` macro and Solana's
 // `solana_program_entrypoint::custom_panic_default!` macro emit
 // `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
 // `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
@@ -42,12 +42,12 @@ pub mod state;
 use instructions::*;
 
 // NS-3 devnet program ID (owner-generated, owner-held keypair; mirrored in
-// Anchor.toml). Assigned per DR-002 for the NS-3 redeployment — deployment
-// and on-chain acceptance are PENDING (docs/DEVNET.md carries the NS-3
-// preparation record until the owner executes the deployment). The NS-2
-// deployment (CuQZes…Ao54) and the NS-1 frozen static reference (5JiCV…zvNF)
-// are preserved in docs/LEGACY_DEPLOYMENTS.md — never reuse their keypairs
-// for mainnet (KEYS-003).
+// Anchor.toml). Assigned per DR-002; deployed and accepted on-chain on
+// 2026-11-12 (56/56 W2 acceptance — docs/DEVNET.md and
+// docs/w2-ns3-acceptance/ carry the record, re-verified independently on
+// 2026-11-15). The NS-2 deployment (CuQZes…Ao54) and the NS-1 frozen static
+// reference (5JiCV…zvNF) are preserved in docs/LEGACY_DEPLOYMENTS.md — never
+// reuse their keypairs for mainnet (KEYS-003).
 declare_id!("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL");
 
 #[program]
@@ -55,7 +55,11 @@ pub mod grave_scanner {
     use super::*;
 
     /// Initialise the GraveScanner protocol config PDA.
-    /// Multisig-only at launch (Squads v4 3-of-5).
+    ///
+    /// Governance-authority-gated: config changes are restricted to the
+    /// protocol governance authority. Multisig (Squads v4 3-of-5) + 72h
+    /// timelock are the committed Mainnet posture — not enforced by the
+    /// current programs (charter-invariant process commitments).
     pub fn initialize(ctx: Context<Initialize>, params: InitializeParams) -> Result<()> {
         instructions::initialize::handler(ctx, params)
     }

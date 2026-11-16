@@ -7,12 +7,16 @@
 // quote-side swap, and distribute proceeds 40 / 40 / 20 to original LPs,
 // salvor, and protocol respectively.
 //
-// Charter invariants enforced at the program level:
+// Charter invariants enforced at the program level (bytecode):
 //
 //   * 20% protocol share is a CEILING, not a target. Cannot be raised.
 //   * `lp_holder_pool_vault` is unsweepable by any admin key, ever.
-//   * 72h timelock on all parameter changes.
 //   * Emergency pause is immediate but `claim_lp_proceeds` stays live.
+//   * One settlement per pool (settlement state is one-way).
+//
+// Charter process commitments (NOT program-enforced — process/owner-gated):
+//
+//   * 72h timelock on all parameter changes.
 //   * Standard upgrades = 7-day notice + 72h timelock.
 //   * Emergency upgrades = 24h timelock + 5-day post-mortem.
 //   * No token, NFT, points, airdrop, or staking at any layer.
@@ -23,14 +27,14 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
+// The pinned Anchor line's `#[program]` macro expansion calls the deprecated
 // `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
 // 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
 // crate level so `cargo clippy -D warnings` stays green. The deprecation
 // does not affect runtime behaviour — `realloc` is still available, just
 // discouraged.
 #![allow(deprecated)]
-// Anchor 0.32.x's `#[program]` macro and Solana's
+// The pinned Anchor line's `#[program]` macro and Solana's
 // `solana_program_entrypoint::custom_panic_default!` macro emit
 // `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
 // `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
@@ -51,28 +55,35 @@ pub mod state;
 use instructions::*;
 
 // NS-3 devnet program ID (owner-generated, owner-held keypair; mirrored in
-// Anchor.toml). Assigned per DR-002 for the NS-3 redeployment — deployment
-// and on-chain acceptance are PENDING (docs/DEVNET.md carries the NS-3
-// preparation record until the owner executes the deployment). The vault
-// crate compiles the GraveScanner NS-3 ID in via its grave_scanner crate
-// dependency (EligibilityCert seeds::program), so scanner and vault ELFs
-// must always be rebuilt together from the same synchronized tree. The NS-2
-// deployment (Bd5smh…s7rg) and the NS-1 frozen static reference (HUyoG5…ox3v6)
-// are preserved in docs/LEGACY_DEPLOYMENTS.md — never reuse their keypairs
-// for mainnet (KEYS-003).
+// Anchor.toml). Assigned per DR-002; deployed and accepted on-chain on
+// 2026-11-12 (56/56 W2 acceptance — docs/DEVNET.md and
+// docs/w2-ns3-acceptance/ carry the record, re-verified independently on
+// 2026-11-15). The vault crate compiles the GraveScanner NS-3 ID in via its
+// grave_scanner crate dependency (EligibilityCert seeds::program), so scanner
+// and vault ELFs must always be rebuilt together from the same synchronized
+// tree. The NS-2 deployment (Bd5smh…s7rg) and the NS-1 frozen static reference
+// (HUyoG5…ox3v6) are preserved in docs/LEGACY_DEPLOYMENTS.md — never reuse
+// their keypairs for mainnet (KEYS-003).
 declare_id!("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya");
 
 #[program]
 pub mod grave_vault {
     use super::*;
 
-    /// Initialise the GraveVault protocol config PDA. Multisig-only at launch.
+    /// Initialise the GraveVault protocol config PDA.
+    ///
+    /// Governance-authority-gated: config changes are restricted to the
+    /// protocol governance authority. Multisig (Squads v4 3-of-5) + 72h
+    /// timelock are the committed Mainnet posture — not enforced by the
+    /// current programs (charter-invariant process commitments).
     pub fn initialize(ctx: Context<Initialize>, params: InitializeParams) -> Result<()> {
         instructions::initialize::handler(ctx, params)
     }
 
-    /// Update GraveVault protocol config. Multisig + 72h timelock.
-    /// Cannot raise `protocol_share_bps` above the Charter ceiling (2000 bps).
+    /// Update GraveVault protocol config. Governance-authority-gated;
+    /// multisig + 72h timelock are the committed Mainnet posture, not
+    /// enforced by the current programs. Cannot raise `protocol_share_bps`
+    /// above the Charter ceiling (2000 bps).
     pub fn update_protocol_config(
         ctx: Context<UpdateProtocolConfig>,
         params: UpdateProtocolConfigParams,
@@ -80,8 +91,9 @@ pub mod grave_vault {
         instructions::update_protocol_config::handler(ctx, params)
     }
 
-    /// Multisig-only. Pauses new salvages immediately. `claim_lp_proceeds`
-    /// remains live during pause — original LPs always recover their share.
+    /// Governance-authority-gated. Pauses new salvages immediately.
+    /// `claim_lp_proceeds` remains live during pause — original LPs always
+    /// recover their share.
     pub fn emergency_pause(ctx: Context<EmergencyPause>, paused: bool) -> Result<()> {
         instructions::emergency_pause::handler(ctx, paused)
     }
