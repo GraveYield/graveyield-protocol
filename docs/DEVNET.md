@@ -190,21 +190,23 @@ script and CI (PR #82 provenance, values recorded verbatim):
 > of that revision was comment-only; (b) the tree built from it produced
 > those two different digests reproducibly on the pinned toolchain; (c)
 > reverting the comment edits restored digests byte-identical to the
-> deployed pins (the fail-closed gate passes on this tree); (d) the
-> deployed ELFs demonstrably embed compiler-generated source-location
-> metadata — the source-path strings are visible in the artifacts, and
-> panic/error `Location` records carry file, line and column for the
-> `error!`/panic paths. IDENTIFIED MECHANISM (evidence-supported, not
-> byte-level-proven): the comment blocks in that revision added and
-> removed lines, shifting the numbers of the location-bearing lines that
-> followed them, perturbing the embedded location metadata and with it
-> the built bytes. No archived copy of the comment-edited ELFs was
-> retained, so the byte-level diff behind the digest shift could not be
-> inspected directly. This observation is NOT a general law: a comment or
-> source edit that shifts no location-bearing line may leave the ELF
-> unchanged, and other edit kinds change the bytes for other reasons.
-> The only reliable arbiter is a rebuild run through the fail-closed gate
-> below — the edit type never is.
+> deployed pins (the fail-closed gate passes on this tree); (d) the built
+> ELFs embed source-path strings, directly visible in the artifacts
+> inspected for this note. NOT ESTABLISHED: the exact mechanism behind
+> the digest shift — no archived copy of the comment-edited ELFs was
+> retained, so the byte-level difference could not be inspected directly.
+> The most plausible explanation, consistent with the verified evidence,
+> is that the comment blocks in that revision added and removed lines,
+> and the line shifts moved the line numbers carried by the panic/error
+> `Location` metadata those source-path strings belong to (which by
+> Rust's standard format records file, line and column for the
+> `error!`/panic paths), perturbing the embedded metadata and with it the
+> built bytes. That causal chain is a hypothesis, not an established
+> fact. Nor is the observed shift a general law: a comment or source edit
+> that shifts no location-bearing line may leave the ELF unchanged, and
+> other edit kinds change the bytes for other reasons. The only reliable
+> arbiter is a rebuild run through the fail-closed gate below — the edit
+> type never is.
 >
 > Four distinct things must not be conflated:
 >
