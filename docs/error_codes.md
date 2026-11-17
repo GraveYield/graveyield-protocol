@@ -31,7 +31,7 @@ future v4.x additions to the pre-anchor error space.
 
 | Code | Name | Condition |
 |------|------|-----------|
-| 6000 | `Unauthorized` | Caller lacks the multisig authority required. |
+| 6000 | `Unauthorized` | Caller lacks the configured governance authority. |
 | 6001 | `PoolNotEligible` | Pool does not satisfy all six derelict-pool criteria. |
 | 6002 | `LaunchPriceNotFound` | `LaunchPrice` PDA missing for this pool. |
 | 6003 | `UnsupportedAmm` | AMM program mismatch or unsupported pool layout. |
@@ -73,7 +73,7 @@ source per the sync convention.
 
 | Code | Name | Condition |
 |------|------|-----------|
-| 7000 | `Unauthorized` | Caller lacks the multisig authority required for this instruction. |
+| 7000 | `Unauthorized` | Caller lacks the configured governance authority for this instruction. |
 | 7001 | `InvalidEligibilityCert` | `EligibilityCert` PDA missing, expired, or owned by the wrong program. |
 | 7002 | `EligibilityCertExpired` | `EligibilityCert` TTL has passed. Re-run Phase 2 to mint a fresh cert. |
 | 7003 | `ProtocolPaused` | Protocol is paused — only `claim_lp_proceeds` is callable. |

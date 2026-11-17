@@ -4,14 +4,14 @@
 // lifecycle record for the salvage execution path. Two of them
 // (`PoolRegistry`, `SalvageReceipt`) custody value implicitly via the
 // lamports they track; the Charter invariant that
-// `lp_holder_pool_vault` is unsweepable by any admin key is enforced
-// at the instruction layer, not by these account structs themselves.
+// `lp_holder_pool_vault` has no admin debit path (current program) is
+// enforced at the instruction layer, not by these account structs.
 //
 // PDA family at a glance (seeds in `crate::constants`):
 //
 //   ProtocolConfig  ["protocol_config"]
-//     Singleton config. Multisig-controlled, 72h-timelocked (timelock
-//     is governance-enforced via Squads, not program-enforced in v1.0
+//     Singleton config. Authority-gated instructions (timelock is a
+//     Squads process commitment, not program-enforced in v1.0
 //     — see PROTOCOL_SPEC.md D2). Holds the 40/40/20 share split, the
 //     Charter protocol-share ceiling, slippage/priority-fee rails, and
 //     the emergency pause flag.

@@ -14,7 +14,7 @@
 //                              │
 //           ┌──────────────────┼───────────────────┐
 //           v                  v                   v
-//       Phase 2 cert       multisig           staleness window
+//       Phase 2 cert       governance         staleness window
 //       issued (cert       invalidates        elapses — anyone may
 //       carries TTL;       anchor before      sweep & reclaim rent
 //       anchor stays       Phase 2 (Anchor-   (sweep_stale_anchor).
@@ -27,7 +27,7 @@
 // The anchor is a *staging* record: it carries no salvage authority and
 // no TTL. Once written it lives on-chain until either (a) Phase 2
 // promotes it to an EligibilityCert (the anchor itself is untouched —
-// the cert is a separate PDA), (b) multisig invalidates it
+// the cert is a separate PDA), (b) governance invalidates it
 // (`invalidate_anchor`), or (c) the staleness window elapses and any
 // caller sweeps it for rent reclamation (`sweep_stale_anchor`). The
 // `invalidated` flag is one-way: `invalidate_anchor` refuses to
@@ -64,7 +64,7 @@ pub struct EligibilityAnchor {
     /// Unix timestamp when the anchor was written.
     pub written_at: i64,
 
-    /// True if multisig invalidated this anchor before certification.
+    /// True if governance invalidated this anchor before certification.
     /// One-way flag: `invalidate_anchor` refuses to re-invalidate an
     /// already-invalidated anchor (refuses-first, spec D10).
     pub invalidated: bool,
@@ -96,7 +96,7 @@ impl EligibilityAnchor {
         self.criteria_bitmap == ALL_CRITERIA_MASK
     }
 
-    /// True iff multisig has invalidated this anchor. Used by
+    /// True iff governance has invalidated this anchor. Used by
     /// `invalidate_anchor` (refuses-first gate) and by `evaluate_pool_phase2`
     /// (refuses to certify an invalidated anchor with `AnchorInvalidated`,
     /// 6017). Exposed as a predicate so call-site `require!`s read as
@@ -191,7 +191,7 @@ mod tests {
         a.written_at = 1_700_000_000;
         a.criteria_bitmap = ALL_CRITERIA_MASK;
         a.bump = 254;
-        // Simulate a multisig invalidation post-write.
+        // Simulate a governance-authority invalidation post-write.
         a.invalidated = true;
 
         let bytes = borsh::to_vec(&a).expect("borsh serialize");

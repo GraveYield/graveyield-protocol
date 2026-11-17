@@ -48,9 +48,9 @@ pub fn handler(ctx: Context<Initialize>, params: InitializeParams) -> Result<()>
     cfg.authority = params.authority;
     cfg.pending_authority = Pubkey::default();
     cfg.pending_authority_eta = 0;
-    // The activity oracle starts as the initial authority (the operator
-    // multisig runs the activity indexer until a dedicated oracle key is
-    // rotated in via `update_protocol_config`). See spec D8.
+    // The activity oracle starts as the initial authority (the operator's
+    // governance key runs the activity indexer until a dedicated oracle
+    // key is rotated in via `update_protocol_config`). See spec D8.
     cfg.activity_oracle = params.authority;
     // Same launch: the launch-price oracle key is separated from the
     // activity key so the init-once C2 baseline is not signed by the hot

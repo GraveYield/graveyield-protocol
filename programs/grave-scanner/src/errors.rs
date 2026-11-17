@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum GraveScannerError {
-    /// On-chain code 6000. Caller lacks the multisig authority required.
+    /// On-chain code 6000. Caller lacks the configured governance authority.
     #[msg("Unauthorized: caller is not the protocol multisig.")]
     Unauthorized = 0,
 

@@ -223,7 +223,7 @@ pub struct SalvagePool<'info> {
     /// unwrap after the Jupiter swap and serves as the source for the
     /// three distribution transfers. Lazy-init via system_program::
     /// create_account on first salvage of this pool (same pattern as
-    /// lp_holder_pool_vault — Anchor 0.32 forbids init on SystemAccount).
+    /// lp_holder_pool_vault — Anchor `init` is avoided on SystemAccounts).
     #[account(
         mut,
         seeds = [VAULT_SOL_HOLDING_SEED, params.pool_address.as_ref()],
@@ -1012,8 +1012,8 @@ mod tests {
 
 /// Lazy-init a system-owned, zero-data PDA via `system_program::create_account`.
 /// Skips the CPI when the account already has lamports (already initialised).
-/// Anchor 0.32 forbids `init`/`init_if_needed` on `SystemAccount`, so this
-/// is the canonical replacement.
+/// (Anchor refuses `init`/`init_if_needed` on `SystemAccount` — verified still
+/// true under 1.2.2 — so this manual create_account path is the replacement.)
 fn lazy_init_system_pda<'info>(
     pda: &UncheckedAccount<'info>,
     payer: &Signer<'info>,

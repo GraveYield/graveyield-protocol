@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// initialize — multisig-only at launch. Creates the singleton
-// `ProtocolConfig` PDA. Called once per program deployment; a second
-// call reverts at the `init` constraint (PDA already exists).
+// initialize — permissionless one-time PDA creation (`init` constraint; the
+// first successful caller supplies the authority public key). Called once
+// per program deployment; a second call reverts at the `init` constraint.
 //
 // Zero-means-default convention: every numeric param field uses `0` as
-// the "accept the constant from `constants.rs`" sentinel. This lets the
-// multisig initialize with all-zeros to take the canonical 40/40/20
+// the "accept the constant from `constants.rs`" sentinel. This lets the first
+// caller initialize with all-zeros to take the canonical 40/40/20
 // split and the documented operational defaults, or override individual
 // fields without re-stating the rest.
 //
@@ -19,11 +19,11 @@
 //     10_000 bps. A split that doesn't sum is rejected with
 //     `InvalidShareSplit` (7004).
 //
-// The 72h timelock on parameter changes is enforced by the Squads
-// multisig's transaction-buffer scheduling, not by this program (spec
-// D2 deferral). `pending_authority` / `pending_authority_eta` /
-// `timelock_seconds` are write-only reserved state in v1.0 — no
-// instruction reads them — see `update_protocol_config.rs`'s
+// The 72h timelock on parameter changes is a governance/process commitment
+// (Squads transaction-buffer scheduling for the intended Mainnet posture),
+// not on-chain enforcement (spec D2 deferral). `pending_authority` /
+// `pending_authority_eta` / `timelock_seconds` are write-only reserved state
+// in v1.0 — no instruction reads them — see `update_protocol_config.rs`'s
 // PRE-MAINNET-TODO(GOV).
 
 use anchor_lang::prelude::*;

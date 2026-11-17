@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// update_protocol_config — multisig-only, 72h-timelocked at the GraveVault
-// Charter level. Updates GraveScanner thresholds and the staleness window.
+// update_protocol_config — governance-authority-gated (`has_one = authority`),
+// immediate; no on-chain timelock (Squads buffer = process commitment only).
 
 use anchor_lang::prelude::*;
 
@@ -23,11 +23,11 @@ pub struct UpdateProtocolConfigParams {
     /// Any value below the floor reverts with `CertTtlBelowMinimum`.
     pub cert_ttl_seconds: Option<i64>,
     /// Rotate the Criterion 1 activity oracle (public key whose Ed25519
-    /// signatures authorize last-swap attestations). Multisig-only.
+    /// signatures authorize last-swap attestations). Authority-gated.
     pub activity_oracle: Option<Pubkey>,
     /// Rotate the Criterion 2 launch-price oracle (public key whose
     /// Ed25519 signatures authorize launch-price attestations, spec D9).
-    /// Multisig-only. Rotation does NOT affect already-recorded
+    /// Authority-gated. Rotation does NOT affect already-recorded
     /// LaunchPrice PDAs (init-once).
     pub launch_price_oracle: Option<Pubkey>,
 }

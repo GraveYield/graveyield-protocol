@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// emergency_pause — multisig-only, immediate. Toggles `ProtocolConfig.paused`.
+// emergency_pause — governance-authority-gated (`has_one = authority` signer
+// check), immediate; toggles `ProtocolConfig.paused` (not multisig-gated).
 //
-// When paused, `evaluate_pool_phase_1` and `evaluate_pool_phase_2` revert with
+// When paused, `evaluate_pool_phase_1`/`evaluate_pool_phase_2` revert with
 // `ProtocolPaused`. `sweep_stale_anchor`, `invalidate_anchor`, and config
-// updates remain callable — pause is an evaluation kill-switch, not a
-// full-program halt.
+// updates remain callable — pause is an evaluation kill-switch, not a halt.
 //
 // Refuses-first: a toggle that would not change the flag reverts with
 // `InvariantViolation` (6006) instead of performing a redundant write and a
 // second `ProtocolPauseChanged` emission that a log reader could mistake for
 // an intervening un-pause.
 //
-// Unlike `update_protocol_config` (which the multisig schedules behind its own
-// 72h timelock), emergency pause is intentionally immediate so the multisig
-// can stop new evaluations the moment an exploit or AMM-side incident is
-// observed. The Charter framing — "Emergency pause is immediate" — mirrors
-// the GraveVault equivalent (programs/grave-vault/src/instructions/emergency_pause.rs).
+// Unlike `update_protocol_config` (the Squads governance flow — a process
+// commitment, not on-chain enforcement — schedules config changes behind a
+// 72h buffer), emergency pause is intentionally immediate so the configured
+// authority can stop new evaluations the moment an exploit or AMM-side
+// incident is observed. Mirrors the GraveVault equivalent (instructions/emergency_pause.rs).
 
 use anchor_lang::prelude::*;
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// invalidate_anchor — multisig-only, immediate. Marks an EligibilityAnchor as
-// invalidated so it cannot be certified into an EligibilityCert. Conveys no
-// salvage authority. Used when out-of-band signal indicates the pool is no
-// longer derelict (e.g., upstream team reactivated it).
+// invalidate_anchor — governance-authority-gated (`has_one = authority` signer
+// check), immediate. Marks an EligibilityAnchor as invalidated so it cannot be
+// certified into an EligibilityCert. Conveys no salvage authority. Used when
+// out-of-band signal indicates the pool is no longer derelict (e.g. reactivated).
 //
 // Scope note: invalidation is a PRE-certification control. An
 // EligibilityCert already issued from this anchor is NOT affected — the
@@ -16,8 +16,8 @@
 // `AnchorInvalidated` (6017) instead of silently re-emitting the event, so
 // the audit trail records exactly one invalidation per anchor.
 //
-// Per v4.0.1 spec patch: this remains multisig-only; auto-invalidation was
-// rejected as redundant with Phase 2's natural re-verification gate.
+// Per the v4.0.1 spec patch (historical governance decision): auto-invalidation
+// was rejected as redundant with Phase 2's re-verification gate; stays manual.
 
 use anchor_lang::prelude::*;
 

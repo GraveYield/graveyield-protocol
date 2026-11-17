@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// GraveVault ProtocolConfig — multisig-controlled, 72h-timelocked.
-// (On-chain timelock wiring is a documented deferral — spec D2; the 72h
-// buffer is enforced by the Squads governance flow, not by this program.)
+// GraveVault ProtocolConfig — authority held by the governance key supplied
+// at `initialize` (NS-3 devnet: a single pinned governance key; Squads v4
+// 3-of-5 custody is the intended Mainnet posture). No on-chain timelock.
 //
 // =====================================================================
 // Config lifecycle (singleton, init-once at `initialize`):
@@ -15,13 +15,13 @@
 //           ┌──────────────┴───────────────────┐
 //           v                                  v
 //       update_protocol_config            emergency_pause
-//       (multisig + 72h timelock via      (multisig, immediate —
-//        Squads; validates ceiling +      refuses-first on no-op
-//        share-sum on apply)              toggle, 7022)
+//       (authority-gated, immediate;      (authority-gated, immediate —
+//        validates ceiling + share-sum    refuses-first on no-op
+//        on apply)                        toggle, 7022)
 //
 // The Charter ceiling on `protocol_share_bps` (≤ 2000 = 20%) is
 // re-asserted at every write path (`initialize`, `update_protocol_config`)
-// — it cannot be raised even by multisig vote. The 40/40/20 split must
+// — it cannot be raised by any config update; the 40/40/20 split must
 // sum to exactly 10_000 bps at every write. `emergency_paused` is the
 // only field that mutates outside `update_protocol_config`, and only
 // `emergency_pause` may touch it.
@@ -31,13 +31,13 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct ProtocolConfig {
-    /// Squads v4 multisig PDA controlling this protocol.
+    /// Governance authority gating every privileged instruction (from init).
     pub authority: Pubkey,
 
-    /// Pending authority during a 72h timelock rotation. Zeroed when not pending.
+    /// RESERVED (write-only; no instruction reads it). Zeroed when unused.
     pub pending_authority: Pubkey,
 
-    /// Unix timestamp at which `pending_authority` becomes effective.
+    /// RESERVED write-only ETA field; no timelock logic consumes it.
     pub pending_authority_eta: i64,
 
     /// Original LP holder share in basis points (default 4_000 = 40%).
@@ -61,7 +61,7 @@ pub struct ProtocolConfig {
     /// Jupiter dust threshold in lamports.
     pub jupiter_dust_threshold_lamports: u64,
 
-    /// Timelock window in seconds (default 72h).
+    /// RESERVED write-only timelock window (default 72h); nothing reads it.
     pub timelock_seconds: i64,
 
     /// True if the protocol is currently paused. New salvages are rejected

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// emergency_pause — multisig-only, immediate. Toggles
-// `ProtocolConfig.emergency_paused`. When paused, `salvage_pool` reverts
-// with `ProtocolPaused` (7003); `claim_lp_proceeds` stays live so
-// original LPs always recover their share (Charter invariant).
+// emergency_pause — governance-authority-gated (`has_one = authority`
+// signer check), immediate. Toggles `ProtocolConfig.emergency_paused`. When
+// paused, `salvage_pool` reverts with `ProtocolPaused` (7003);
+// `claim_lp_proceeds` stays live so original LPs always recover their share.
 //
 // Refuses-first: a toggle that would not change the flag reverts with
 // `InvariantViolation` (7022) instead of performing a redundant write
@@ -12,11 +12,11 @@
 // `emergency_pause` discipline (6006) so the two programs' pause audit
 // trails have the same shape.
 //
-// Unlike `update_protocol_config` (which the multisig schedules behind
-// its own 72h timelock), emergency pause is intentionally immediate so
-// the multisig can stop new salvages the moment an exploit or AMM-side
-// incident is observed. The Charter framing — "Emergency pause is
-// immediate" — mirrors the GraveScanner equivalent
+// Unlike `update_protocol_config` (whose 72h timelock is a Squads process
+// commitment, not on-chain enforcement), emergency pause is intentionally
+// immediate so the configured authority can stop new salvages the moment
+// an exploit or AMM-side incident is observed. The Charter framing —
+// "Emergency pause is immediate" — mirrors the GraveScanner equivalent
 // (programs/grave-scanner/src/instructions/emergency_pause.rs).
 
 use anchor_lang::prelude::*;
