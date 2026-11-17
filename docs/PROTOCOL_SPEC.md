@@ -169,24 +169,36 @@ revision is out of scope.
 
 | Instruction | Effect |
 |---|---|
-| `initialize` | Creates `ProtocolConfig` (thresholds, cert TTL, pause flag). |
+| `initialize` | Creates `ProtocolConfig` (thresholds, cert TTL, pause flag) — permissionless and init-once (Anchor `init` constraint): the payer is the only signer and funds the account, and the configured authority is supplied as a public-key parameter (it does not sign); the first successful initializer establishes the ProtocolConfig authority. |
 | `record_launch_price` | Creates the init-once `LaunchPrice` PDA (Criterion 2 baseline) — only from an oracle-signed Ed25519 attestation (D9). |
 | `evaluate_pool_phase_1` | Evaluates all six criteria; writes `EligibilityAnchor` stamped with `first_eligible_epoch`. |
 | `evaluate_pool_phase_2` | Re-evaluates all six criteria after the epoch gap; requires bitmap equality with the anchor; issues the `EligibilityCert` — or reissues it in place once expired (`CertStillValid` on a live cert; D10). |
-| `invalidate_anchor` | Multisig-only: marks an anchor `invalidated` (censors a wrong Phase 1 pass). Pre-certification control — an already-issued cert is unaffected (its own TTL bounds it). |
+| `invalidate_anchor` | Configured-authority-gated: marks an anchor `invalidated` (censors a wrong Phase 1 pass). Pre-certification control — an already-issued cert is unaffected (its own TTL bounds it). |
 | `sweep_stale_anchor` | Permissionless rent reclaim for any anchor older than `anchor_staleness_seconds` (default 14 days, floored at 3 epochs / 6 days). By then any cert minted from the anchor has expired (TTL default 1h); rent returns to the original writer. |
-| `update_protocol_config` | Multisig-only threshold updates, bounded (cert TTL floor 600s; collapse bps ≤ 10_000; staleness window floor 6 days). |
-| `emergency_pause` | Multisig-only pause flag; gates `evaluate_pool_*` only. A no-op toggle reverts (6006). |
+| `update_protocol_config` | Configured-authority-gated threshold updates, bounded (cert TTL floor 600s; collapse bps ≤ 10_000; staleness window floor 6 days). |
+| `emergency_pause` | Configured-authority-gated pause flag; gates `evaluate_pool_*` only. A no-op toggle reverts (6006). |
 
 **GraveVault** (`programs/grave-vault`) — settlement.
 
 | Instruction | Effect |
 |---|---|
-| `initialize` | Creates `ProtocolConfig` (40/40/20 shares, fee/slippage/dust params, pause flag). |
+| `initialize` | Creates `ProtocolConfig` (40/40/20 shares, fee/slippage/dust params, pause flag) — permissionless and init-once (Anchor `init` constraint): the payer is the only signer and funds the account, and the configured authority is supplied as a public-key parameter (it does not sign); the first successful initializer establishes the ProtocolConfig authority. |
 | `salvage_pool` | The settlement instruction (§3). One salvage per pool, ever (init-on-PDA defenses). |
 | `claim_lp_proceeds` | Merkle-verified pro-rata withdrawal from `lp_holder_pool_vault`. Live during pause. |
-| `update_protocol_config` | Multisig-only share/parameter updates (protocol share ceiling 20% enforced on-chain). |
-| `emergency_pause` | Multisig-only pause flag; gates `salvage_pool` only. |
+| `update_protocol_config` | Configured-authority-gated share/parameter updates (protocol share ceiling 20% enforced on-chain). |
+| `emergency_pause` | Configured-authority-gated pause flag; gates `salvage_pool` only. |
+
+"Configured-authority-gated" is the exact enforcement shape of every
+privileged instruction above: the program requires the transaction
+signer to equal the ProtocolConfig `authority` stored on chain
+(Anchor `has_one = authority` + `authority: Signer`), and that authority
+is whatever key the first successful `initialize` supplied. The programs
+check the signer's identity only — they do not verify Squads membership,
+signer counts, or M-of-N approval. Squads v4 M-of-N custody (3-of-5 at
+launch, 4-of-7 post-audit per the Charter) is the intended external
+governance arrangement that may control that authority; where it does,
+approval flows through Squads' own control path — a governance
+commitment, not program enforcement.
 
 ### 2.2 PDA map
 
@@ -469,8 +481,9 @@ path; the residual risk is griefing, accepted for v1.0.
 ## 6. What the protocol guarantees — enforcement matrix
 
 Every guarantee below is classified as **on-chain enforced** (program
-code rejects violations), **governance enforced** (multisig process;
-violations require governance misbehaviour, not code), or
+code rejects violations), **governance enforced** (the external
+governance arrangement — the intended Squads M-of-N multisig; violations
+require governance misbehaviour, not code), or
 **SDK/operator enforced** (client-side policy; a non-SDK operator can
 violate it).
 
@@ -511,7 +524,7 @@ violate it).
 | 72h timelock on parameter changes | Squads v4 transaction-buffer scheduling | **Not program-enforced.** On-chain `timelock_seconds` / `pending_authority` fields exist but are currently write-only reserved state (D2). |
 | 7-day public notice on standard upgrades; 24h timelock + 5-day post-mortem on emergency upgrades | Charter process | Pure process commitments; no code artifact. |
 | Multisig membership and threshold | Squads 3-of-5 at launch → 4-of-7 post-audit | Off-chain. |
-| Program upgrade authority custody | Upgrade key held by multisig | All "unsweepable / cannot change" guarantees are ultimately bounded by upgrade authority governance. |
+| Program upgrade authority custody | Intended Mainnet: upgrade key held by the multisig; verified NS-3 devnet: upgrade authority is the deployer key | Separate authority domain from the ProtocolConfig authority — controlling the config authority does not confer upgrade rights, and vice versa. All "unsweepable / cannot change" guarantees are ultimately bounded by upgrade authority governance. |
 | Threshold tuning within spirit | `update_protocol_config` bounds | The programs bound individual values; the multisig is trusted to choose sane values within them (e.g. inactivity cannot be tuned to 0 — there is no lower bound; accepted and documented here). |
 
 ### 6.3 SDK/operator enforced (cannot be on-chain enforced)
@@ -585,11 +598,14 @@ glossary's "low TVL" were **inverted** and are corrected alongside this
 spec. The code (`criteria.rs`, `min_tvl_lamports`) was authoritative and
 is unchanged.
 
-**D2 — Timelock model.** v1.0 enforces the 72h parameter-change
-timelock **at the governance layer only** (Squads v4 transaction
-buffers). The on-chain `pending_authority`, `pending_authority_eta`, and
-`timelock_seconds` fields are **reserved and non-functional** — declared,
-written, never read. Docs claiming program-level enforcement are
+**D2 — Timelock model.** The 72h parameter-change delay is **a
+governance-process commitment** (Squads v4 transaction-buffer scheduling
+in the intended Mainnet governance arrangement), not a GraveYield
+bytecode control: v1.0 enforces no on-chain timelock. The on-chain
+`pending_authority`, `pending_authority_eta`, and `timelock_seconds`
+fields are **reserved and non-functional** — declared,
+written, never read; storing `timelock_seconds = 259200` does not delay
+anything. Docs claiming program-level enforcement are
 corrected. Wiring an on-chain timelock (and consuming the dead fields or
 removing them) is an explicit future decision, not a silent assumption.
 
@@ -830,7 +846,7 @@ trust anchor.
 | 1 | Whitepaper §1 "residual TVL below threshold"; §3 "< 0.5 SOL"; glossary "low TVL" | `current_tvl_lamports ≥ min_tvl_lamports` (minimum, not maximum) | **Fixed** — docs corrected; D1. |
 | 2 | Whitepaper §3 "Criteria 1-5 are evaluated against on-chain pool state" | C1 and C2 consume caller-supplied inputs today (ORACLE-001/002) | **Fixed** — whitepaper now points to §5 evidence status. |
 | 3 | Glossary "EligibilityCert … TTL = 1 hour"; cert doc-comment "issued_at + 3600" | TTL = `ProtocolConfig.cert_ttl_seconds`: governance-configurable, default 3_600s, floored at 600s | **Fixed** — glossary wording updated. |
-| 4 | README/CONTRIBUTING/whitepaper "72h timelock on all parameter changes" (stated as program-level) | Timelock enforced by Squads scheduling only; on-chain fields dead | **Fixed** — docs now say "multisig-enforced"; D2. |
+| 4 | README/CONTRIBUTING/whitepaper "72h timelock on all parameter changes" (stated as program-level) | Timelock enforced by Squads scheduling only; on-chain fields dead | **Fixed** — docs now attribute the delay to the external Squads governance process, not program code; D2. |
 | 5 | `docs/error_codes.md` lists 7008/7014 alongside live errors | Both variants exist but are never raised | **Fixed** — error_codes.md now marks them reserved. |
 | 6 | PRE_MAINNET_CHECKLIST ORACLE-001 refers to a `first_swap_slot` parameter | `RecordLaunchPriceParams` carries no slot reference; `recorded_slot` is write-time clock | **Fixed** — checklist row amended. |
 | 7 | `tests/README.md` implies on-chain priority-fee ceiling enforcement tests | Enforcement is SDK-only (D3) | **Fixed** — wording updated. |
