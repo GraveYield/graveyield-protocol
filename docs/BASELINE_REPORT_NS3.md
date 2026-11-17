@@ -202,9 +202,11 @@ Actions API for each recorded HEAD.
   `docs/GY-DOC-RECON-001_ALIGNMENT_REPORT.md` (+2,396 lines), revision 5
   (2026-11-14). Not on `main`; its 21 owner questions (Q-01…Q-21) are
   **open**, not resolved (§11).
-- **protocol #113 (OPEN, head `0c1c0c3`, 2026-11-17):** docs(programs) — the
-  deferred G-03…G-06 Rust-source comment corrections (21 files,
-  comment-only; the `salvage_pool.rs` Anchor-version notes are in scope).
+- **protocol #113 (OPEN, 2026-11-17):** docs(programs) — the
+  deferred G-03…G-06 Rust-source comment corrections (source-correction
+  commit `0c1c0c3`: 21 files, comment-only; the `salvage_pool.rs`
+  Anchor-version notes are in scope; plus the baseline-report
+  reconciliation added by `b25b080` — 22 files total).
   Built through the fail-closed provenance gate on the pinned toolchain; the
   rebuild reproduced the deployed manifest pins byte-for-byte — no re-pin
   and no redeployment required (§9.1, §10).
@@ -782,8 +784,9 @@ reverted (`677aab6`), and only the non-ELF-affecting parts landed in the
 final PR #111 diff.
 
 The deferred Rust-source parts were subsequently completed by **PR #113**
-(head `0c1c0c3`, branch `fix/deferred-source-comment-corrections`,
-2026-11-17): a comment-only correction pass — verified in this amendment
+(source-correction commit `0c1c0c3`, branch
+`fix/deferred-source-comment-corrections`, 2026-11-17; since amended by
+`b25b080`): a comment-only correction pass — verified in this amendment
 against the PR diff (147 added / 147 removed lines across `programs/`, every
 changed line a comment, every file's line count preserved, plus a 2-line
 `docs/error_codes.md` doc sync) — built through the fail-closed provenance
