@@ -48,9 +48,11 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
 - **Genuinely complete:** the NS-3 deployment, initialization, oracle
   registration, and governance drills (56/56 + 14/14 recorded evidence);
   the deployed-ELF provenance pin discipline (fail-closed CI gate, byte-equal
-  rebuilds); the Phase 0 documentation truth passes across all five repos
-  (PR #111 protocol, #3 indexer, #4 salvor-bots, #12 console, #2 site);
-  the SDK single-source-of-truth discipline (byte-identical mirror, CI-enforced).
+  rebuilds); the specific Phase 0 reconciliation PRs, all merged (PR #111
+  protocol, #3 indexer, #4 salvor-bots, #12 console, #2 site) — remaining
+  cross-repository documentation discrepancies are still tracked in the gap
+  register (§10), not silently resolved; the SDK single-source-of-truth
+  discipline (byte-identical mirror, CI-enforced).
 - **Partially complete:** end-to-end lifecycle exercise (proven only in fork
   simulations and the local W1 rehearsal — never against the live devnet
   deployment); indexer evidence-path verification (13/13 recorded run is
@@ -116,7 +118,8 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
 ### 2.3 What this report deliberately does not claim
 
 - No mainnet deployment, production custody, or operational oracle service.
-- No completed security audit (the only open issue, #23, is unsolicited
+- No completed security audit (issue #23 is the only open **audit-related**
+  issue — not the only open repository issue; it records unsolicited
   audit-firm outreach, not an engagement record).
 - No end-to-end salvage operation: none has ever run on devnet or elsewhere
   (stated by the W2 acceptance record, the 2026-11-15 independent
@@ -919,26 +922,69 @@ findings. **None of these is silently marked resolved.**
 
 ## 12. Pre-Testnet and Pre-Mainnet Considerations
 
-GraveYield has no separate testnet generation; the next milestone after the
-current devnet era is mainnet preparation. The honest sequence:
+### 12.1 Roadmap transition: NS-3 Devnet baseline → Testnet milestones
 
-1. **Close the Phase 0 documentation state** (PR #104 disposition, G-34,
-   G-14, G-35, G-36) so the public record is internally consistent.
+The milestone sequence that follows the current Devnet era is defined by the
+owner-supplied Devnet-to-Testnet roadmap
+(`GraveYield_Devnet_to_Testnet_Roadmap-1.txt`); mainnet preparation is
+**not** the next milestone:
+
+| Milestone | Name | Relationship to this baseline |
+|---|---|---|
+| M0 | Baseline freeze | Current stage: the NS-3 Devnet deployment/provenance baseline this report documents — frozen in the §1 sense, with open register items (§10) carried inside it |
+| M1 | Testnet scope freeze | **Next milestone (Phase 1) — not started** |
+| M2 | Protocol validation | Future — not started |
+| M3 | Integration completion | Future — not started |
+| M4 | Testnet deployment | Future — not started |
+| M5 | End-to-end proof | Future — not started |
+
+Phase 0 baseline establishment (this report) is the M0 stage; per the
+roadmap it must be followed by Phase 1 Testnet scope freeze (M1). Mainnet
+readiness remains a separate stage that comes only after Testnet completion
+and stabilization (§12.3).
+
+Explicitly distinguishing the two states:
+
+- **Current NS-3 Devnet state (real, recorded):** programs deployed and
+  initialized on Devnet (§5), ELFs pinned and CI-verified (§6), acceptance
+  and independent re-verification recorded. No Testnet deployment, no
+  Testnet generation, and no Testnet scope document exist.
+- **Proposed Testnet milestone (M1–M5, future):** proposed and unstarted.
+  **None of the M1–M5 exit criteria — including Testnet deployment (M4)
+  and end-to-end proof (M5) — has been completed, and this report claims
+  none of them.** The roadmap's Testnet milestones must not be read as
+  satisfied by anything recorded here.
+
+### 12.2 The honest prerequisite sequence (current stage, M0)
+
+1. **Close the Phase 0 documentation state.** The specific Phase 0
+   reconciliation PRs **have been merged** (protocol #111, indexer #3,
+   salvor-bots #4, console #12, site #2); what remains open is the owner
+   disposition of PR #104 and the residual cross-repository documentation
+   discrepancies still tracked in the gap register (G-14, G-25, G-34,
+   G-35, G-36) so the public record becomes internally consistent.
 2. **Prove the live path on devnet before anything else** (G-12 → G-16 →
    G-17): a funded-payer 13/13 matrix run against NS-3, one owner-gated
    end-to-end certify-and-salvage exercise, and a recorded
    SalvageReceipt/ClaimRecord artifact set. Until this happens, "deployment
    acceptance" must continue to be described exactly as the W2 record
    describes it.
-3. **Build the oracle operation** (G-18) — the ORACLE-003 runbook is the
-   single hard blocker that stands between the current state and any
-   scheduled evaluation traffic.
-4. **Mainnet readiness chain** (G-22/G-23/G-24 + checklist rows): custody
-   decisions, key ceremony, GOV-001 resolution, LOCKER-002/Q-04 scope,
-   KEYS-002/Q-03 economics, audit handoff (`scripts/list-pre-mainnet-todos.sh`
-   output attached per the checklist's auditor one-liner).
-5. **Hygiene that audits will ask for** (G-31 IDLs, G-30 error-mirror tail,
+3. **Build the oracle operation** (G-18): the ORACLE-003 runbook is a
+   required operational prerequisite for any scheduled oracle operation —
+   one of several outstanding dependencies recorded in §10 (e.g. G-12,
+   G-16), not the sole one.
+4. **Hygiene that audits will ask for** (G-31 IDLs, G-30 error-mirror tail,
    G-33 Node-version note, G-32 dependabot queue).
+
+### 12.3 Mainnet readiness chain (separate stage)
+
+This chain belongs to the separate mainnet stage — after Testnet completion
+and stabilization per the roadmap — not to the M0 → M1 transition:
+
+- **Mainnet readiness chain** (G-22/G-23/G-24 + checklist rows): custody
+  decisions, key ceremony, GOV-001 resolution, LOCKER-002/Q-04 scope,
+  KEYS-002/Q-03 economics, audit handoff (`scripts/list-pre-mainnet-todos.sh`
+  output attached per the checklist's auditor one-liner).
 
 The devnet deployment itself needs no pre-mainnet action to remain valid:
 it is pinned, accepted, and independently re-verifiable at any time via the
@@ -970,10 +1016,12 @@ In dependency order, each with its acceptance condition:
 5. **Console alignment (G-08/G-09/G-11):** land the corrections branch
    (rebased onto post-#12 main), then implement the approved lifecycle
    design, then re-vendor the canonical SDK.
-6. **ORACLE-003 runbook + hosted indexer service (G-18):** the operational
-   prerequisite for any scheduled oracle traffic.
-7. **Mainnet preparation:** begin the §12 chain in parallel where decisions
-   are the only dependency (custody, audit engagement).
+6. **ORACLE-003 runbook + hosted indexer service (G-18):** a required
+   operational prerequisite for any scheduled oracle traffic — one of
+   several outstanding dependencies (G-12/G-16, §10), not the sole one.
+7. **Mainnet preparation:** a separate stage that follows Testnet completion
+   and stabilization (§12.3); only its long-lead decision items (custody,
+   audit engagement) can be progressed by the owner in parallel.
 
 ---
 
