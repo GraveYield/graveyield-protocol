@@ -68,11 +68,17 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
   pins are CI-enforced, and deliberate change requires a reviewed re-pin PR
   plus an owner redeployment. The *project* baseline is not frozen in the
   sense of "nothing left to do": eight register items are deferred, blocked,
-  or awaiting owner decisions (§10). Moving to the next roadmap milestone
-  requires, at minimum: (1) owner disposition of PR #13 (console corrections)
-  and PR #104 (alignment report), (2) the first owner-gated end-to-end devnet
-  exercise against NS-3, and (3) the ORACLE-003 runbook before any scheduled
-  oracle operation.
+  or awaiting owner decisions (§10). Under the roadmap's milestone sequence
+  (§12.1), the M0 exit criterion is to establish one authoritative
+  implementation and deployment baseline, with no conflicting claims across
+  repositories or documentation; what still bears on it is documentation
+  work — owner disposition of PR #13 (console corrections) and PR #104
+  (alignment report), plus the register's documentation-discrepancy rows.
+  The first owner-gated end-to-end devnet exercise against NS-3, the
+  funded-payer evidence matrix, and the ORACLE-003 runbook (before any
+  scheduled oracle operation) remain outstanding Devnet operational work in
+  the gap register (§10) and the §13 backlog — they are not M0 exit criteria
+  and do not gate starting M1.
 
 ---
 
@@ -931,12 +937,31 @@ owner-supplied Devnet-to-Testnet roadmap
 
 | Milestone | Name | Relationship to this baseline |
 |---|---|---|
-| M0 | Baseline freeze | Current stage: the NS-3 Devnet deployment/provenance baseline this report documents — frozen in the §1 sense, with open register items (§10) carried inside it |
-| M1 | Testnet scope freeze | **Next milestone (Phase 1) — not started** |
+| M0 | Baseline freeze | Current stage: the NS-3 Devnet deployment/provenance baseline this report documents — frozen in the §1 sense; exit criteria defined below |
+| M1 | Testnet scope freeze | **Next milestone (Phase 1) — not started**; scope definition below |
 | M2 | Protocol validation | Future — not started |
 | M3 | Integration completion | Future — not started |
 | M4 | Testnet deployment | Future — not started |
 | M5 | End-to-end proof | Future — not started |
+
+As defined in the supplied roadmap:
+
+- **M0 — Baseline freeze (current stage).** Its exit criteria are to
+  establish **one** authoritative implementation and deployment baseline,
+  with **no conflicting claims** across repositories or documentation. The
+  register rows that still bear on this criterion are the
+  documentation-discrepancy rows (G-14, G-25, G-34, G-35, G-36 — §12.2).
+  The open Devnet operational items (G-12, G-16, G-17, G-18) are **not** M0
+  exit criteria.
+- **M1 — Testnet scope freeze (next milestone; begins once M0 is
+  satisfied; not started).** Its purpose is to **define the Testnet v0
+  scope**: Raydium AMM V4, WSOL, one controlled test pool, one complete
+  Scanner-to-Vault lifecycle, one minimal Salvor execution path, and one LP
+  holder claim flow, with exclusions documented. M1 is a scope-definition
+  milestone — planning, not execution: nothing is deployed to or validated
+  on Testnet as part of M1; that work belongs to the later milestones
+  (M2 Protocol validation through M5 End-to-end proof), which follow scope
+  freeze.
 
 Phase 0 baseline establishment (this report) is the M0 stage; per the
 roadmap it must be followed by Phase 1 Testnet scope freeze (M1). Mainnet
@@ -955,7 +980,12 @@ Explicitly distinguishing the two states:
   none of them.** The roadmap's Testnet milestones must not be read as
   satisfied by anything recorded here.
 
-### 12.2 The honest prerequisite sequence (current stage, M0)
+### 12.2 M0 exit criterion vs. outstanding Devnet operational work
+
+**The M0 exit criterion, per the supplied roadmap, is to establish one
+authoritative implementation and deployment baseline, with no conflicting
+claims across repositories or documentation.** The remaining work that
+bears on that criterion is documentation-consistency work:
 
 1. **Close the Phase 0 documentation state.** The specific Phase 0
    reconciliation PRs **have been merged** (protocol #111, indexer #3,
@@ -963,9 +993,17 @@ Explicitly distinguishing the two states:
    disposition of PR #104 and the residual cross-repository documentation
    discrepancies still tracked in the gap register (G-14, G-25, G-34,
    G-35, G-36) so the public record becomes internally consistent.
-2. **Prove the live path on devnet before anything else** (G-12 → G-16 →
-   G-17): a funded-payer 13/13 matrix run against NS-3, one owner-gated
-   end-to-end certify-and-salvage exercise, and a recorded
+
+**Outstanding Devnet operational work — kept fully visible in the gap
+register (§10) and in the §13 backlog.** These items are **not** M0 exit
+criteria and are **not** prerequisites for starting M1; the supplied
+roadmap does not make them either. They are dependencies for the specific
+operational outcomes they describe (live-path evidence, scheduled oracle
+operations) — not for the M0 → M1 transition:
+
+2. **Prove the live path on devnet** (G-12 → G-16 → G-17): a funded-payer
+   13/13 matrix run against NS-3, one owner-gated end-to-end
+   certify-and-salvage exercise, and a recorded
    SalvageReceipt/ClaimRecord artifact set. Until this happens, "deployment
    acceptance" must continue to be described exactly as the W2 record
    describes it.
@@ -994,7 +1032,13 @@ committed verifiers.
 
 ## 13. Recommended Next Steps
 
-In dependency order, each with its acceptance condition:
+In dependency order, each with its acceptance condition. **Milestone
+mapping (per §12.1):** item 1 serves the M0 exit criterion (one
+authoritative baseline, no conflicting claims across repositories or
+documentation). The M1 Testnet scope freeze — defining the Testnet v0
+scope — can begin once M0 is satisfied; it does **not** wait on items 2–6,
+which are outstanding backlog work tracked in the gap register (§10), not
+M0 exit criteria and not prerequisites for starting M1:
 
 1. **Owner dispositions (no code):** rule on PR #104, PR #13/#14 console
    branches, and the thirteen decisions in §11. *Accept:* each open PR has a
@@ -1004,7 +1048,8 @@ In dependency order, each with its acceptance condition:
    then one end-to-end certify-and-salvage drill with recorded artifacts.
    *Accept:* committed NS-3 evidence-path report with 0 skipped; lifecycle
    accounts exist on devnet and are reconciled against the fork-suite
-   expectations.
+   expectations. (Outstanding Devnet operational work — not an M0 exit
+   criterion and not a gate for starting M1; §12.2.)
 3. **Truth-pass PRs (documentation-only, no ELF impact):** indexer
    G-13/G-14, salvor G-07 (coordinated mirror PR), console G-10, site G-35.
    *Accept:* terminology + doc-links lint green; no manifest change.
