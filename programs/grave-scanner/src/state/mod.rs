@@ -8,15 +8,15 @@
 // PDA family at a glance (seeds in `crate::constants`):
 //
 //   ProtocolConfig     ["protocol_config"]
-//     Singletons the protocol. Multisig-controlled, 72h-timelocked
-//     (governance-enforced via Squads, not program-enforced in v1.0).
+//     Singletons the protocol. Authority-gated instructions; the 72h
+//     timelock is a Squads process commitment, not program-enforced.
 //     Holds the six derelict-pool thresholds, cert TTL, staleness
 //     window, and the two oracle pubkeys.
 //
 //   EligibilityAnchor  ["eligibility_anchor", amm_program_id, pool_address]
 //     Written by Phase 1 of `evaluate_pool`. Stamps
 //     `first_eligible_epoch` and the six-criterion bitmap. Lives until
-//     Phase 2 certifies, multisig invalidates, or the staleness window
+//     Phase 2 certifies, governance invalidates, or the staleness window
 //     elapses (sweep_stale_anchor reclaims rent). Staging record only.
 //
 //   EligibilityCert    ["eligibility_cert", amm_program_id, pool_address]

@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// GraveScanner ProtocolConfig — multisig-controlled, 72h-timelocked.
-// (On-chain timelock wiring is a documented deferral — spec D2; the 72h
-// buffer is enforced by the Squads governance flow, not by this program.)
+// GraveScanner ProtocolConfig — authority held by the governance key supplied
+// at `initialize` (NS-3 devnet: a single pinned governance key; Squads v4
+// 3-of-5 custody is the intended Mainnet posture). No on-chain timelock.
 
 use anchor_lang::prelude::*;
 
 #[account]
 #[derive(InitSpace)]
 pub struct ProtocolConfig {
-    /// Squads v4 multisig PDA controlling this protocol.
+    /// Governance authority gating every privileged instruction (from init).
     pub authority: Pubkey,
 
-    /// Pending authority during a 72h timelock rotation. Zeroed when not pending.
+    /// RESERVED (write-only; no instruction reads it). Zeroed when unused.
     pub pending_authority: Pubkey,
 
-    /// Unix timestamp at which `pending_authority` becomes effective.
+    /// RESERVED write-only ETA field; no timelock logic consumes it.
     pub pending_authority_eta: i64,
 
     /// Inactivity threshold in seconds (Criterion 1).
@@ -50,9 +50,9 @@ pub struct ProtocolConfig {
 
     /// Public key whose Ed25519 signatures authorize Criterion 1
     /// last-swap attestations (ORACLE-002, Phase 1.2 / spec D8). Set to
-    /// the initial authority at `initialize` — the operator multisig runs
-    /// the activity indexer until a dedicated oracle key is rotated in
-    /// via `update_protocol_config`.
+    /// the initial authority at `initialize` — the operator's governance
+    /// key runs the activity indexer until a dedicated oracle key is
+    /// rotated in via `update_protocol_config`.
     pub activity_oracle: Pubkey,
 
     /// Public key whose Ed25519 signatures authorize Criterion 2

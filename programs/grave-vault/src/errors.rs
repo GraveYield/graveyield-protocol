@@ -20,7 +20,7 @@ use anchor_lang::prelude::*;
 
 #[error_code(offset = 7000)]
 pub enum GraveVaultError {
-    /// On-chain code 7000. Caller lacks the multisig authority required.
+    /// On-chain code 7000. Caller lacks the configured governance authority.
     #[msg("Unauthorized: caller is not the protocol multisig.")]
     Unauthorized = 0,
 

@@ -7,15 +7,15 @@
 // quote-side swap, and distribute proceeds 40 / 40 / 20 to original LPs,
 // salvor, and protocol respectively.
 //
-// Charter invariants enforced at the program level:
-//
-//   * 20% protocol share is a CEILING, not a target. Cannot be raised.
-//   * `lp_holder_pool_vault` is unsweepable by any admin key, ever.
-//   * 72h timelock on all parameter changes.
-//   * Emergency pause is immediate but `claim_lp_proceeds` stays live.
-//   * Standard upgrades = 7-day notice + 72h timelock.
-//   * Emergency upgrades = 24h timelock + 5-day post-mortem.
-//   * No token, NFT, points, airdrop, or staking at any layer.
+// Charter — split into bytecode-enforced invariants (verified against this
+// implementation) and process commitments (governance policy, NOT enforced
+// by current bytecode; a future program upgrade could change the enforced
+// list). Enforced now: 20% protocol-share ceiling; only `claim_lp_proceeds`
+// debits `lp_holder_pool_vault`; pause blocks salvage while claims stay
+// live; one settlement per pool (init-once PoolRegistry + SalvageReceipt).
+// Process commitments: 72h parameter-change timelock; standard upgrades =
+// 7-day notice + 72h timelock; emergency upgrades = 24h timelock + 5-day
+// postmortem; no token/NFT/points/airdrop/staking at any layer.
 //
 // See:
 //   - docs/whitepaper.md
@@ -23,20 +23,20 @@
 //   - docs/architecture/charter-invariants.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
-// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
-// 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
-// crate level so `cargo clippy -D warnings` stays green. The deprecation
-// does not affect runtime behaviour — `realloc` is still available, just
-// discouraged.
+// Historical attribution (recorded under the 0.32.x line): Anchor 0.32.1's
+// `#[program]` macro expansion called the deprecated `AccountInfo::realloc()`
+// (replaced by `AccountInfo::resize()` in Solana SDK 2.x / 3.x). Under the
+// current anchor-lang 1.2.2 toolchain this crate compiles warning-free without
+// the allow (verified by host `cargo check`), so the `#![allow(deprecated)]`
+// below is a retained no-op — kept unchanged in this comments-only pass.
 #![allow(deprecated)]
-// Anchor 0.32.x's `#[program]` macro and Solana's
-// `solana_program_entrypoint::custom_panic_default!` macro emit
-// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
+// The `#[program]` macro (first recorded under Anchor 0.32.x; verified still
+// true under anchor-lang 1.2.2) emits `#[cfg(feature = "custom-panic")]`,
+// `#[cfg(feature = "anchor-debug")]`, `#[cfg(feature = "custom-heap")]`, and
 // `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
 // trip the `unexpected_cfgs` lint because the consuming crate did not declare
-// them. We silence at crate level until the upstream macros emit
-// `check-cfg` directives themselves.
+// them. Still required: removing the allow makes the warnings fire (verified
+// by host `cargo check`), so it is silenced at crate level.
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
@@ -51,9 +51,9 @@ pub mod state;
 use instructions::*;
 
 // NS-3 devnet program ID (owner-generated, owner-held keypair; mirrored in
-// Anchor.toml). Assigned per DR-002 for the NS-3 redeployment — deployment
-// and on-chain acceptance are PENDING (docs/DEVNET.md carries the NS-3
-// preparation record until the owner executes the deployment). The vault
+// Anchor.toml). Assigned per DR-002; deployed to Devnet and accepted on
+// 2026-11-12 (56/56 W2 acceptance; independently re-verified 2026-11-15) —
+// see docs/DEVNET.md and docs/w2-ns3-acceptance/. The vault
 // crate compiles the GraveScanner NS-3 ID in via its grave_scanner crate
 // dependency (EligibilityCert seeds::program), so scanner and vault ELFs
 // must always be rebuilt together from the same synchronized tree. The NS-2
@@ -66,12 +66,12 @@ declare_id!("7VxUGJNgi1bZ8x4rTtLBNdgLs9sCLmUTpVE3on1nshya");
 pub mod grave_vault {
     use super::*;
 
-    /// Initialise the GraveVault protocol config PDA. Multisig-only at launch.
+    /// Initialise the GraveVault protocol config PDA; permissionless one-time init.
     pub fn initialize(ctx: Context<Initialize>, params: InitializeParams) -> Result<()> {
         instructions::initialize::handler(ctx, params)
     }
 
-    /// Update GraveVault protocol config. Multisig + 72h timelock.
+    /// Update GraveVault protocol config (authority-gated; no on-chain timelock).
     /// Cannot raise `protocol_share_bps` above the Charter ceiling (2000 bps).
     pub fn update_protocol_config(
         ctx: Context<UpdateProtocolConfig>,
@@ -80,8 +80,8 @@ pub mod grave_vault {
         instructions::update_protocol_config::handler(ctx, params)
     }
 
-    /// Multisig-only. Pauses new salvages immediately. `claim_lp_proceeds`
-    /// remains live during pause — original LPs always recover their share.
+    /// Governance-authority-gated. Pauses new salvages immediately.
+    /// `claim_lp_proceeds` stays live — LPs always recover their share.
     pub fn emergency_pause(ctx: Context<EmergencyPause>, paused: bool) -> Result<()> {
         instructions::emergency_pause::handler(ctx, paused)
     }

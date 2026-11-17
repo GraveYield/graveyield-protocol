@@ -13,20 +13,20 @@
 //   - docs/architecture/eligibility-anchors.md
 
 #![allow(clippy::result_large_err)]
-// Anchor 0.32.1's `#[program]` macro expansion calls the deprecated
-// `AccountInfo::realloc()` (replaced by `AccountInfo::resize()` in Solana SDK
-// 2.x / 3.x). Until Anchor's upstream fix lands, we silence the lint at
-// crate level so `cargo clippy -D warnings` stays green. The deprecation
-// does not affect runtime behaviour — `realloc` is still available, just
-// discouraged.
+// Historical attribution (recorded under the 0.32.x line): Anchor 0.32.1's
+// `#[program]` macro expansion called the deprecated `AccountInfo::realloc()`
+// (replaced by `AccountInfo::resize()` in Solana SDK 2.x / 3.x). Under the
+// current anchor-lang 1.2.2 toolchain this crate compiles warning-free without
+// the allow (verified by host `cargo check`), so the `#![allow(deprecated)]`
+// below is a retained no-op — kept unchanged in this comments-only pass.
 #![allow(deprecated)]
-// Anchor 0.32.x's `#[program]` macro and Solana's
-// `solana_program_entrypoint::custom_panic_default!` macro emit
-// `#[cfg(feature = "custom-panic")]`, `#[cfg(feature = "anchor-debug")]`, and
+// The `#[program]` macro (first recorded under Anchor 0.32.x; verified still
+// true under anchor-lang 1.2.2) emits `#[cfg(feature = "custom-panic")]`,
+// `#[cfg(feature = "anchor-debug")]`, `#[cfg(feature = "custom-heap")]`, and
 // `#[cfg(target_os = "solana")]` tags inside our crate. On Rust 1.80+ these
 // trip the `unexpected_cfgs` lint because the consuming crate did not declare
-// them. We silence at crate level until the upstream macros emit
-// `check-cfg` directives themselves.
+// them. Still required: removing the allow makes the warnings fire (verified
+// by host `cargo check`), so it is silenced at crate level.
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
@@ -42,9 +42,9 @@ pub mod state;
 use instructions::*;
 
 // NS-3 devnet program ID (owner-generated, owner-held keypair; mirrored in
-// Anchor.toml). Assigned per DR-002 for the NS-3 redeployment — deployment
-// and on-chain acceptance are PENDING (docs/DEVNET.md carries the NS-3
-// preparation record until the owner executes the deployment). The NS-2
+// Anchor.toml). Assigned per DR-002; deployed to Devnet and accepted on
+// 2026-11-12 (56/56 W2 acceptance; independently re-verified 2026-11-15) —
+// see docs/DEVNET.md and docs/w2-ns3-acceptance/. The earlier NS-2
 // deployment (CuQZes…Ao54) and the NS-1 frozen static reference (5JiCV…zvNF)
 // are preserved in docs/LEGACY_DEPLOYMENTS.md — never reuse their keypairs
 // for mainnet (KEYS-003).
@@ -54,8 +54,8 @@ declare_id!("EFJpKtWx5gDnc4Hh6GEEgPLUrPh377E4Nfic8jsJAQJL");
 pub mod grave_scanner {
     use super::*;
 
-    /// Initialise the GraveScanner protocol config PDA.
-    /// Multisig-only at launch (Squads v4 3-of-5).
+    /// Initialise the GraveScanner protocol config PDA. Permissionless one-time
+    /// PDA creation; the first successful caller supplies the authority pubkey.
     pub fn initialize(ctx: Context<Initialize>, params: InitializeParams) -> Result<()> {
         instructions::initialize::handler(ctx, params)
     }
@@ -95,8 +95,8 @@ pub mod grave_scanner {
         instructions::evaluate_pool_phase2::handler(ctx, params)
     }
 
-    /// Multisig-only, immediate. Invalidates an `EligibilityAnchor` before its
-    /// Phase 2 certification. Conveys no salvage authority.
+    /// Governance-authority-gated (`has_one = authority` signer check),
+    /// immediate. Invalidates an anchor pre-cert; no salvage authority.
     pub fn invalidate_anchor(
         ctx: Context<InvalidateAnchor>,
         params: InvalidateAnchorParams,
@@ -112,8 +112,8 @@ pub mod grave_scanner {
         instructions::sweep_stale_anchor::handler(ctx)
     }
 
-    /// Multisig-only, 72h timelock at the GraveScanner level. Updates
-    /// thresholds, anchor_staleness_seconds, and authority keys.
+    /// Governance-authority-gated, immediate — no on-chain timelock; the
+    /// 72h Squads buffer is a process commitment. Updates thresholds/staleness.
     pub fn update_protocol_config(
         ctx: Context<UpdateProtocolConfig>,
         params: UpdateProtocolConfigParams,
@@ -121,11 +121,11 @@ pub mod grave_scanner {
         instructions::update_protocol_config::handler(ctx, params)
     }
 
-    /// Multisig-only, immediate. Toggles `paused` in ProtocolConfig. When
-    /// `true`, both `evaluate_pool_phase_1` and `evaluate_pool_phase_2` revert
-    /// with `ProtocolPaused`. `sweep_stale_anchor`, `invalidate_anchor`, and
-    /// config updates remain callable so the multisig can recover the protocol
-    /// from a paused state. Mirrors GraveVault's `emergency_pause`.
+    /// Governance-authority-gated, immediate. Toggles `paused` in
+    /// ProtocolConfig. When `true`, both `evaluate_pool_phase_1` and
+    /// `evaluate_pool_phase_2` revert with `ProtocolPaused`. The other
+    /// instructions remain callable so the configured authority can recover
+    /// the protocol from a paused state. Mirrors GraveVault's `emergency_pause`.
     pub fn emergency_pause(ctx: Context<EmergencyPause>, paused: bool) -> Result<()> {
         instructions::emergency_pause::handler(ctx, paused)
     }

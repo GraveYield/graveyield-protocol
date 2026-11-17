@@ -2,10 +2,10 @@
 //
 // Each instruction module exports its `Accounts` context struct, `Params`
 // struct, any `#[event]` it emits, and a `handler` function invoked by
-// lib.rs's `#[program]` block. The glob re-exports below are required by
-// Anchor 0.32.x's `#[program]` macro, which expects each instruction's
-// auto-generated `__cpi_client_accounts_*` / `__client_accounts_*` helper
-// modules to be in scope at the parent namespace. The `handler` symbol
+// lib.rs's `#[program]` block. The glob re-exports (first required by Anchor
+// 0.32.x's `#[program]` macro; verified still required under 1.2.2) bring each
+// instruction's auto-generated `__cpi_client_accounts_*` / `__client_accounts_*`
+// helper modules into scope at the parent namespace. The `handler` symbol
 // duplicates across modules, but that ambiguity is harmless: lib.rs only
 // ever invokes `handler` via the fully-qualified path
 // `instructions::<module>::handler(...)`, never through the glob.
