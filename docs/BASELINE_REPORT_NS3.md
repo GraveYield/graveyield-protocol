@@ -12,6 +12,14 @@
 > executed. Every on-chain value quoted here is a committed, previously
 > recorded deployment-evidence artifact re-verified against the repositories —
 > not a new RPC observation — except where explicitly marked otherwise.
+> **Amendment (2026-11-17, PR #113 follow-up):** the deferred Rust-source
+> comment corrections behind register rows G-03…G-06 were completed on the
+> PR #113 branch and are reconciled as **Completed** in §9.1/§10. The PR #113
+> rebuild reproduced the deployed manifest pins byte-for-byte for both
+> programs, so no re-pin and no owner redeployment is associated with these
+> corrections; PR #113 itself remains open and unmerged for owner review.
+> This amendment modifies only this report — no Rust source, manifest,
+> digest test, or DEVNET.md text.
 
 ---
 
@@ -67,8 +75,10 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
   frozen and internally consistent — the ELFs on devnet are byte-pinned, the
   pins are CI-enforced, and deliberate change requires a reviewed re-pin PR
   plus an owner redeployment. The *project* baseline is not frozen in the
-  sense of "nothing left to do": eight register items are deferred, blocked,
-  or awaiting owner decisions (§10). Under the roadmap's milestone sequence
+  sense of "nothing left to do": register items remain deferred, blocked,
+  or awaiting owner decisions (§10) — with G-03…G-06 completed by PR #113
+  (§9.1), G-07 is the sole remaining deferred row. Under the roadmap's
+  milestone sequence
   (§12.1), the M0 exit criterion is to establish one authoritative
   implementation and deployment baseline, with no conflicting claims across
   repositories and documentation. What still bears on M0 is therefore
@@ -192,6 +202,12 @@ Actions API for each recorded HEAD.
   `docs/GY-DOC-RECON-001_ALIGNMENT_REPORT.md` (+2,396 lines), revision 5
   (2026-11-14). Not on `main`; its 21 owner questions (Q-01…Q-21) are
   **open**, not resolved (§11).
+- **protocol #113 (OPEN, head `0c1c0c3`, 2026-11-17):** docs(programs) — the
+  deferred G-03…G-06 Rust-source comment corrections (21 files,
+  comment-only; the `salvage_pool.rs` Anchor-version notes are in scope).
+  Built through the fail-closed provenance gate on the pinned toolchain; the
+  rebuild reproduced the deployed manifest pins byte-for-byte — no re-pin
+  and no redeployment required (§9.1, §10).
 - **protocol dependabot:** #109 (@solana/web3.js 3.1.1→3.2.1), #108
   (prettier), #107 (typescript-eslint), #94 (eslint) — open, unmerged.
 - **protocol issue #98 (open):** investigation record — NS-3 Node.js
@@ -240,10 +256,12 @@ All statements in this section are from direct source inspection at
   verified against live mainnet state per checklist); LOCKER-002
   (PinkSale/Team Finance/Streamflow) **not implemented** — such pools are
   treated as unlocked (⬜ tracking row).
-- **Known stale source comments (deferred corrections):** the NS-3 program-ID
-  block at `src/lib.rs:46` still reads "deployment and on-chain acceptance
-  are PENDING" — factually stale since 2026-11-12; correction P-02 deferred
-  for ELF-provenance reasons (§9.1).
+- **Source-comment correction status (P-02 / G-03):** the NS-3 program-ID
+  block at `src/lib.rs:46` read "deployment and on-chain acceptance
+  are PENDING" — factually stale since 2026-11-12 and deferred since PR #111
+  for ELF-provenance reasons. Corrected by PR #113 (comment-only; the
+  rebuild reproduced the deployed manifest pins byte-for-byte — §9.1); the
+  PR remains open and unmerged for owner review.
 
 ### 4.2 GraveVault (`programs/grave-vault/`)
 
@@ -277,12 +295,15 @@ All statements in this section are from direct source inspection at
 - **Fail-closed stubs (verified at source):** `src/cpi/raydium_clmm.rs`,
   `src/cpi/orca_whirlpool.rs`, `src/cpi/pump_swap.rs` all revert with
   `AmmCpiUnimplemented` (7017) — CPI-006/007/008 are not implemented (v1.1).
-- **Known stale source comments (deferred corrections):** the NS-3 block at
-  `src/lib.rs:55` still reads "PENDING" (P-03 deferred); instruction doc
-  comments still present "Multisig-only (Squads v4 3-of-5)" / "Multisig +
-  72h timelock" as if enforced (P-08 deferred); the vault charter header
-  still presents bytecode-enforced invariants and process commitments as one
-  list (P-09 deferred). See §9.1.
+- **Source-comment correction status (P-03/P-08/P-09 → G-03/G-05/G-06):** the
+  NS-3 block at `src/lib.rs:55` read "PENDING"; instruction doc comments
+  presented "Multisig-only (Squads v4 3-of-5)" / "Multisig + 72h timelock" as
+  if enforced; the vault charter header presented bytecode-enforced
+  invariants and process commitments as one list. All corrected by PR #113
+  (comment-only): initialization reworded as permissionless one-time PDA
+  creation, authority-gated handlers labeled configured-authority-gated,
+  and the charter header split into bytecode-enforced invariants vs process
+  commitments (§9.1); the PR remains open and unmerged for owner review.
 
 ### 4.3 Protocol SDK (`sdk/`, package `@graveyield/sdk` v0.2.0)
 
@@ -493,8 +514,10 @@ Matching digests prove the deployed bytes equal the approved build outputs.
 They do **not** prove the authenticity of every transitive build dependency
 or the manifest's original trust anchors (W2 §8 scope limitation), and they
 are **not** evidence of any protocol operation. The verifier's "digest_match"
-semantic after any future source change without redeployment is honestly
-"right shape, wrong bytes" until an owner redeploys (DEVNET.md §1).
+semantic after any future source change that shifts the built bytes, without
+redeployment, is honestly "right shape, wrong bytes" until an owner redeploys
+(DEVNET.md §1); PR #113 demonstrates that comment-only edits are not
+necessarily byte-shifting — the rebuild is the only arbiter (§9.1).
 
 ### 6.4 The verification ladder (do not conflate these)
 
@@ -525,7 +548,7 @@ Covered in §4. Summary status:
 | `snapshotter/` | Implemented | 53 tests; byte-locked Merkle convention |
 | `adversary/` battery | Implemented | 39 tests |
 | Devnet tooling + provenance gates | Implemented | devnet-tools 410 tests per PR #111 record; gates green in CI |
-| Rust-source comment truth (P-02/03/08/09, P-07 source parts) | **Deferred** — stale comments remain at scanner `lib.rs:46`, vault `lib.rs:55`, instruction doc comments, charter header | N/A — deliberately not applied (§9.1) |
+| Rust-source comment truth (P-02/03/08/09, P-07 source parts) | **Completed** via PR #113 — comment-only corrections on the PR branch (scanner/vault `lib.rs` blocks, instruction doc comments, charter header, Anchor attributions incl. `salvage_pool.rs`) | Rebuilt ELFs reproduced the manifest pins byte-for-byte; no re-pin/redeployment (§9.1) |
 
 ### 7.B `grave-indexer` (`93ce7897`)
 
@@ -758,33 +781,65 @@ deployed ELF provenance stays authoritative**, the ELF-shifting edits were
 reverted (`677aab6`), and only the non-ELF-affecting parts landed in the
 final PR #111 diff.
 
+The deferred Rust-source parts were subsequently completed by **PR #113**
+(head `0c1c0c3`, branch `fix/deferred-source-comment-corrections`,
+2026-11-17): a comment-only correction pass — verified in this amendment
+against the PR diff (147 added / 147 removed lines across `programs/`, every
+changed line a comment, every file's line count preserved, plus a 2-line
+`docs/error_codes.md` doc sync) — built through the fail-closed provenance
+gate on the pinned toolchain. The rebuild reproduced the deployed manifest
+pins byte-for-byte for both programs (GraveScanner `e24ddc5e…d6c98`,
+GraveVault `8c71fe9d…33e83`, per the PR #113 build record), so the
+DEVNET.md §1 discipline resolves with no re-pin and no redeployment: the
+existing deployed digests were preserved and verified against the unchanged
+manifest — not a new deployment and not a new on-chain verification event.
+PR #113 remains open and unmerged for owner review; the rows below are
+updated accordingly, and the deferral history is retained as the record of
+the owner's 2026-11-16 decision.
+
 | ID | Correction | Surface | Status |
 |---|---|---|---|
 | P-01 | `Anchor.toml` program-ID comment → deployed status (2026-11-12, 56/56) | config comment (non-ELF) | **Addressed** (PR #111) |
-| P-02 | Scanner `lib.rs` NS-3 block: "PENDING" → deployed | **Rust source comment** | **Deferred** — stale text remains at `programs/grave-scanner/src/lib.rs:46` |
-| P-03 | Vault `lib.rs` NS-3 block: same rewrite | **Rust source comment** | **Deferred** — stale text remains at `programs/grave-vault/src/lib.rs:55` |
+| P-02 | Scanner `lib.rs` NS-3 block: "PENDING" → deployed | **Rust source comment** | **Addressed** (PR #113 — comment-only; the stale text at `programs/grave-scanner/src/lib.rs:46` is corrected on the PR branch) |
+| P-03 | Vault `lib.rs` NS-3 block: same rewrite | **Rust source comment** | **Addressed** (PR #113 — comment-only; the stale text at `programs/grave-vault/src/lib.rs:55` is corrected on the PR branch) |
 | P-04 | `Anchor.toml` `[scripts]` ts-mocha target commented out with limitation note (harness never landed; `anchor test` runs no suite) | config comment (non-ELF) | **Addressed** (PR #111; tests/README.md updated) |
 | P-05 | Anchor 0.32.x → 1.2.2 across README badges/table/quickstart, CONTRIBUTING, `docs/technical-documentation.md` | docs (non-ELF) | **Addressed** (PR #111) |
 | P-06 | CI badge URL → canonical `GraveYield/graveyield-protocol` path | docs (non-ELF) | **Addressed** (PR #111) |
-| P-07 | "Anchor 0.31.x/0.32.x" behavior-note attributions → "the pinned Anchor line" (scanner+vault lib.rs headers, both `instructions/mod.rs`, `raydium_v4.rs` adapter notes) — plus the non-source part: scanner `Cargo.toml` `anchor-debug` comment | Rust source comments + Cargo.toml comment | **Split:** Cargo.toml part **Addressed** (PR #111, proven byte-inert); **Rust-source parts Deferred** |
-| P-08 | "Multisig-only (Squads v4 3-of-5)" / "Multisig + 72h timelock" instruction doc comments → governance-authority-gated with multisig+timelock as the committed Mainnet posture, not current-program enforcement | **Rust source comments** | **Deferred** |
-| P-09 | Vault `lib.rs` charter header split into bytecode-enforced invariants vs process commitments | **Rust source comment** | **Deferred** |
+| P-07 | "Anchor 0.31.x/0.32.x" behavior-note attributions → "the pinned Anchor line" (scanner+vault lib.rs headers, both `instructions/mod.rs`, `raydium_v4.rs` adapter notes — plus `programs/grave-vault/src/instructions/salvage_pool.rs`, omitted from the original row and included in the PR #113 correction scope) — plus the non-source part: scanner `Cargo.toml` `anchor-debug` comment | Rust source comments + Cargo.toml comment | **Split:** Cargo.toml part **Addressed** (PR #111, proven byte-inert); **Rust-source parts Addressed** (PR #113 — attributions relabeled as historical or as verified under anchor-lang 1.2.2, per build evidence) |
+| P-08 | "Multisig-only (Squads v4 3-of-5)" / "Multisig + 72h timelock" instruction doc comments → configured-authority-gated wording, with multisig custody + 72h timelock labeled as the committed governance/process posture, not current-program enforcement; initialization documented as permissionless one-time PDA creation | **Rust source comments** | **Addressed** (PR #113 — wording distinction established in the comments; no on-chain enforcement is added or implied) |
+| P-09 | Vault `lib.rs` charter header split into bytecode-enforced invariants vs process commitments | **Rust source comment** | **Addressed** (PR #113 — enforced items re-verified against the implementation; commitments labeled as governance/process, without upgrade-proof absolute wording) |
 
-**Why the Rust-source corrections are deferred (the specific conflict,
-documented in `docs/DEVNET.md` §1):** any edit to the program Rust sources —
-comments included — shifts source line numbers and with them the SBF ELFs'
-embedded line/panic-location metadata, changing the built bytes away from
-the deployed digests. This was established empirically: the comment-edited
-tree reproducibly built to different digests across three independent
-pinned-toolchain builds (CI run 43907738016 + two local `--build-only`
-rebuilds, agreeing byte-for-byte). The rebuilt digests from that tree
-(`ae777eb3…7004b` / `6fd86675…6199c`) were never deployed and never approved;
-the interim re-pin was withdrawn. What is **verified**: the delta was
-comment-only; the digests shifted reproducibly; reverting restored
-byte-identical digests (the gate passes on `main`). What is **not
-established**: the exact byte-level mechanism (no archived copy of the
+**Why the Rust-source corrections were deferred before PR #113 (the specific
+conflict, documented in `docs/DEVNET.md` §1):** the PR #111-era owner
+decision treated any program-source edit as capable of shifting the built
+bytes away from the deployed digests. What was established empirically at
+that time: the comment-edited tree reproducibly built to different digests
+across three independent pinned-toolchain builds (CI run 43907738016 + two
+local `--build-only` rebuilds, agreeing byte-for-byte). The rebuilt digests
+from that tree (`ae777eb3…7004b` / `6fd86675…6199c`) were never deployed and
+never approved; the interim re-pin was withdrawn. What was **verified**:
+that delta was comment-only; the digests shifted reproducibly; reverting
+restored byte-identical digests (the gate passes on `main`). What was
+**not established**: the exact byte-level mechanism (no archived copy of the
 comment-edited ELFs was retained); the line-metadata explanation is recorded
-as a plausible hypothesis, not a fact.
+in DEVNET.md §1 as a plausible hypothesis, not a fact.
+
+**Resolution (PR #113, 2026-11-17):** the deferred corrections were
+re-applied as a strictly line-count-preserving, comment-only pass and built
+through the fail-closed gate on the pinned toolchain. The rebuild
+reproduced the deployed manifest pins byte-for-byte for both programs
+(GraveScanner `e24ddc5e…d6c98`, GraveVault `8c71fe9d…33e83`, per the PR #113
+build record), so no re-pin and no owner redeployment is required or
+performed: the existing deployed digests are unchanged and were verified
+against the unchanged manifest. This is consistent with DEVNET.md §1's own
+caveat that the earlier shift is "not a general law" and that "the only
+reliable arbiter is a rebuild run through the fail-closed gate" — no
+mechanism claim is made here for either outcome. The earlier
+`ae777eb3`/`6fd86675` digests remain invalid, never-deployed historical
+artifacts. G-03…G-06 are therefore recorded as completed by PR #113 (§10);
+PR #113 remains open and unmerged for owner review, and no deployment,
+upgrade, authority change, or transaction is associated with these
+corrections.
 
 **The four-way distinction (DEVNET.md §1):**
 
@@ -793,19 +848,25 @@ as a plausible hypothesis, not a fact.
 2. **The approved SHA-256 provenance pins** — the manifest values; the
    authority the fail-closed gate enforces; authoritative per the owner's
    2026-11-16 decision.
-3. **Locally rebuilt ELF artifacts** — build outputs; a rebuild from the
-   current tree matches the pins; the comment-edited tree's rebuild did not.
+3. **Locally rebuilt ELF artifacts** — build outputs; a rebuild from `main`
+   matches the pins; the PR #111-era comment-edited tree's rebuild did not,
+   while PR #113's comment-edited tree's rebuild does (see the resolution
+   above — the rebuild is the arbiter in both cases).
 4. **The documented process for legitimate future ELF changes** — a
    deliberate, reviewed digest re-pin PR per the DEVNET.md §1 procedure,
    followed by an owner-executed redeployment.
 
 A **documentation correction** (this report, README updates) touches no
-bytes; a **source-comment change** can shift ELF bytes and therefore the
-pins; a **binary change** is a new build output requiring a new approved pin;
-a **deployment change** is the owner-only on-chain act that makes new bytes
-the deployed reality. Deferred corrections remain open until a reviewed
-re-pin PR plus redeployment; they are **not** treated as completed anywhere
-in this report.
+bytes; a **source-comment change** *can* shift ELF bytes and therefore the
+pins, but need not — the rebuild through the fail-closed gate decides, and
+PR #113's comment-only pass proved byte-neutral; a **binary change** is a
+new build output requiring a new approved pin; a **deployment change** is
+the owner-only on-chain act that makes new bytes the deployed reality.
+Corrections whose rebuild reproduces the pins byte-for-byte can complete
+without a re-pin or redeployment (the PR #113 outcome); corrections whose
+rebuild shifts the bytes remain open until a reviewed re-pin PR plus
+redeployment. No correction is treated as completed anywhere in this report
+without that rebuild evidence.
 
 ### 9.2 Other known limitations (implemented vs planned)
 
@@ -853,10 +914,10 @@ Status categories are used exactly as defined (one per item, not mixed).
 |---|---|---|---|---|---|---|
 | G-01 | Deployment | NS-3 programs deployed, initialized, drilled, scanner oracles registered on Devnet (56/56 W2 + 14/14 independent) | **Verified** | Foundation for all further work | None | P0 (complete) |
 | G-02 | Provenance | Deployed ELFs match manifest pins; fail-closed CI gate + rebuild byte-equality | **Verified** | Protects deployment integrity | Re-pin PR + owner redeployment for any future change | P0 (complete) |
-| G-03 | Protocol docs | Rust-source comment corrections P-02/P-03 (stale "PENDING" NS-3 blocks at scanner `lib.rs:46`, vault `lib.rs:55`) | **Deferred** | Cosmetic-vs-byte trade-off: comments contradict deployed reality | Reviewed re-pin PR (DEVNET.md §1 procedure) + owner redeployment | DEV |
-| G-04 | Protocol docs | Rust-source parts of P-07 (Anchor-attribution comments in lib.rs headers, both `instructions/mod.rs`, `raydium_v4.rs`) | **Deferred** | Same conflict as G-03 | Same as G-03 | DEV |
-| G-05 | Protocol docs | P-08 instruction doc comments still present multisig/timelock as if enforced | **Deferred** | Governance misunderstanding risk for integrators | Same as G-03 | DEV |
-| G-06 | Protocol docs | P-09 vault charter header not split into bytecode-enforced vs process commitments | **Deferred** | Same audience as G-05 | Same as G-03 | DEV |
+| G-03 | Protocol docs | Rust-source comment corrections P-02/P-03 (stale "PENDING" NS-3 blocks at scanner `lib.rs:46`, vault `lib.rs:55`) | **Completed** (PR #113 — comments only; rebuilt ELFs reproduce the manifest pins byte-for-byte: existing deployed digests preserved and verified, no re-pin, no redeployment) | Stale text corrected; readers no longer told the deployment is pending | Owner merge disposition of PR #113 (open, unmerged) | P0 (complete) |
+| G-04 | Protocol docs | Rust-source parts of P-07 (Anchor-attribution comments in lib.rs headers, both `instructions/mod.rs`, `raydium_v4.rs`, and `programs/grave-vault/src/instructions/salvage_pool.rs` — the last omitted from the original row and included in the PR #113 correction scope) | **Completed** (PR #113 — historical attributions labeled as historical; current-toolchain attributions evidence-based; same byte-for-byte pin preservation as G-03) | Anchor-version behavior claims now carry evidence labels | Owner merge disposition of PR #113 (open, unmerged) | P0 (complete) |
+| G-05 | Protocol docs | P-08 instruction doc comments presented multisig/timelock as if enforced | **Completed** (PR #113 — initialization documented as permissionless one-time PDA creation, the first successful caller supplying the authority public key; authority-gated handlers documented as configured-authority-gated; Squads custody + 72h timelock labeled governance/process commitments; reserved fields marked write-only, not enforcement) | Integrators no longer read multisig enforcement into the handlers; the wording does not add or imply on-chain governance enforcement | Owner merge disposition of PR #113 (open, unmerged) | P0 (complete) |
+| G-06 | Protocol docs | P-09 vault charter header did not separate bytecode-enforced invariants from process commitments | **Completed** (PR #113 — charter header split; enforced items re-verified against the implementation without upgrade-proof absolute wording; timelock/notice/postmortem windows and the no-token stance labeled process commitments, not bytecode) | Charter readers can now distinguish bytecode enforcement from governance/process commitments | Owner merge disposition of PR #113 (open, unmerged) | P0 (complete) |
 | G-07 | SDK / salvor-bots | Stale NS-3 "PENDING" docblocks: `sdk/src/client.ts:90-96` (protocol + byte-locked salvor mirror), `scout/src/config.ts:15-21`, `scout/test/devnetSmoke.test.ts:9-13` (oracles "point at the since-wiped deployer key" — false since 2026-11-12) | **Deferred** (TS-only, not ELF-affecting, but CI byte-equality requires a coordinated two-repo PR; recorded, not fixed, per task scope) | Misleads bot operators reading source | Coordinated protocol+salvor-bots mirror PR | DEV |
 | G-08 | Console | Audit corrections A1–A6 / B1–B2 + 45 regression tests (PR #13) not merged; all symptoms present on `main` (token orientation, estimator guard/mint input, score cell, `VAULT_IX` missing `sweep_dust`, footer, 3 RPC surfaces, no genesis check) | **Not implemented** (branch `fix/phase2-audit-corrections` CI-green, closed) | Console displays mis-oriented tokens; cluster identity asserted, not verified | Owner disposition of PR #13 (re-open/re-land/rebase onto post-#12 main) | DEV |
 | G-09 | Console | Lifecycle integration (design `docs/lifecycle-integration-design.md`, owner decision O4) — no lifecycle reads, no `PoolState` extension | **Not implemented** (design only, merged via PR #12) | Console cannot show pool lifecycle truthfully | Owner approval of O4 scope, then implementation | DEV |
@@ -890,8 +951,13 @@ Status categories are used exactly as defined (one per item, not mixed).
 
 Register discipline notes: no item is counted twice across categories;
 implementation status is never inferred from code existence alone (G-17 is
-"Not implemented" on-chain although fully implemented in code); deferred
-items G-03…G-07 are deliberately **not** classified as done. A **P0**
+"Not implemented" on-chain although fully implemented in code); G-03…G-06
+are classified as **Completed** solely on PR #113's rebuild evidence (the
+comment-only corrections reproduced the deployed manifest pins
+byte-for-byte — no re-pin, no redeployment; the PR itself remains open and
+unmerged for owner review, so the corrections sit on the PR branch, not yet
+on `main`); G-07 remains deferred and is deliberately **not** classified as
+done, and no other row's status is affected. A **P0**
 classification marks a Phase 0 documentation/baseline matter; by itself it
 is **not** an automatic M0 exit blocker — M0's exit criterion is the
 roadmap's (§12.2: one authoritative baseline, no conflicting claims across
@@ -1015,9 +1081,11 @@ clarification).
 10. **Mainnet custody chain (G-22/G-23).** GOV-001 timelock decision, KEYS-003
     key ceremony, Squads 3-of-5 arrangements.
 11. **Audit engagement (G-24).** Select and commission the independent audit.
-12. **Deferred-correction schedule (G-03…G-07).** When to bundle the
-    Rust-source comment corrections into a reviewed re-pin PR + owner
-    redeployment, and the coordinated SDK docblock PR.
+12. **Deferred-correction schedule (G-07) + PR #113 disposition.** The
+    G-03…G-06 Rust-source comment corrections are complete via PR #113 (no
+    re-pin/redeployment — §9.1); outstanding are the owner's merge
+    disposition of PR #113 and the scheduling of the coordinated SDK
+    docblock mirror PR (G-07).
 13. **SDK publication (G-30).** Owner npm credentials session.
 
 ---
@@ -1154,7 +1222,8 @@ no conflicting claims across repositories and documentation — §12.2) is
 served only by the documentation-conflict subset of item 1. The M1 Testnet
 scope freeze — defining the Testnet v0 scope — can begin once M0's actual
 roadmap exit criteria are satisfied; it does **not** wait on the remainder
-of item 1 or on items 2–6, which are outstanding backlog work tracked in
+of item 1 or on items 2–6 (item 4's corrections are delivered by PR #113;
+its owner merge disposition remains), which remain backlog work tracked in
 the gap register (§10), classified by their actual dependencies and target
 phases — not M0 exit criteria and not prerequisites for starting M1.
 Beginning M1 neither authorizes Testnet deployment nor establishes Testnet
@@ -1184,11 +1253,15 @@ appropriate subsequent milestones:
 3. **Truth-pass PRs (documentation-only, no ELF impact):** indexer
    G-13/G-14, salvor G-07 (coordinated mirror PR), console G-10, site G-35.
    *Accept:* terminology + doc-links lint green; no manifest change.
-4. **Deferred-correction bundle (G-03…G-06):** one reviewed PR carrying all
-   Rust-source comment corrections, built through the fail-closed gate,
-   digests re-pinned deliberately per DEVNET.md §1, redeployed by the owner.
-   *Accept:* new pins recorded with from→to digests; owner redeployment
-   verified by `verify_ns3_elf_digests.mjs` 27/27 against the new pins.
+4. **Deferred-correction bundle (G-03…G-06) — delivered as PR #113:** one
+   reviewed PR carrying all Rust-source comment corrections, built through
+   the fail-closed gate on the pinned toolchain; the rebuild reproduced the
+   existing manifest pins byte-for-byte, so no re-pin and no owner
+   redeployment was required (the unchanged-digest outcome of the
+   DEVNET.md §1 procedure). *Accept (met):* comment-only diff, line counts
+   preserved; rebuilt ELFs byte-equal to the pins per the PR #113 build
+   record; manifest untouched. *Outstanding:* owner merge disposition — the
+   PR remains open and unmerged.
 5. **Console alignment (G-08/G-09/G-11):** land the corrections branch
    (rebased onto post-#12 main), then implement the approved lifecycle
    design, then re-vendor the canonical SDK.
@@ -1236,7 +1309,9 @@ appropriate subsequent milestones:
 
 ### PR evidence index
 
-- PR #111 (Phase 0 reconciliation; deferral decision + full verification
+- PR #113 (G-03…G-06 comment-only corrections; rebuild reproduced the
+  manifest pins — no re-pin/redeployment; open, unmerged for owner review),
+  PR #111 (Phase 0 reconciliation; deferral decision + full verification
   record), #110 (record reconciliation + independent verification source),
   #105 (IMPL-001 Phase A), #103 (W2 acceptance), #100 (fork skip-integrity),
   #99 (provenance checker bounding), #89 (digest verifier), #84/#85/#86
