@@ -72,14 +72,19 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
   (§12.1), the M0 exit criterion is to establish one authoritative
   implementation and deployment baseline, with no conflicting claims across
   repositories and documentation. What still bears on M0 is therefore
-  limited to genuine documentation inconsistencies — the register's
-  documentation-discrepancy rows (G-14, G-25/G-26, G-34, G-35, G-36) — not
-  the blanket resolution of every open PR, owner decision, or development
-  task. Owner disposition of console implementation PR #13 is a development
-  task (G-08, DEV), and PR #104 with its unresolved questions remains
-  visible as a documentation-lineage and owner-decision matter (G-25, §11):
-  neither is automatically required before M1 can begin — only the
-  conflicting claims themselves, where still present, are. The first
+  limited to genuine documentation conflicts — the register's
+  documentation-conflict rows (G-14, G-34, G-35, G-36), each naming its
+  specific conflicting claims and reconciliation evidence — not the blanket
+  resolution of every open PR, owner decision, development task, or
+  documentation-lineage decision. The G-25/G-26 documentation-lineage rows
+  keep their findings, P0 classifications, and all owner-question
+  references (§10); per the §10 clarification their M0 bearing is confined
+  to those specific conflicts — the disposition of PR #104 itself
+  (merge/extract/retire) and the resolution of all 21 of its owner
+  questions are outstanding non-M0 matters (§11). Owner disposition of
+  console implementation PR #13 is a development task (G-08, DEV): it is
+  not automatically required before M1 can begin — only the conflicting
+  claims themselves, where still present, are. The first
   owner-gated end-to-end devnet exercise against NS-3, the funded-payer
   evidence matrix, and the ORACLE-003 runbook (before any scheduled oracle
   operation) remain outstanding Devnet operational work in the gap register
@@ -870,8 +875,8 @@ Status categories are used exactly as defined (one per item, not mixed).
 | G-22 | Governance | GOV-001: `pending_authority`/`timelock_seconds` write-only; 7014 never raised; upgrade authority = single deployer key | **Requires owner decision** (wire on-chain timelock or document reserved) | Mainnet custody posture | Squads 3-of-5 custody plan | PRE-MN |
 | G-23 | Keys | KEYS-003: mainnet keypairs under custody; never reuse devnet keys; full ID-surface sync list in DECISIONS.md DR-001 §4 | **Not implemented** (🟥 checklist row) | Hard mainnet blocker | Owner key ceremony | PRE-MN |
 | G-24 | Security | Independent security audit; audit handoff path exists (`PRE_MAINNET_CHECKLIST.md` §Audit handoff); issue #23 is unsolicited outreach only | **Not implemented** | Hard mainnet blocker | Owner engagement decision | PRE-MN |
-| G-25 | Docs lineage | GY-DOC-RECON-001 alignment report unmerged (PR #104, revision 5, do-not-merge) with 21 open owner questions | **Requires owner decision** | Canonical-documentation state ambiguous | Owner review/disposition of PR #104 + Q-01…Q-21 | P0 |
-| G-26 | Docs lineage | Whitepaper version lineage (v4.0 md vs v4.0.1 comment references vs docx metadata; Q-01/WP-02); GhostPools r5 revision (Q-11/GP-01…05); spec baseline re-pin (SP-01); roadmap form (Q-12) | **Requires owner decision** | Public-document integrity | Owner decisions inside PR #104 review | P0 |
+| G-25 | Docs lineage | GY-DOC-RECON-001 alignment report unmerged (PR #104, revision 5, do-not-merge) with 21 open owner questions | **Requires owner decision** | Canonical-documentation state ambiguous | Split per the §10 clarification below: **(A) M0-relevant** — only the specific, demonstrable cross-repository conflicts (claims about the implementation/deployment baseline itself), itemized with their conflicting claims and reconciliation evidence in rows G-14/G-34/G-35/G-36, each resolvable by its own row's path without any disposition of PR #104; **(B) non-M0** — the PR #104 disposition itself (merge/extract/retire) and the Q-01…Q-21 questions that do not create an actual conflict in the current implementation/deployment baseline (§11), kept fully visible at their target phases | P0 |
+| G-26 | Docs lineage | Whitepaper version lineage (v4.0 md vs v4.0.1 comment references vs docx metadata; Q-01/WP-02); GhostPools r5 revision (Q-11/GP-01…05); spec baseline re-pin (SP-01); roadmap form (Q-12) | **Requires owner decision** | Public-document integrity | Per the §10 clarification below: as recorded, none of the four matters above creates a demonstrable conflict in the current implementation/deployment baseline — each is an editorial, historical, publication, or owner-ratification decision (whitepaper version choice Q-01/WP-02; GhostPools qualifications Q-11/GP-01…05; spec re-pin SP-01; roadmap form Q-12) that stays visible inside PR #104 review at its target phase, all references preserved; none is an automatic M0 blocker | P0 |
 | G-27 | Repo split | In-repo `indexer/` package overlaps dedicated `grave-indexer` repo; `submit.ts` holds `ACTIVITY_ORACLE_KEY` env custody (ADR D3 narrowing) | **Requires owner decision** (Q-05) | Custody-surface widening; duplicate maintenance | Owner adopts Deliverable 3 §16 recommendation or alternatives | OPS |
 | G-28 | Scale | Discovery backfill/cursor policy at ~706k pools (Q-07); mainnet RPC provider strategy (Q-08); full-archive RPC for C2 derivation (Q-20) | **Requires owner decision** | Evidence completeness + cost at scale | Owner decisions before mainnet funnel | PRE-MN |
 | G-29 | Monitoring | Scheduled evidence-smoke secrets (`DEVNET_RPC_URL`/`MAINNET_RPC_URL`) configured-or-not unverifiable from repos (Q-09) | **Not independently verified** | Monitoring may be silently no-op | Owner check in GitHub settings | OPS |
@@ -893,7 +898,76 @@ roadmap's (§12.2: one authoritative baseline, no conflicting claims across
 repositories and documentation), and each row's bearing on that criterion
 is determined by its own description and dependency column, not by its
 phase tag. Rows classified DEV/OPS/PRE-MN/ROADMAP carry into the later
-milestones and stages their phases describe.
+milestones and stages their phases describe. The G-25/G-26 dependency
+columns are split explicitly in the clarification below.
+
+**G-25/G-26 M0-dependency clarification.** Both rows remain in the register
+with their P0 classifications, descriptions, evidence, and owner-question
+references unchanged. What is clarified is each row's bearing on the M0 exit
+criterion (§12.2), so that neither row can be read as making the blanket
+disposition of PR #104 — or the resolution of all 21 of its owner questions
+(Q-01…Q-21) — a prerequisite for M0. The rule applied is the report-wide one
+(§12.2): M0 requires resolution of actual documentation conflicts that
+prevent one authoritative implementation and deployment baseline; it does
+not require blanket resolution of PR #104, all 21 owner questions, or every
+documentation-lineage decision.
+
+- **Actual M0 blockers (specific, demonstrable conflicts).** Under the
+  roadmap criterion, the only G-25/G-26 content that bears on M0 is the set
+  of specific, demonstrable conflicting claims across repositories or
+  authoritative documentation — claims about the implementation and
+  deployment baseline itself. As recorded, those discrepancies are itemized
+  in their own register rows, each naming its conflicting claims and the
+  evidence needed to reconcile them, and each resolvable by its own row's
+  path without any disposition of PR #104: **G-14** (indexer
+  ORACLE_PIPELINE §8 / ORACLE_CUSTODY pre-registration framing vs the
+  2026-11-12 registration record — small doc PR), **G-34** (console
+  delivery-status wording: `main` carries the r1-only PR #12 report
+  versions vs the closed-unmerged PR #14 r3, which states the code was
+  delivered as PR #13 — itself unmerged; owner picks the canonical
+  revision), **G-35** (site first-viewport overstatement vs the
+  meta-description/Status qualifiers — small site PR), and **G-36**
+  (test-count claims: 372 vs static ~373 salvor; 715 protocol claim vs CI;
+  Q-13 — per-repo commit-pinned counts). The unmerged status of the
+  alignment report itself is not a conflicting claim: PR #104 is an
+  explicitly do-not-merge review artifact, and a draft's recommendations do
+  not contradict `main` until the owner adopts them.
+- **Outstanding non-M0 matters (kept fully visible; nothing marked
+  resolved).** (i) The owner's disposition decision for PR #104 itself —
+  merge as review artifact, extract into actionable PRs, or retire (§11
+  item 1). (ii) The unresolved questions among Q-01…Q-21: as recorded in
+  this report's evidence, none is shown to create a demonstrable conflict
+  in the current implementation/deployment baseline; each stays open with
+  its §11 reference and carries into the phase its register row targets.
+  (iii) The G-26 lineage matters, classified per matter below. Should any
+  G-25/G-26 matter be shown to create a demonstrable conflict in the
+  current implementation/deployment baseline — with the exact conflicting
+  statements and the evidence identified — that specific conflict would
+  fall under the M0 criterion; as recorded, none does.
+- **G-26 per-matter classification** (actual contradictions of the
+  implementation/deployment baseline vs editorial, historical, publication,
+  or owner-ratification decisions):
+  - **Whitepaper version lineage (Q-01/WP-02).** The coexisting version
+    identities (published md v4.0, comment references to v4.0.1, docx
+    metadata) are a demonstrable public-record inconsistency — but not a
+    conflict in the implementation/deployment baseline: no
+    implementation/deployment claim depends on which whitepaper version is
+    canonical. Outstanding: the owner's version choice (Q-01/WP-02; the
+    alignment report's "adopt Version 4.1.0 draft" is a recommendation, not
+    a decision), followed by the documentation task of aligning version
+    references to the ratified version. No version is selected here; all
+    three references are preserved.
+  - **GhostPools r5 revision (Q-11/GP-01…05).** Editorial qualification and
+    ratification decisions on a public document; no recorded dependency on
+    implementation/deployment state. Outstanding owner decision (Q-11).
+  - **Specification baseline re-pin (SP-01).** A lineage decision about
+    which specification revision is pinned; as recorded, no specification
+    statement is identified as contradicting the deployed programs'
+    behavior or the deployment baseline. Outstanding owner decision
+    (SP-01); the re-pin does not automatically block M0.
+  - **Roadmap form (Q-12).** A presentation/ratification decision
+    (status-based roadmap); no implementation/deployment dependency.
+    Outstanding owner decision (Q-12).
 
 ---
 
@@ -901,13 +975,22 @@ milestones and stages their phases describe.
 
 Extracted from the draft alignment report (PR #104, Q-01…Q-21), the decision
 register, the console implementation report (O-items), and this baseline's
-findings. **None of these is silently marked resolved.**
+findings. **None of these is silently marked resolved.** As recorded, none
+of them is a blanket M0 prerequisite either: the M0 criterion turns on the
+specific documentation conflicts named in §10/§12.2, not on the blanket
+resolution of PR #104 or of every question below (§10 G-25/G-26
+clarification).
 
 1. **PR #104 disposition (G-25/G-26).** Merge as review artifact, extract
    into actionable PRs, or retire — plus ratification of Q-01 (whitepaper
    lineage: recommend adopting Version 4.1.0 draft), Q-02 (canonical C1–C6
    labels + historical mapping), Q-11 (GhostPools r5 qualifications),
-   Q-12 (status-based roadmap), SP-01 (spec baseline re-pin).
+   Q-12 (status-based roadmap), SP-01 (spec baseline re-pin). *M0 bearing:
+   none, as recorded* — these are documentation-lineage and
+   owner-ratification decisions that do not create a demonstrable conflict
+   in the current implementation/deployment baseline (§10 clarification);
+   the M0-relevant conflicts are the specific register rows named in
+   §12.2.
 2. **Console PR #13 and PR #14 (G-08/G-34).** Decide whether the A1–A6/B1–B2
    corrections branch is re-based and landed, and which revision of the
    implementation report is canonical.
@@ -963,12 +1046,17 @@ As defined in the supplied roadmap:
   supplied roadmap, is to establish **one** authoritative implementation
   and deployment baseline, with **no conflicting claims** across
   repositories and documentation. The register rows that still bear on this
-  criterion are the documentation-discrepancy rows (G-14, G-25/G-26, G-34,
-  G-35, G-36 — §12.2). M0 does **not** require resolving every open PR,
-  owner decision, or development task — only the genuine conflicting claims
-  in the record; a **P0** classification alone is not an automatic M0 exit
-  blocker (§10). The open Devnet operational items (G-12, G-16, G-17,
-  G-18) are **not** M0 exit criteria.
+  criterion are the documentation-conflict rows (G-14, G-34, G-35, G-36 —
+  §12.2), each naming its specific conflicting claims and reconciliation
+  evidence; the G-25/G-26 lineage rows stay visible as outstanding
+  owner-decision matters (§10 clarification), with M0 bearing confined to
+  those same specific conflicts — the blanket disposition of PR #104 and
+  the resolution of all 21 of its owner questions are not M0 requirements.
+  M0 does **not** require resolving every open PR, owner decision, or
+  development task — only the genuine conflicting claims in the record; a
+  **P0** classification alone is not an automatic M0 exit blocker (§10).
+  The open Devnet operational items (G-12, G-16, G-17, G-18) are **not**
+  M0 exit criteria.
 - **M1 — Testnet scope freeze (next milestone; begins once M0 is
   satisfied; not started).** Its purpose is to **define the Testnet v0
   scope**: Raydium AMM V4, WSOL, one controlled test pool, one complete
@@ -1004,21 +1092,23 @@ Explicitly distinguishing the two states:
 **The M0 exit criterion, per the supplied roadmap, is to establish one
 authoritative implementation and deployment baseline, with no conflicting
 claims across repositories and documentation.** The remaining work that
-bears on that criterion is limited to the genuine documentation
-inconsistencies — not the blanket resolution of every open PR, owner
-decision, or development task:
+bears on that criterion is limited to the genuine documentation conflicts —
+not the blanket resolution of every open PR, owner decision, development
+task, or documentation-lineage decision:
 
 1. **Close the Phase 0 documentation state.** The specific Phase 0
    reconciliation PRs **have been merged** (protocol #111, indexer #3,
    salvor-bots #4, console #12, site #2); what remains open for M0 is the
    resolution of the residual cross-repository documentation discrepancies
-   still tracked in the gap register (G-14, G-25/G-26, G-34, G-35, G-36)
-   so the public record becomes internally consistent — including, where a
-   row's dependency column calls for one, the specific owner decision that
-   resolves it. PR #104's blanket disposition and its remaining owner
-   questions are documentation-lineage and owner-decision matters (G-25,
-   §11) that stay visible and carry into the phases their register rows
-   target; they are not automatically required before M1 can begin.
+   still tracked in the gap register (G-14, G-34, G-35, G-36 — the
+   specific demonstrated conflicts, per the §10 clarification) so the
+   public record becomes internally consistent — including, where a row's
+   dependency column calls for one, the specific owner decision that
+   resolves it. PR #104's blanket disposition, its remaining owner
+   questions, and the G-26 lineage matters are documentation-lineage and
+   owner-decision matters (G-25/G-26, §10/§11) that stay visible and carry
+   into the phases their register rows target; they are not automatically
+   required before M1 can begin.
 
 **Outstanding Devnet operational work — kept fully visible in the gap
 register (§10) and in the §13 backlog.** These items are **not** M0 exit
@@ -1077,8 +1167,10 @@ appropriate subsequent milestones:
    requirement. *Accept:* each open PR and §11 question carries a recorded
    owner disposition or remains explicitly tracked in §10/§11; none is
    silently resolved. *M0-relevant subset:* only the dispositions that
-   resolve present documentation conflicts (G-14, G-25/G-26, G-34, G-35,
-   G-36) bear on the M0 exit criterion (§12.2). Console PR #13
+   resolve present documentation conflicts (G-14, G-34, G-35, G-36) bear
+   on the M0 exit criterion (§12.2); per the §10 clarification, the PR
+   #104 disposition itself, the non-conflicting Q-01…Q-21 questions, and
+   the G-26 lineage decisions are not part of that subset. Console PR #13
    implementation corrections (G-08) and lifecycle work (G-09) remain
    development tasks (DEV); the remaining §11 questions carry into the
    phases their register rows target.
