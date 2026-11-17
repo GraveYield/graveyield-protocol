@@ -189,16 +189,19 @@ revision is out of scope.
 | `emergency_pause` | Configured-authority-gated pause flag; gates `salvage_pool` only. |
 
 "Configured-authority-gated" is the exact enforcement shape of every
-privileged instruction above: the program requires the transaction
-signer to equal the ProtocolConfig `authority` stored on chain
-(Anchor `has_one = authority` + `authority: Signer`), and that authority
-is whatever key the first successful `initialize` supplied. The programs
-check the signer's identity only — they do not verify Squads membership,
-signer counts, or M-of-N approval. Squads v4 M-of-N custody (3-of-5 at
-launch, 4-of-7 post-audit per the Charter) is the intended external
-governance arrangement that may control that authority; where it does,
-approval flows through Squads' own control path — a governance
-commitment, not program enforcement.
+privileged instruction above: the program requires the authority
+account to be a signer for the instruction and to match the
+ProtocolConfig `authority` stored on chain (Anchor `has_one = authority`
++ `authority: Signer`), and that authority is whatever key the first
+successful `initialize` supplied. Signer privilege may be provided
+through a program-derived address's authorized CPI path — the authority
+need not be a top-level transaction signer. The programs check the
+signer's identity only — they do not verify Squads membership, signer
+counts, or M-of-N approval. Squads v4 M-of-N custody (3-of-5 at launch,
+4-of-7 post-audit per the Charter) is the intended external governance
+arrangement that may control that authority; where it does, approval
+flows through Squads' own control path — a governance commitment, not
+program enforcement.
 
 ### 2.2 PDA map
 

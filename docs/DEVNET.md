@@ -845,6 +845,8 @@ subsequent deployment passed the recorded post-deployment acceptance
   enforcement: the programs gate on the configured authority's
   signature only, do not verify Squads membership or M-of-N
   thresholds, and `initialize` itself is permissionless (payer-signed;
-  authority supplied as a public-key parameter). No Mainnet Squads
-  instance is deployed or configured at the time of writing; KEYS-003
-  and GOV-001 track the mainnet custody and timelock wiring decisions.
+  authority supplied as a public-key parameter). This repository
+  contains no verifiable evidence of a deployed or configured Mainnet
+  Squads instance at the time of writing; Mainnet governance
+  configuration remains subject to verification. KEYS-003 and GOV-001
+  track the mainnet custody and timelock wiring decisions.
