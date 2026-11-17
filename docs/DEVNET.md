@@ -470,6 +470,17 @@ In every `init-*` transaction the deployer keypair is the
 transaction's signer and fee payer; the governance public key is only
 written into the config's `authority` field.
 
+These are client-side/operational safeguards, not properties of the
+on-chain instruction. The `initialize` instruction in both programs is
+permissionless and init-once: the Anchor `init` constraint creates the
+`ProtocolConfig` PDA exactly once, the payer is the only signer the
+instruction requires (it signs and pays), and the configured authority
+is supplied as a public-key parameter that does not sign the
+initialization transaction. A client that constructs the instruction
+directly could initialize an uninitialized config with any authority it
+chooses — the CLI's `--authority` requirement, governance-key pinning,
+and role separation exist because that choice is one-time and permanent.
+
 With all-zero params the on-chain defaults land (mirroring
 `constants.rs` in both programs):
 
@@ -823,8 +834,19 @@ subsequent deployment passed the recorded post-deployment acceptance
   fork harness already proves the settlement mechanics against mainnet
   bytecode (`tests/` suites).
 - **Multisig authority / on-chain timelock** — devnet NS-3 runs the
-  single deployer key as upgrade authority and governance as config
-  authority, with the timelock fields as reserved state. Mainnet ships
-  multisig-only (Squads v4 3-of-5) per the Charter and `initialize`
-  documentation; KEYS-003 and GOV-001 track the mainnet custody and
-  timelock wiring.
+  single deployer key as upgrade authority and the governance key as
+  ProtocolConfig authority — two separate authority domains (the BPF
+  upgradeable loader's ProgramData upgrade authority vs the config
+  authority the programs check; controlling one does not confer the
+  other) — with the timelock fields as reserved state. The intended
+  Mainnet governance arrangement — Squads v4 3-of-5 custody of the
+  configured ProtocolConfig authority (4-of-7 post-audit target) per
+  the Charter — is a governance/process commitment, not program
+  enforcement: the programs gate on the configured authority's
+  signature only, do not verify Squads membership or M-of-N
+  thresholds, and `initialize` itself is permissionless (payer-signed;
+  authority supplied as a public-key parameter). This repository
+  contains no verifiable evidence of a deployed or configured Mainnet
+  Squads instance at the time of writing; Mainnet governance
+  configuration remains subject to verification. KEYS-003 and GOV-001
+  track the mainnet custody and timelock wiring decisions.

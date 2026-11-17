@@ -227,7 +227,15 @@ export function buildScannerEmergencyPauseIx(opts: {
   });
 }
 
-/** Build GraveScanner::invalidate_anchor (multisig-only). */
+/**
+ * Build GraveScanner::invalidate_anchor. Configured-authority-gated: the
+ * `authority` account is the instruction signer and must equal the
+ * ProtocolConfig authority stored on chain. The program checks that
+ * signature only — it does not verify Squads membership or M-of-N
+ * thresholds; where the configured authority is a Squads PDA (the
+ * intended governance arrangement), approval flows through Squads' own
+ * control path.
+ */
 export function buildInvalidateAnchorIx(opts: {
   scannerProgramId: PublicKey;
   ammProgramId: PublicKey;
