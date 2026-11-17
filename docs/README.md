@@ -46,7 +46,8 @@ canon outside this list is either superseded or unrelated to the project.
 | Topic | Document |
 |-------|----------|
 | Error codes (Scanner 6000-6019, Vault 7000-7014) | [`error_codes.md`](error_codes.md) |
-| Phase 0 baseline (verified on-chain + repo state, 2026-10-24; blocker register, devnet usability decision, next steps) | [`BASELINE_REPORT.md`](BASELINE_REPORT.md) |
+| **Authoritative NS-3 project baseline** (2026-11-17 — the current-state reference: deployment, provenance, cross-repo status, deferred work, gap register, owner decisions) | [`BASELINE_REPORT_NS3.md`](BASELINE_REPORT_NS3.md) |
+| Phase 0 baseline (verified on-chain + repo state, 2026-10-24; blocker register, devnet usability decision, next steps) — **historical record of the NS-1/NS-2 era, superseded as the current-state reference by [`BASELINE_REPORT_NS3.md`](BASELINE_REPORT_NS3.md)** | [`BASELINE_REPORT.md`](BASELINE_REPORT.md) |
 | W2 NS-3 Devnet deployment acceptance (owner-executed 2026-11-12; recorded 29/29 + 27/27 verifier results, tx signatures, scope limits) | [`w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md`](w2-ns3-acceptance/W2_NS3_POST_DEPLOYMENT_ACCEPTANCE.md) |
 | Independent read-only NS-3 Devnet re-verification (2026-11-15; 14/14 checks at finalized slot 522363929, epoch 1209; recorded from the merged PR #110 description) | [`w2-ns3-acceptance/INDEPENDENT_READONLY_VERIFICATION_2026-11-15.md`](w2-ns3-acceptance/INDEPENDENT_READONLY_VERIFICATION_2026-11-15.md) |
 | W1 NS-3 lifecycle-rehearsal inspection (pre-modification harness inspection: works / NS-2-specific / NS-3-ready / adapt / missing / mocked / owner-gated) | [`W1_NS3_REHEARSAL_INSPECTION.md`](W1_NS3_REHEARSAL_INSPECTION.md) |
