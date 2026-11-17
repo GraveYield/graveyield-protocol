@@ -71,14 +71,20 @@ writes) rather than by a lost key — unlike NS-1 and NS-2.
   or awaiting owner decisions (§10). Under the roadmap's milestone sequence
   (§12.1), the M0 exit criterion is to establish one authoritative
   implementation and deployment baseline, with no conflicting claims across
-  repositories or documentation; what still bears on it is documentation
-  work — owner disposition of PR #13 (console corrections) and PR #104
-  (alignment report), plus the register's documentation-discrepancy rows.
-  The first owner-gated end-to-end devnet exercise against NS-3, the
-  funded-payer evidence matrix, and the ORACLE-003 runbook (before any
-  scheduled oracle operation) remain outstanding Devnet operational work in
-  the gap register (§10) and the §13 backlog — they are not M0 exit criteria
-  and do not gate starting M1.
+  repositories and documentation. What still bears on M0 is therefore
+  limited to genuine documentation inconsistencies — the register's
+  documentation-discrepancy rows (G-14, G-25/G-26, G-34, G-35, G-36) — not
+  the blanket resolution of every open PR, owner decision, or development
+  task. Owner disposition of console implementation PR #13 is a development
+  task (G-08, DEV), and PR #104 with its unresolved questions remains
+  visible as a documentation-lineage and owner-decision matter (G-25, §11):
+  neither is automatically required before M1 can begin — only the
+  conflicting claims themselves, where still present, are. The first
+  owner-gated end-to-end devnet exercise against NS-3, the funded-payer
+  evidence matrix, and the ORACLE-003 runbook (before any scheduled oracle
+  operation) remain outstanding Devnet operational work in the gap register
+  (§10) and the §13 backlog — they are not M0 exit criteria and do not gate
+  starting M1.
 
 ---
 
@@ -880,7 +886,14 @@ Status categories are used exactly as defined (one per item, not mixed).
 Register discipline notes: no item is counted twice across categories;
 implementation status is never inferred from code existence alone (G-17 is
 "Not implemented" on-chain although fully implemented in code); deferred
-items G-03…G-07 are deliberately **not** classified as done.
+items G-03…G-07 are deliberately **not** classified as done. A **P0**
+classification marks a Phase 0 documentation/baseline matter; by itself it
+is **not** an automatic M0 exit blocker — M0's exit criterion is the
+roadmap's (§12.2: one authoritative baseline, no conflicting claims across
+repositories and documentation), and each row's bearing on that criterion
+is determined by its own description and dependency column, not by its
+phase tag. Rows classified DEV/OPS/PRE-MN/ROADMAP carry into the later
+milestones and stages their phases describe.
 
 ---
 
@@ -946,13 +959,16 @@ owner-supplied Devnet-to-Testnet roadmap
 
 As defined in the supplied roadmap:
 
-- **M0 — Baseline freeze (current stage).** Its exit criteria are to
-  establish **one** authoritative implementation and deployment baseline,
-  with **no conflicting claims** across repositories or documentation. The
-  register rows that still bear on this criterion are the
-  documentation-discrepancy rows (G-14, G-25, G-34, G-35, G-36 — §12.2).
-  The open Devnet operational items (G-12, G-16, G-17, G-18) are **not** M0
-  exit criteria.
+- **M0 — Baseline freeze (current stage).** Its exit criterion, per the
+  supplied roadmap, is to establish **one** authoritative implementation
+  and deployment baseline, with **no conflicting claims** across
+  repositories and documentation. The register rows that still bear on this
+  criterion are the documentation-discrepancy rows (G-14, G-25/G-26, G-34,
+  G-35, G-36 — §12.2). M0 does **not** require resolving every open PR,
+  owner decision, or development task — only the genuine conflicting claims
+  in the record; a **P0** classification alone is not an automatic M0 exit
+  blocker (§10). The open Devnet operational items (G-12, G-16, G-17,
+  G-18) are **not** M0 exit criteria.
 - **M1 — Testnet scope freeze (next milestone; begins once M0 is
   satisfied; not started).** Its purpose is to **define the Testnet v0
   scope**: Raydium AMM V4, WSOL, one controlled test pool, one complete
@@ -964,9 +980,12 @@ As defined in the supplied roadmap:
   freeze.
 
 Phase 0 baseline establishment (this report) is the M0 stage; per the
-roadmap it must be followed by Phase 1 Testnet scope freeze (M1). Mainnet
-readiness remains a separate stage that comes only after Testnet completion
-and stabilization (§12.3).
+roadmap it must be followed by Phase 1 Testnet scope freeze (M1). Satisfying
+M0's actual exit criteria is what opens M1; outstanding register work (§10)
+is carried into the appropriate subsequent milestones per its target-phase
+classification — beginning M1 neither authorizes Testnet deployment nor
+establishes Testnet readiness. Mainnet readiness remains a separate stage
+that comes only after Testnet completion and stabilization (§12.3).
 
 Explicitly distinguishing the two states:
 
@@ -984,15 +1003,22 @@ Explicitly distinguishing the two states:
 
 **The M0 exit criterion, per the supplied roadmap, is to establish one
 authoritative implementation and deployment baseline, with no conflicting
-claims across repositories or documentation.** The remaining work that
-bears on that criterion is documentation-consistency work:
+claims across repositories and documentation.** The remaining work that
+bears on that criterion is limited to the genuine documentation
+inconsistencies — not the blanket resolution of every open PR, owner
+decision, or development task:
 
 1. **Close the Phase 0 documentation state.** The specific Phase 0
    reconciliation PRs **have been merged** (protocol #111, indexer #3,
-   salvor-bots #4, console #12, site #2); what remains open is the owner
-   disposition of PR #104 and the residual cross-repository documentation
-   discrepancies still tracked in the gap register (G-14, G-25, G-34,
-   G-35, G-36) so the public record becomes internally consistent.
+   salvor-bots #4, console #12, site #2); what remains open for M0 is the
+   resolution of the residual cross-repository documentation discrepancies
+   still tracked in the gap register (G-14, G-25/G-26, G-34, G-35, G-36)
+   so the public record becomes internally consistent — including, where a
+   row's dependency column calls for one, the specific owner decision that
+   resolves it. PR #104's blanket disposition and its remaining owner
+   questions are documentation-lineage and owner-decision matters (G-25,
+   §11) that stay visible and carry into the phases their register rows
+   target; they are not automatically required before M1 can begin.
 
 **Outstanding Devnet operational work — kept fully visible in the gap
 register (§10) and in the §13 backlog.** These items are **not** M0 exit
@@ -1033,16 +1059,29 @@ committed verifiers.
 ## 13. Recommended Next Steps
 
 In dependency order, each with its acceptance condition. **Milestone
-mapping (per §12.1):** item 1 serves the M0 exit criterion (one
-authoritative baseline, no conflicting claims across repositories or
-documentation). The M1 Testnet scope freeze — defining the Testnet v0
-scope — can begin once M0 is satisfied; it does **not** wait on items 2–6,
-which are outstanding backlog work tracked in the gap register (§10), not
-M0 exit criteria and not prerequisites for starting M1:
+mapping (per §12.1):** the M0 exit criterion (one authoritative baseline,
+no conflicting claims across repositories and documentation — §12.2) is
+served only by the documentation-conflict subset of item 1. The M1 Testnet
+scope freeze — defining the Testnet v0 scope — can begin once M0's actual
+roadmap exit criteria are satisfied; it does **not** wait on the remainder
+of item 1 or on items 2–6, which are outstanding backlog work tracked in
+the gap register (§10), classified by their actual dependencies and target
+phases — not M0 exit criteria and not prerequisites for starting M1.
+Beginning M1 neither authorizes Testnet deployment nor establishes Testnet
+readiness; the outstanding work remains documented and carried into the
+appropriate subsequent milestones:
 
 1. **Owner dispositions (no code):** rule on PR #104, PR #13/#14 console
-   branches, and the thirteen decisions in §11. *Accept:* each open PR has a
-   recorded owner decision; no question in §11 is left silently open.
+   branches, and the thirteen decisions in §11 — each according to its
+   actual dependency and target phase (§10), not as a blanket M0
+   requirement. *Accept:* each open PR and §11 question carries a recorded
+   owner disposition or remains explicitly tracked in §10/§11; none is
+   silently resolved. *M0-relevant subset:* only the dispositions that
+   resolve present documentation conflicts (G-14, G-25/G-26, G-34, G-35,
+   G-36) bear on the M0 exit criterion (§12.2). Console PR #13
+   implementation corrections (G-08) and lifecycle work (G-09) remain
+   development tasks (DEV); the remaining §11 questions carry into the
+   phases their register rows target.
 2. **NS-3 live exercise package (owner-gated, mode-2 discipline):** fund a
    devnet payer, run the full 13-case matrix with 0 skipped against NS-3,
    then one end-to-end certify-and-salvage drill with recorded artifacts.
