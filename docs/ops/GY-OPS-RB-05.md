@@ -1,10 +1,10 @@
 # GY-OPS-RB-05 — Manual Locker Screening Runbook
 
-**Version:** 1.0.0
-**Status:** OWNER-RATIFIED FOR M1
-**Decision:** DR-003 / D-05 / Q-04
-**Scope:** Protocol-wide, inventory-scoped best-effort screening
-**Mandatory limitation:** Best-effort screening against a ratified inventory — not universal detection.
+- **Version:** 1.0.0
+- **Status:** OWNER-RATIFIED FOR M1
+- **Decision:** DR-003 / D-05 / Q-04
+- **Scope:** Protocol-wide, inventory-scoped best-effort screening
+- **Mandatory limitation:** Best-effort screening against a ratified inventory — not universal detection.
 
 ## 1. Purpose
 
@@ -70,7 +70,15 @@ A zero-account result is evidence of absence only for the queried program, filte
 
 ### R4 — Generic LP custody enumeration
 
-Enumerate token accounts for the LP mint using exact mint filters and token-account size for the applicable token program. Repeat for Token-2022 where relevant.
+Enumerate token accounts for the LP mint using exact mint filters for the applicable token program.
+
+**Token-program coverage (mandatory, fail-closed).**
+
+1. Determine the token program that owns the LP mint by reading the mint account, and record the determination and its evidence.
+2. Run full `getProgramAccounts` enumeration for the LP mint under that token program.
+3. Run the same mint-filtered query against the other token program (SPL Token or Token-2022) and record its result. Token accounts for a mint exist only under the mint's own token program, so any nonzero result under the other program indicates a misidentified mint program or split custody and fails closed.
+4. If the LP mint is a Token-2022 mint, record its extension set — including any transfer-fee and transfer-hook extensions — and treat hook-mediated custody as reportable. Do not rely on a fixed account-size filter for Token-2022 accounts: extensions change the account data size, so a size filter can silently drop accounts. Use mint memcmp filters; if a size filter must be used, its value must be justified against the recorded extension set, otherwise the query is incomplete and fails closed.
+5. An unsupported token program, an ambiguous mint-program determination, or skipped token-program coverage cannot produce a PASS.
 
 Aggregate balances by owner and classify each owner:
 - known holder wallet;
@@ -78,7 +86,15 @@ Aggregate balances by owner and classify each owner:
 - known locker/custody program;
 - unknown wallet/PDA/custodian.
 
-For PDA owners, resolve the owning program using account information and investigate the custody path. Any detected non-UNCX lock or unknown custodian disqualifies the candidate. Incomplete enumeration, truncation, unsupported token program, or unresolved owner is not a PASS.
+**PDA owner classification (mandatory, fail-closed).** A PDA owner must never be classified as a known holder wallet. For every PDA owner:
+
+1. fetch the PDA account and record its owning program;
+2. attempt attribution by re-deriving candidate PDAs for every ratified-inventory program and comparing derived addresses;
+3. record the derivation inputs, the owning program, and the custody conclusion in the artifact.
+
+If the owning program cannot be determined, is not covered by the ratified inventory, or the custody path cannot be documented, the owner remains classified as an unknown custodian and the run ends `DISQUALIFIED_UNKNOWN_CUSTODIAN`. Reclassification as approved benign custody requires a written basis and owner approval recorded in the artifact; it can never be inferred from enumeration alone.
+
+Any detected non-UNCX lock or unknown custodian disqualifies the candidate. Incomplete enumeration, truncation, unsupported token program, or unresolved owner is not a PASS.
 
 `getTokenLargestAccounts` top-N is a weaker fallback only. If used, label the result weaker and do not treat it as equivalent to full enumeration.
 

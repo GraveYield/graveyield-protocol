@@ -1,11 +1,11 @@
 # GraveYield M1 Owner Decision Record
 
-**Decision ID:** `DR-003`
-**Owner decision bundle:** `GY-M1-ODR-001`
-**Related cluster ruling:** `GY-M1-CR-001`
-**Date:** 2026-11-19 (UTC+8)
-**Status:** OWNER-APPROVED — documentation formalization authorized
-**Amendments:** None
+- **Decision ID:** `DR-003`
+- **Owner decision bundle:** `GY-M1-ODR-001`
+- **Related cluster ruling:** `GY-M1-CR-001`
+- **Date:** 2026-11-19 (UTC+8)
+- **Status:** OWNER-APPROVED — documentation formalization authorized
+- **Amendments:** None
 
 ## 1. Approval provenance and scope
 
