@@ -283,8 +283,10 @@ def manifest_digest(artifact):
 # wins), which would allow the object that gets schema-validated to differ
 # from the object that gets hashed. Every documentation JSON document is
 # therefore parsed with duplicate-member rejection at every object nesting
-# level. (The independent Node.js implementation is strict here by
-# construction: its JSON.parse already throws on duplicate object keys.)
+# level. (The independent Node.js cross-check is not a substitute for this:
+# Node's JSON.parse silently keeps the last of duplicate object keys, so
+# duplicate-key rejection is enforced only here, by this Python parser,
+# before the cross-check runs.)
 # --------------------------------------------------------------------------
 
 
@@ -342,9 +344,9 @@ RFC_NUMBER_VECTORS = [
 # strings orders by UTF-16 code units, which implements §3.2.3 property
 # ordering. Expected values committed in the vectors file were generated with
 # this implementation, and the live check below re-verifies on every run.
-# Node's JSON.parse additionally rejects duplicate object keys by
-# construction, independently enforcing the strict-parsing rule on the
-# committed vectors file.
+# The committed files are already checked for duplicate keys by
+# Python strict_json_loads() before the Node cross-check runs.
+# Node JSON.parse() itself does not reject duplicate object keys.
 NODE_CHECK_SCRIPT = r"""
 const crypto = require('crypto');
 const fs = require('fs');
