@@ -1,0 +1,48 @@
+{
+  "schema": "gy.locker-inventory.v1",
+  "version": "1.0.0",
+  "status": "M1 owner-ratified scope; only UNCX adapter verified in repository",
+  "ratification": {
+    "decision": "DR-003",
+    "date": "2026-11-19",
+    "scope": "protocol-wide",
+    "limitation": "Best-effort screening against a ratified inventory \u2014 not universal detection."
+  },
+  "entries": [
+    {
+      "name": "UNCX Raydium AMM V4 locker",
+      "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
+      "status": "verified_in_repository",
+      "query_authoritative": true,
+      "notes": "Use the exact adapter/PDA derivation and account validation implemented in programs/grave-scanner/src/adapters/locker.rs. Revalidate against the target fork state for each run."
+    },
+    {
+      "name": "Streamflow",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    },
+    {
+      "name": "Team Finance",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    },
+    {
+      "name": "PinkSale",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    }
+  ],
+  "policy": {
+    "non_uncx_lock": "disqualify",
+    "unknown_custodian": "disqualify",
+    "incomplete_query_or_inventory": "fail_closed",
+    "single_operator_signature": "incomplete",
+    "retention": "certification lifetime plus at least 2 years"
+  }
+}

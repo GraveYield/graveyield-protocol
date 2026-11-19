@@ -14,6 +14,7 @@
 |---|---|---|---|
 | DR-001 | 2026-10-25 | NS-1: deployer key custody resolved — dead key; path B (fresh devnet deployment); current deployment retained as frozen static reference | B1, NS-1 (gates NS-2) |
 | DR-002 | 2026-11-03 | NS-2 authority key lost (forensics 2026-11-03; owner-side search empty); NS-2 deployments preserved untouched as historical evidence; NS-3 approved with fresh deployment identities — keys generated and held by the owner, deployment executed manually by the owner | phase-4 assessment B1, decision D1 (branch b) |
+| DR-003 | 2026-11-19 | M1 owner decision package: D-04 acquisition/P2/register/sinks; D-05/Q-04; D-09/Q-05; D-02 governance trust; dedicated fork keys; D-06 P1–P7; D-16/G-18b unavailable; GY-M1-CR-001 cluster ruling; authorize M1 execution specification | M1 specification and owner-decision provenance |
 
 ---
 
@@ -150,3 +151,47 @@ mentions allowed only in `docs/LEGACY_DEPLOYMENTS.md`,
 `docs/DECISIONS.md`, the historical sections of `docs/DEVNET.md`, and
 historical evidence artifacts), and `docs/DEVNET.md` carries the new
 signature table with correct UTC dates.
+
+---
+
+## DR-003 — M1 owner decision package and execution-spec authorization — 2026-11-19
+
+**Owner decision bundle:** `GY-M1-ODR-001`
+**Related cluster ruling:** `GY-M1-CR-001`
+**Approval:** Owner approved all ten decision items on 2026-11-19 with no amendments.
+
+**Decision.** The owner approves:
+1. D-04-A: voluntary OTC acquisition from consenting LP holders.
+2. D-04-B: P2 Salvor operational renunciation of its LP-holder claim; direct 40% Salvor allocation remains.
+3. D-04-C: mandatory per-pool acquisition and restitution register.
+4. D-04-D: owner approval, independent review, and published exclusion ledger for sink declarations.
+5. D-05: ratify `GY-OPS-RB-05` and Q-04 with protocol-wide scope and best-effort limitations.
+6. D-09: canonical `grave-indexer` → protocol evaluation/queue → Salvor execution architecture; wire Q-05.
+7. D-16 and G-18b: record as unavailable, with no operative M1 effect until original definitions are recovered.
+8. D-02: documented governance-trust posture for M1; program-level threshold floors and multisig/timelock controls are required before Mainnet.
+9. KEYS: owner-controlled dedicated local-fork keys, separate deployment and oracle identities, and no Mainnet key reuse.
+10. D-06: ratify P1–P7 and define “match” as snapshot-time ownership.
+
+The complete terms, limitations, and evidence requirements are in [`decisions/GY-M1-OWNER-DECISIONS-001.md`](decisions/GY-M1-OWNER-DECISIONS-001.md).
+
+**Cluster ruling.** `GY-M1-CR-001` selects a local Solana Mainnet-fork validator with genuine Mainnet fixtures, actual elapsed time, actual local-validator epoch transitions, Mainnet-compatible Jupiter integration confined to the fork, and dedicated fork keys. It amends the D-03 execution environment and D-08 cluster wording. It does not prove Jupiter compatibility or authorize key generation, deployment, or transactions.
+
+**D-01 and D-08 formalization.** The M1 sourcing predicate requires exactly one WSOL side, with WSOL as Raydium `pc_mint` / quote side; C3 remains 500,000,000 raw quote-side units. This is an M1 sourcing restriction only. The owner-approved 15-stage lifecycle supersedes the older roadmap scope-freeze definition in substance. M1 completion is not Mainnet readiness. Synthetic/backdated eligibility evidence remains prohibited.
+
+**D-02 transparency.** The six eligibility criteria remain unchanged. The current program does not enforce lower bounds for C1/C3/C4 and permits C2=0 within its upper bound. The no-relaxation posture is a governance trust assumption for M1, not a bytecode guarantee. Program-level floors and multisig/timelock controls are pre-Mainnet requirements.
+
+**D-04 P2 enforcement boundary.** P2 is operational renunciation. The Salvor-controlled leaf remains in the distribution and is not claimed; its amount is not redistributed. Current claim code does not enforce this rule. A project-wallet watchlist and monitoring are required. Sink declarations require owner approval, independent review, and a published per-pool exclusion ledger. Unsupported nonzero exclusions fail closed until the live Rust producer/CLI path supports them.
+
+**D-05 limitation.** Q-04 is protocol-wide. Confirmed non-UNCX locks and unknown custodians disqualify. Only UNCX is verified in-repository at ratification; other candidate lockers require independent program/layout validation before reliance. Mandatory wording: “Best-effort screening against a ratified inventory — not universal detection.”
+
+**D-06 trust boundary.** P1–P7 are ratified as an M1 operational procedure. Holder-level re-enumeration, drift invalidation, and atomic binding are not implemented at the assessed baseline. The specification must not claim cryptographic holder-level guarantees.
+
+**D-09 and Q-05.** `grave-indexer` is canonical for discovery and C1 evidence; protocol handles candidate evaluation, scoring, queueing, and submission scheduling; GraveScanner is the on-chain eligibility authority; GraveVault is settlement; SDK is canonical for wire/PDA/instruction construction; Salvor bots consume one designated path; `ops/` supervises. Q-05 is resolved by wiring this canonical path. D-09 is distinct from the in-spec launch-price D9.
+
+**D-16 / G-18b.** Both identifiers are recorded as `UNAVAILABLE — original owner definition not supplied`. No meaning is inferred and neither has operative M1 effect until original definitions are recovered and explicitly adopted. This does not retire G-18 / ORACLE-003.
+
+**Key custody.** M1 uses dedicated owner-controlled local-fork keys, separate deployment and oracle identities, no Mainnet key reuse, and no repository storage of key material. The exact custodian/storage/rotation/funded-payer record remains an execution prerequisite. No key generation or transfer is authorized here.
+
+**Authorization.** The owner authorizes preparation and commitment of the M1 execution specification and associated governance/operations documentation. This is documentation authorization only. It does not authorize code implementation, broad refactoring, key generation or transfer, deployment, program upgrades, live transactions, pool operations, real-user funds, or Mainnet production activity.
+
+**Verification and remaining gates.** M1 execution remains gated by the engineering and operational prerequisites in `docs/M1_EXECUTION_SPEC.md`, including the SlotHashes fix and regression test, D-01 sourcing predicate, canonical indexer wiring, Rust snapshotter sole-producer wiring, independent snapshot validation, sink CLI support, Jupiter fork validation, cluster plumbing, P2 no-claim monitoring, locker-screening execution, and oracle custody/funded-payer records. OWN-13 remains open. OWN-14 remains open beyond the key-custody policy stated above.
