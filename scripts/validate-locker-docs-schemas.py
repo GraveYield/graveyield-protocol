@@ -19,6 +19,12 @@ Checks performed:
      with an independent RFC 8785 implementation (Node.js JSON.stringify over
      UTF-16-sorted copies) and cross-checked live against that Node
      implementation on every run when node is available.
+  7. Integer subset boundary: every schema-valid integer lies in the
+     interoperable safe-integer range (|n| <= 2^53 - 1); the canonicalizer
+     additionally rejects integers that are not exactly representable as
+     IEEE 754 doubles.
+  8. Strict JSON parsing: every committed documentation JSON document is
+     parsed with duplicate-member rejection at every object nesting level.
 
 Negative-test matrix (fail-closed constraints must actually reject):
   T1  qualified PASS without a reviewer countersignature is rejected
@@ -32,7 +38,23 @@ Negative-test matrix (fail-closed constraints must actually reject):
       (plus candidate with ratification_details, verified entry violations)
   T6  pool.token_program and token_program_coverage.mint_program must agree
       (changing one while preserving the other is rejected)
-  T7  valid SPL Token and valid Token-2022 screening examples are accepted
+  T7  deterministic manifest recipe on the committed example: the digest
+      reproduces, tampering is detected, and the canonical bytes are stable
+      across a JSON round-trip
+  F1  RFC 8785 conformance: Appendix B.2 numbers, string handling, committed
+      vectors, independent Node.js cross-check; invalid Unicode (unpaired
+      UTF-16 surrogates in values and member names) is rejected, never
+      escaped; integers not exactly representable as IEEE 754 doubles are
+      rejected
+  F2  manifest-hashing supported subset for getProgramAccounts filters
+      (non-integral numbers and non-ASCII member names rejected)
+  F3  safe-integer subset boundary: integers beyond 2^53 - 1 are rejected by
+      both schemas; the maximum permitted integer is accepted and pinned by a
+      committed vector; the first non-double-exact integer is rejected by the
+      canonicalizer
+  F4  strict JSON parsing: duplicate object members are rejected at the
+      document root and at every nesting level; the same member name in
+      sibling objects remains accepted
 
 Exit code 0 = every check passed; nonzero = at least one failure.
 """
@@ -93,6 +115,17 @@ def assert_accepted(name, validator, instance):
     report(name, not errors, detail)
 
 
+def assert_strict_loads_rejected(name, text):
+    try:
+        strict_json_loads(text)
+    except StrictJsonError:
+        report(name, True)
+    except ValueError as exc:  # noqa: BLE001 — wrong rejection type is a failure
+        report(name, False, f"rejected with an unexpected error type: {exc}")
+    else:
+        report(name, False, "duplicate-member document was not rejected")
+
+
 # --------------------------------------------------------------------------
 # RFC 8785 (JSON Canonicalization Scheme) — genuine implementation.
 #
@@ -107,9 +140,11 @@ def assert_accepted(name, validator, instance):
 #   exactly representable as IEEE 754 doubles are rejected (I-JSON, RFC 8785
 #   §3.2.2.3).
 # - Strings escape per RFC 8785 §3.2.2.2: quotation mark, backslash, and the
-#   C0 control characters only; everything else (including U+2028/U+2029 and
-#   DEL) is emitted literally as UTF-8. Lone surrogates are escaped as
-#   \udXXX, matching well-formed JSON.stringify.
+#   C0 control characters only; everything else (including U+2028/U+2029,
+#   DEL, and supplementary-plane characters) is emitted literally as UTF-8.
+#   Unpaired UTF-16 surrogate code units are invalid Unicode input: RFC 8785
+#   requires canonicalization to fail rather than silently emit them, so
+#   they are rejected (fail closed) instead of being escaped as \udXXX.
 # --------------------------------------------------------------------------
 _SHORT_ESCAPES = {
     '"': '\\"',
@@ -177,13 +212,25 @@ def _es6_number(value):
 
 
 def _serialize_string(text):
+    # RFC 8785 §3.2.2.2 requires string data to be valid Unicode. Unpaired
+    # UTF-16 surrogate code units cannot be emitted as valid UTF-8 JSON, so
+    # canonicalization fails closed instead of escaping them. (Python's JSON
+    # parser combines well-formed surrogate pairs into single scalar
+    # characters, so any surrogate surviving here is unpaired by
+    # construction.)
     out = ['"']
     for ch in text:
         code = ord(ch)
         esc = _SHORT_ESCAPES.get(ch)
         if esc is not None:
             out.append(esc)
-        elif code < 0x20 or 0xD800 <= code <= 0xDFFF:
+        elif 0xD800 <= code <= 0xDFFF:
+            raise ValueError(
+                "invalid Unicode: unpaired UTF-16 surrogate code unit "
+                f"U+{code:04X} fails canonicalization (RFC 8785 §3.2.2.2 "
+                "requires valid Unicode input; it must not be escaped)"
+            )
+        elif code < 0x20:
             out.append("\\u%04x" % code)
         else:
             out.append(ch)
@@ -193,7 +240,8 @@ def _serialize_string(text):
 
 def _utf16_key(key):
     # UTF-16 big-endian byte order == UTF-16 code-unit order (fixed 2-byte
-    # units). surrogatepass tolerates lone surrogates (escaped on output).
+    # units). surrogatepass is kept only as a defensive fallback; unpaired
+    # surrogates are already rejected during string serialization.
     return key.encode("utf-16-be", "surrogatepass")
 
 
@@ -226,6 +274,36 @@ def manifest_digest(artifact):
     body.pop("manifest_sha256", None)
     canonical = jcs_canonicalize(body)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), canonical
+
+
+# --------------------------------------------------------------------------
+# Strict JSON parsing (GY-OPS-RB-05 R7 input hygiene).
+#
+# Python's json.loads() silently accepts duplicate object keys (last value
+# wins), which would allow the object that gets schema-validated to differ
+# from the object that gets hashed. Every documentation JSON document is
+# therefore parsed with duplicate-member rejection at every object nesting
+# level. (The independent Node.js implementation is strict here by
+# construction: its JSON.parse already throws on duplicate object keys.)
+# --------------------------------------------------------------------------
+
+
+class StrictJsonError(ValueError):
+    """Raised when a JSON document contains a duplicate object member."""
+
+
+def _object_pairs_no_duplicates(pairs):
+    seen = set()
+    for key, _value in pairs:
+        if key in seen:
+            raise StrictJsonError(f"duplicate JSON object member: {key!r}")
+        seen.add(key)
+    return dict(pairs)
+
+
+def strict_json_loads(text):
+    """json.loads() that rejects duplicate object members at every nesting level."""
+    return json.loads(text, object_pairs_hook=_object_pairs_no_duplicates)
 
 
 # RFC 8785 Appendix B.2 number vectors (rfc-editor.org/rfc/rfc8785.txt):
@@ -264,6 +342,9 @@ RFC_NUMBER_VECTORS = [
 # strings orders by UTF-16 code units, which implements §3.2.3 property
 # ordering. Expected values committed in the vectors file were generated with
 # this implementation, and the live check below re-verifies on every run.
+# Node's JSON.parse additionally rejects duplicate object keys by
+# construction, independently enforcing the strict-parsing rule on the
+# committed vectors file.
 NODE_CHECK_SCRIPT = r"""
 const crypto = require('crypto');
 const fs = require('fs');
@@ -317,13 +398,24 @@ process.stdout.write(JSON.stringify(out));
 
 # In-script constructed string cases beyond the committed vectors file
 # (constructed programmatically so no raw control bytes, U+2028/U+2029, or
-# lone surrogates enter the repository): (name, input, expected canonical)
+# surrogates enter the repository): (name, input, expected canonical)
 EXTRA_STRING_ASSERTIONS = [
     ("u0001", "\u0001", '"\\u0001"'),
     ("del_u007f", "\u007f", '"\u007f"'),
     ("u2028_literal", "a\u2028b", '"a\u2028b"'),
     ("u2029_literal", "a\u2029b", '"a\u2029b"'),
-    ("lone_surrogate", "\ud800", '"\\ud800"'),
+    ("supplementary_plane_literal", "\U0001F600", '"\U0001F600"'),
+]
+
+# Invalid-Unicode inputs that MUST fail canonicalization (RFC 8785 §3.2.2.2):
+# unpaired UTF-16 surrogate code units, in string values and in object member
+# names alike. These replace the former lone-surrogate escaping acceptance:
+# canonicalization must fail closed, never silently escape invalid Unicode.
+REJECTED_UNICODE_INPUTS = [
+    ("unpaired_high_surrogate_value", "\ud800"),
+    ("unpaired_low_surrogate_value", "\udc00"),
+    ("unpaired_high_surrogate_member_name", {"\ud800x": 1}),
+    ("unpaired_low_surrogate_member_name", {"tail\udfff": 1}),
 ]
 
 
@@ -374,15 +466,15 @@ def run_node_cross_check(screening_example):
         Path(tmp).unlink(missing_ok=True)
     if proc.returncode != 0:
         raise RuntimeError(f"node cross-check failed: {proc.stderr[:2000]}")
-    return json.loads(proc.stdout)
+    return strict_json_loads(proc.stdout)
 
 
 
 
 def main():
     # ---- Load and meta-validate the schemas --------------------------------
-    inventory_schema = json.loads(INVENTORY_SCHEMA_PATH.read_text())
-    screening_schema = json.loads(SCREENING_SCHEMA_PATH.read_text())
+    inventory_schema = strict_json_loads(INVENTORY_SCHEMA_PATH.read_text())
+    screening_schema = strict_json_loads(SCREENING_SCHEMA_PATH.read_text())
     inventory_validator = jsonschema.Draft202012Validator(inventory_schema)
     screening_validator = jsonschema.Draft202012Validator(screening_schema)
 
@@ -399,7 +491,7 @@ def main():
         report("S0b locker-screening.schema.json passes meta-validation", False, str(exc))
 
     # ---- Committed data must validate --------------------------------------
-    inventory_data = json.loads(INVENTORY_DATA_PATH.read_text())
+    inventory_data = strict_json_loads(INVENTORY_DATA_PATH.read_text())
     assert_accepted(
         "S1 docs/ops/locker-inventory.json validates against gy.locker-inventory.v1",
         inventory_validator,
@@ -431,12 +523,19 @@ def main():
         "; ".join(rfc_failures[:6]),
     )
 
-    # ---- In-script string escaping cases ------------------------------------
+    # ---- In-script string handling and invalid-Unicode rejection ------------
     string_failures = []
     for name, input_, expected in EXTRA_STRING_ASSERTIONS:
         got = _serialize_string(input_)
         if got != expected:
             string_failures.append(f"{name}: expected {expected!r}, got {got!r}")
+    # invalid Unicode must fail canonicalization, never be escaped
+    for name, input_ in REJECTED_UNICODE_INPUTS:
+        try:
+            jcs_canonicalize(input_)
+            string_failures.append(f"{name} was canonicalized instead of rejected")
+        except ValueError:
+            pass
     # integers that are not IEEE 754-exact must be rejected (I-JSON)
     try:
         _es6_number(10**60)
@@ -444,14 +543,15 @@ def main():
     except ValueError:
         pass
     report(
-        "F1b JCS string escaping: control chars, DEL, U+2028/U+2029 literal, "
-        "lone surrogate escaped; non-representable integers rejected",
+        "F1b JCS string handling: control chars, DEL, U+2028/U+2029 and "
+        "supplementary-plane characters literal; unpaired high/low surrogates "
+        "(values and member names) rejected; non-exact integers rejected",
         not string_failures,
         "; ".join(string_failures),
     )
 
     # ---- Committed test vectors (docs/ops/manifest-test-vectors.json) -------
-    vectors_doc = json.loads(VECTORS_PATH.read_text())
+    vectors_doc = strict_json_loads(VECTORS_PATH.read_text())
     vector_results = {}
     vector_failures = []
     for vector in vectors_doc["vectors"]:
@@ -499,7 +599,7 @@ def main():
         "T7b tampered artifact yields a different manifest digest (detected)",
         manifest_digest(tampered)[0] != stated,
     )
-    roundtrip = json.loads(canonical_example)
+    roundtrip = strict_json_loads(canonical_example)
     report(
         "T7c canonical serialization is byte-stable across a JSON round-trip",
         manifest_digest(roundtrip)[0] == stated,
@@ -796,6 +896,109 @@ def main():
         inventory_validator,
         verified_not_authoritative,
     )
+
+    # ---- F3: safe-integer subset boundary -----------------------------------
+    big_int = 9007199254740992  # 2^53 — first integer beyond the safe range
+    max_int = 9007199254740991  # 2^53 - 1 — Number.MAX_SAFE_INTEGER
+    slots_big = copy.deepcopy(base)
+    slots_big["rpc"]["response_slots"] = [big_int]
+    assert_rejected(
+        "F3a integer 2^53 in rpc.response_slots is rejected (safe-integer maximum is 2^53-1)",
+        screening_validator,
+        slots_big,
+        expected_substrings=("9007199254740991",),
+    )
+    filter_big = copy.deepcopy(base)
+    filter_big["per_locker_queries"] = [
+        {
+            "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
+            "filters": [{"dataSize": big_int}],
+            "result": "EXAMPLE: complete result recorded",
+            "raw_response_sha256": "bb" * 32,
+        }
+    ]
+    assert_rejected(
+        "F3b out-of-range integer nested inside a filter object is rejected",
+        screening_validator,
+        filter_big,
+        expected_substrings=(
+            "9007199254740992",
+            "not valid under any of the given schemas",
+        ),
+    )
+    slots_max = copy.deepcopy(base)
+    slots_max["rpc"]["response_slots"] = [max_int]
+    assert_accepted(
+        "F3c maximum permitted integer 2^53-1 accepted in rpc.response_slots",
+        screening_validator,
+        slots_max,
+    )
+    filters_max = copy.deepcopy(base)
+    filters_max["per_locker_queries"] = [
+        {
+            "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
+            "filters": [{"dataSize": max_int}, {"limit": -max_int}],
+            "result": "EXAMPLE: complete result recorded",
+            "raw_response_sha256": "bb" * 32,
+        }
+    ]
+    assert_accepted(
+        "F3d maximum permitted integer 2^53-1 accepted in nested filter values",
+        screening_validator,
+        filters_max,
+    )
+    try:
+        _es6_number(big_int + 1)
+        report(
+            "F3e canonicalizer rejects the first non-double-exact integer (2^53+1)",
+            False,
+            "9007199254740993 was serialized instead of rejected",
+        )
+    except ValueError:
+        report(
+            "F3e canonicalizer rejects the first non-double-exact integer (2^53+1)",
+            True,
+        )
+    inventory_big = copy.deepcopy(inventory_data)
+    inventory_big["entries"][verified_idx]["ratification_details"]["accounts"][0][
+        "account_size"
+    ] = big_int
+    assert_rejected(
+        "F3f out-of-range integer account_size rejected by the inventory schema",
+        inventory_validator,
+        inventory_big,
+        expected_substrings=("9007199254740991",),
+    )
+
+    # ---- F4: strict JSON parsing (duplicate object members) -----------------
+    assert_strict_loads_rejected(
+        "F4a duplicate member key at the document root is rejected",
+        '{"schema": "gy.locker-screening.v1", "run_id": "EXAMPLE", '
+        '"run_id": "EXAMPLE"}',
+    )
+    assert_strict_loads_rejected(
+        "F4b duplicate member key inside a nested object is rejected",
+        '{"pool": {"address": "11111111111111111111111111111112", '
+        '"address": "11111111111111111111111111111112"}}',
+    )
+    assert_strict_loads_rejected(
+        "F4c duplicate member key inside an object nested in an array is rejected",
+        '{"per_locker_queries": [{"filters": [{"dataSize": 1, "dataSize": 2}]}]}',
+    )
+    try:
+        strict_json_loads('{"a": {"x": 1}, "b": {"x": 2}}')
+        report(
+            "F4d the same member name in sibling objects is accepted "
+            "(only true duplicates rejected)",
+            True,
+        )
+    except ValueError as exc:
+        report(
+            "F4d the same member name in sibling objects is accepted "
+            "(only true duplicates rejected)",
+            False,
+            str(exc),
+        )
 
     # ---- Summary ------------------------------------------------------------
     print()

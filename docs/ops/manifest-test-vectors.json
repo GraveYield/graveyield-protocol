@@ -1,5 +1,5 @@
 {
-  "description": "Reproducible RFC 8785 (JSON Canonicalization Scheme) test vectors for the deterministic gy.locker-screening.v1 manifest recipe defined in docs/ops/GY-OPS-RB-05.md R7. Each vector carries the exact input JSON value, the expected canonical UTF-8 serialization, its byte length, and its SHA-256. For vectors flagged exclude_manifest_sha256, the canonical value and digest are computed after removing the input's top-level manifest_sha256 member (that is the manifest recipe itself). Expected values were verified against an independent RFC 8785 implementation (Node.js JSON.stringify over UTF-16-sorted copies — the ECMAScript serialization normatively referenced by RFC 8785 3.2.2.3) and are enforced by scripts/validate-locker-docs-schemas.py in CI, which additionally cross-checks the Python canonicalizer against the same Node implementation on every run.",
+  "description": "Reproducible RFC 8785 (JSON Canonicalization Scheme) test vectors for the deterministic gy.locker-screening.v1 manifest recipe defined in docs/ops/GY-OPS-RB-05.md R7. Each vector carries the exact input JSON value, the expected canonical UTF-8 serialization, its byte length, and its SHA-256. For vectors flagged exclude_manifest_sha256, the canonical value and digest are computed after removing the input's top-level manifest_sha256 member (that is the manifest recipe itself). The safe_integer_maximum vector pins the boundary of the supported integer subset — the interoperable safe-integer range |n| <= 2^53 - 1; inputs outside the supported subset (out-of-range integers, invalid Unicode, duplicate member keys) are rejected fail-closed by the CI validator's negative-test matrix. Expected values were verified against an independent RFC 8785 implementation (Node.js JSON.stringify over UTF-16-sorted copies — the ECMAScript serialization normatively referenced by RFC 8785 3.2.2.3) and are enforced by scripts/validate-locker-docs-schemas.py in CI, which additionally cross-checks the Python canonicalizer against the same Node implementation on every run.",
   "vectors": [
     {
       "name": "non_ascii_property_ordering",
@@ -25,6 +25,18 @@
       "expected_canonical": "[5e-324,-5e-324,1.7976931348623157e+308,9007199254740992,1e+21,1e+23,1424953923781206.2,333333333.33333325,333333333.3333333,0.000001,9.999999999999997e-7,0.1,100,1e-7]",
       "expected_byte_length": 168,
       "expected_sha256": "9e06d33c760512c646f3570443e86c4d8bfd3ab2ec1d643f0af4e5092667ef3b"
+    },
+    {
+      "name": "safe_integer_maximum",
+      "note": "Boundary of the supported integer subset: the interoperable safe-integer range -(2^53 - 1) <= n <= 2^53 - 1. 9007199254740991 (ECMAScript Number.MAX_SAFE_INTEGER) is the largest integer a conforming artifact may carry in any field; integers beyond it are rejected by the artifact schemas, and any integer not exactly representable as an IEEE 754 double is rejected by the canonicalizer (I-JSON).",
+      "input": {
+        "dataSize": 9007199254740991,
+        "limit": -9007199254740991,
+        "ok": true
+      },
+      "expected_canonical": "{\"dataSize\":9007199254740991,\"limit\":-9007199254740991,\"ok\":true}",
+      "expected_byte_length": 65,
+      "expected_sha256": "850d2a7f538c3fdb9b0ac5c78c2aece4443b9380806801d5a0053a73758d7a42"
     },
     {
       "name": "nested_objects",

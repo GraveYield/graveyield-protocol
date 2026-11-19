@@ -78,6 +78,12 @@
     }
   },
   "$defs": {
+    "safe_integer": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "Integer restricted to the interoperable safe-integer range -(2^53 - 1) <= n <= 2^53 - 1 (ECMAScript Number.MIN_SAFE_INTEGER / Number.MAX_SAFE_INTEGER) — the same supported integer subset defined for the manifest recipe in docs/ops/GY-OPS-RB-05.md R7. Values in this range are exactly representable as IEEE 754 doubles; anything outside is rejected (fail closed)."
+    },
     "entry": {
       "type": "object",
       "required": ["name", "program_id", "status", "query_authoritative"],
@@ -231,7 +237,7 @@
           "description": "Exact derivation expression for the discriminator (e.g. sha256(\"account:TokenLock\")[..8])."
         },
         "account_size": {
-          "type": "integer",
+          "$ref": "#/$defs/safe_integer",
           "minimum": 1
         },
         "pda": {
@@ -257,7 +263,7 @@
           "type": "object",
           "description": "Named field byte offsets into the account data.",
           "additionalProperties": {
-            "type": "integer",
+            "$ref": "#/$defs/safe_integer",
             "minimum": 0
           }
         },
