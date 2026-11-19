@@ -96,7 +96,11 @@
     },
     "token_program_coverage": {
       "type": "object",
-      "required": ["mint_program", "mint_program_determination_evidence", "cross_program_query_result"],
+      "required": [
+        "mint_program",
+        "mint_program_determination_evidence",
+        "cross_program_query_result"
+      ],
       "additionalProperties": false,
       "properties": {
         "mint_program": {

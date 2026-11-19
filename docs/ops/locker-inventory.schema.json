@@ -4,14 +4,7 @@
   "title": "GY locker inventory (gy.locker-inventory.v1)",
   "description": "Validation schema for the versioned locker inventory consumed by the manual locker-screening runbook (docs/ops/GY-OPS-RB-05.md, R1/R3). The ratified M1 inventory data is committed separately as docs/ops/locker-inventory.json and must validate against this schema before any screening run relies on it.",
   "type": "object",
-  "required": [
-    "schema",
-    "version",
-    "status",
-    "ratification",
-    "entries",
-    "policy"
-  ],
+  "required": ["schema", "version", "status", "ratification", "entries", "policy"],
   "additionalProperties": false,
   "properties": {
     "schema": {
@@ -176,12 +169,7 @@
     },
     "account_spec": {
       "type": "object",
-      "required": [
-        "account_type",
-        "discriminator_hex",
-        "discriminator_derivation",
-        "account_size"
-      ],
+      "required": ["account_type", "discriminator_hex", "discriminator_derivation", "account_size"],
       "additionalProperties": false,
       "properties": {
         "account_type": {
