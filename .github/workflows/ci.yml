@@ -683,3 +683,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Relative markdown link check
         run: bash scripts/doc-links-lint.sh
+
+  # M1 locker-documentation guardrail (GY-OPS-RB-05 R1/R7): validates the
+  # committed locker inventory against gy.locker-inventory.v1, validates the
+  # embedded screening example against gy.locker-screening.v1, recomputes the
+  # deterministic manifest_sha256 vector (RFC 8785, manifest_sha256 excluded),
+  # and enforces the fail-closed conditional constraints as a negative-test
+  # matrix (reviewer countersignature, TokenLock evidence, Token-2022
+  # extension records, inventory entry status/program-id relationships).
+  docs-schema-lint:
+    name: docs schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Locker documentation schema validation
+        run: |
+          python3 -m pip install --disable-pip-version-check jsonschema==4.26.0
+          python3 scripts/validate-locker-docs-schemas.py

@@ -108,6 +108,52 @@
       "allOf": [
         {
           "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "verified_in_repository"
+              }
+            }
+          },
+          "then": {
+            "required": ["program_id", "query_authoritative", "ratification_details"],
+            "properties": {
+              "program_id": {
+                "type": "string",
+                "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+              },
+              "query_authoritative": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "candidate_unverified"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "program_id": {
+                "const": null
+              },
+              "query_authoritative": {
+                "const": false
+              },
+              "ratification_details": {
+                "const": null
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["query_authoritative"],
             "properties": {
               "query_authoritative": {
                 "const": true

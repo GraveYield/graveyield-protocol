@@ -45,7 +45,11 @@
         },
         "token_program": {
           "$ref": "#/$defs/base58",
-          "description": "Token program that owns the LP mint, as determined in R4."
+          "enum": [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          ],
+          "description": "Token program that owns the LP mint, as determined in R4. Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6)."
         },
         "cluster": {
           "type": "string",
@@ -99,13 +103,18 @@
       "required": [
         "mint_program",
         "mint_program_determination_evidence",
-        "cross_program_query_result"
+        "cross_program_query_result",
+        "token2022_extensions",
+        "account_validation"
       ],
       "additionalProperties": false,
       "properties": {
         "mint_program": {
-          "type": "string",
-          "description": "Token program that owns the LP mint, read from the mint account."
+          "enum": [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          ],
+          "description": "Token program that owns the LP mint, read from the mint account (R4 step 1). Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6)."
         },
         "mint_program_determination_evidence": {
           "type": "string",
@@ -123,21 +132,60 @@
             "additionalProperties": false,
             "properties": {
               "extension": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "handling": {
                 "type": "string",
+                "minLength": 1,
                 "description": "Recorded per-extension disposition: verification method applied, reconciliation inclusion, or explicit unsupported (fail closed)."
               }
             }
           },
-          "description": "Recorded extension set and per-extension disposition when the LP mint is a Token-2022 mint (R4 step 4); null otherwise."
+          "description": "Explicit per-extension record, always present. Must be a non-null array when the LP mint is Token-2022 (possibly empty only when the recorded extension enumeration shows the mint has no extensions) and must be null when the LP mint is SPL Token; enforced by the conditionals below (R4 step 4). Every extension with an unverifiable effect is recorded as unsupported and the run fails closed."
         },
         "account_validation": {
           "type": "string",
+          "minLength": 1,
           "description": "Recorded statement that every returned token account passed the R4 step 5 checks (owner program, mint, layout, state)."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["mint_program"],
+            "properties": {
+              "mint_program": {
+                "const": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "token2022_extensions": {
+                "type": "array"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["mint_program"],
+            "properties": {
+              "mint_program": {
+                "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "token2022_extensions": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
     },
     "uncx_check": {
       "type": "object",
@@ -159,9 +207,30 @@
           "items": {
             "$ref": "#/$defs/sha256"
           },
-          "description": "SHA-256 of each retained TokenLock raw response when a marker is present."
+          "description": "SHA-256 of each retained TokenLock raw response. Required as a non-null, nonempty array whenever marker_present is true (R2: complete remaining-account evidence); null or omitted only when the marker is absent. Enforced by the conditional below."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["marker_present"],
+            "properties": {
+              "marker_present": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": ["token_lock_evidence_sha256"],
+            "properties": {
+              "token_lock_evidence_sha256": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "per_locker_queries": {
       "type": "array",
@@ -266,17 +335,19 @@
       "additionalProperties": false,
       "properties": {
         "identity": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "signature": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         }
       },
-      "description": "Independent reviewer countersignature (R8). Must be non-null for a qualified PASS; enforced by the conditional below."
+      "description": "Independent reviewer countersignature (R8). Required, non-null, with nonempty identity and signature, for a qualified PASS; enforced by the conditional below."
     },
     "manifest_sha256": {
       "$ref": "#/$defs/sha256",
-      "description": "SHA-256 over the artifact contents (R7 manifest)."
+      "description": "SHA-256 over the deterministic canonical serialization of this artifact with manifest_sha256 itself excluded: RFC 8785 (JSON Canonicalization Scheme) — UTF-8, object members sorted recursively by Unicode code-point order of their keys, no insignificant whitespace. The exact recipe, included fields, and verification procedure are defined in docs/ops/GY-OPS-RB-05.md R7. The schema records the digest but cannot recompute it; reproducibility is verified by the independent reviewer (R8) and by scripts/validate-locker-docs-schemas.py."
     },
     "retention_date": {
       "type": "string",
@@ -286,6 +357,7 @@
   "allOf": [
     {
       "if": {
+        "required": ["determination"],
         "properties": {
           "determination": {
             "const": "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY"
@@ -293,10 +365,22 @@
         }
       },
       "then": {
+        "required": ["reviewer"],
         "properties": {
           "reviewer": {
             "type": "object",
-            "required": ["identity", "signature"]
+            "required": ["identity", "signature"],
+            "additionalProperties": false,
+            "properties": {
+              "identity": {
+                "type": "string",
+                "minLength": 1
+              },
+              "signature": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           },
           "disqualifying_evidence": {
             "type": "null"
@@ -412,7 +496,7 @@
         "identity": "EXAMPLE-reviewer",
         "signature": "EXAMPLE-countersignature"
       },
-      "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+      "manifest_sha256": "e1e19f754839205d509644b2790398d26a48b17e95534369a590e2b759ad31bc",
       "retention_date": "EXAMPLE: certification lifetime plus at least 2 years"
     }
   ]

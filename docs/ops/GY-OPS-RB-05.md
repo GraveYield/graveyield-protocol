@@ -52,7 +52,7 @@ Load the versioned inventory. The inventory data (`docs/ops/locker-inventory.jso
 
 Derive the UNCX marker PDA for the AMM and query it at the recorded commitment.
 - Absent marker: evidence of no UNCX lock for that AMM at the queried state only.
-- Present marker: retrieve and validate all associated TokenLock evidence; do not certify without complete remaining-account evidence.
+- Present marker: retrieve and validate all associated TokenLock evidence; do not certify without complete remaining-account evidence. Each retained TokenLock raw response is hashed and recorded in the artifact (`uncx_check.token_lock_evidence_sha256`); a present marker with no retained TokenLock evidence cannot support PASS.
 - Any malformed, inconsistent, or unavailable response: fail closed.
 
 Preserve the raw JSON response, derived PDA, endpoint, slot/context, timestamp, and SHA-256.
@@ -77,14 +77,14 @@ Enumerate token accounts for the LP mint using exact mint filters for the applic
 1. Determine the token program that owns the LP mint by reading the mint account, and record the determination and its evidence.
 2. Run full `getProgramAccounts` enumeration for the LP mint under that token program.
 3. Run the same mint-filtered query against the other token program (SPL Token or Token-2022) and record its result. Token accounts for a mint exist only under the mint's own token program, so any nonzero result under the other program shows that the recorded mint-program determination is wrong or the query was mis-scoped; the run fails closed and must be restarted with a corrected, re-verified determination.
-4. If the LP mint is a Token-2022 mint, record its extension set and apply the per-extension rules below. Do not rely on a fixed account-size filter for Token-2022 accounts: extensions change the account data size, so a size filter can silently drop accounts. Use mint memcmp filters; if a size filter must be used, its value must be justified against the recorded extension set, otherwise the query is incomplete and fails closed.
+4. If the LP mint is a Token-2022 mint, record its extension set explicitly in the artifact (a per-extension array; null is required for SPL Token mints) and apply the per-extension rules below. Do not rely on a fixed account-size filter for Token-2022 accounts: extensions change the account data size, so a size filter can silently drop accounts. Use mint memcmp filters; if a size filter must be used, its value must be justified against the recorded extension set, otherwise the query is incomplete and fails closed.
 
    Per-extension handling — fail-closed unless an adequate verification method is recorded in the artifact:
    - **transfer-fee:** withheld-fee amounts are not visible in ordinary balance reads; either include withheld amounts in the relevant balance reconciliation or record the extension as unsupported. A run whose reconciliation omits withheld-fee amounts cannot PASS.
    - **confidential transfer / confidential balances:** confidential amounts are invisible to public-balance enumeration. Ordinary enumeration must not produce a PASS without an adequate, recorded verification method covering the confidential component; otherwise the run ends `INCOMPLETE_FAIL_CLOSED`.
    - **transfer-hook:** hook-mediated custody is reportable; attribute the hook program and classify its custody paths under the PDA rules below.
    - **any other extension:** record it, assess its effect on enumeration and reconciliation, and treat an unverifiable effect as incomplete (fail closed).
-5. Validate every returned token account before it enters the aggregation: the account's owner program matches the queried token program; its mint field equals the LP mint; its data parses to the expected layout (base layout plus the recorded extension layouts for Token-2022); and its account state is recorded. An account failing any of these checks is malformed evidence and fails closed.
+5. Validate every returned token account before it enters the aggregation: the account's owner program matches the queried token program; its mint field equals the LP mint; its data parses to the expected layout (base layout plus the recorded extension layouts for Token-2022); and its account state is recorded. An account failing any of these checks is malformed evidence and fails closed. Record the completion of these checks in the artifact (`token_program_coverage.account_validation`).
 6. An unsupported token program, an ambiguous mint-program determination, or skipped token-program coverage cannot produce a PASS.
 
 Aggregate balances by owner and classify each owner:
@@ -138,7 +138,15 @@ Create one artifact per `(run_id, pool)` using schema `gy.locker-screening.v1`, 
 - determination and disqualifying evidence;
 - limitations acknowledgement;
 - operator signature and reviewer countersignature;
-- SHA-256 manifest and retention date.
+- deterministic SHA-256 manifest (recipe below) and retention date.
+
+**Deterministic manifest hashing (mandatory).** `manifest_sha256` is computed over the completed artifact itself, never over the separate evidence files it references:
+
+1. Take the final artifact object and remove its top-level `manifest_sha256` member. Every other field present in the artifact (required and optional alike) is included; nothing else is added.
+2. Canonicalize the remaining object per RFC 8785 (JSON Canonicalization Scheme): UTF-8 output; object members sorted recursively by Unicode code-point order of their keys; no insignificant whitespace; standard minimal JSON string escaping. For artifacts of this schema — ASCII keys, with only string, boolean, integer, array, and object values, never floating-point numbers — any conforming JCS implementation yields identical bytes (for example, JavaScript `JSON.stringify` on a key-sorted deep copy, or Python `json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))`).
+3. Set `manifest_sha256` to the lowercase hex SHA-256 of those exact UTF-8 bytes.
+
+The manifest is therefore reproducible from the artifact alone. Verification is symmetric and external to the schema, which records the digest but cannot recompute it: the independent reviewer (R8) re-canonicalizes the artifact minus `manifest_sha256`, recomputes the digest, and rejects the artifact on any mismatch, and `scripts/validate-locker-docs-schemas.py` performs the same recomputation in CI on the committed example. An artifact whose manifest cannot be reproduced from its own contents is tampered or incomplete evidence and fails closed.
 
 Retain for the certification lifetime plus at least two years, or longer if a later owner policy requires it.
 
