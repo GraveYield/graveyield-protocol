@@ -1,10 +1,10 @@
 # GraveYield M1 Execution Specification
 
-**Document ID:** `GY-M1-SPEC-001`
-**Version:** 1.0.0
-**Status:** OWNER-AUTHORIZED SPECIFICATION — NOT EXECUTION AUTHORIZATION
-**Date:** 2026-11-19 (UTC+8)
-**Decision basis:** `DR-003`, `GY-M1-ODR-001`, `GY-M1-CR-001`
+- **Document ID:** `GY-M1-SPEC-001`
+- **Version:** 1.0.0
+- **Status:** OWNER-AUTHORIZED SPECIFICATION — NOT EXECUTION AUTHORIZATION
+- **Date:** 2026-11-19 (UTC+8)
+- **Decision basis:** `DR-003`, `GY-M1-ODR-001`, `GY-M1-CR-001`
 
 ## 0. Purpose and authority
 
@@ -89,7 +89,7 @@ No independent duplicate discovery/signing path may bypass canonical C1 evidence
 
 ## 4. Fifteen-stage M1 lifecycle
 
-Each stage requires a dated evidence record. The stage order below preserves the owner-approved lifecycle. A dependency may be performed earlier when required for correctness; in particular, snapshot capture is necessarily pre-salvage because the registry seals the root during salvage. Stage 10 is the final artifact publication/integrity checkpoint.
+Each stage requires a dated evidence record. The stage order below preserves the owner-approved lifecycle. A dependency may be performed earlier when required for correctness; in particular, snapshot capture is necessarily pre-salvage because the registry seals the root during salvage. Stage 6 screening precedes Phase 2 certification submission, and Stage 10 is the final artifact-integrity verification and evidence-package publication checkpoint.
 
 ### Stage 1 — Fork deployment and configuration
 
@@ -133,22 +133,27 @@ Each stage requires a dated evidence record. The stage order below preserves the
 - Do not accelerate time or manipulate epoch state.
 - Record any validator restart or interruption and re-establish the evidence chain if continuity cannot be proven.
 
-### Stage 6 — Phase 2 evaluation
+### Stage 6 — Six-criteria certification and locker screening
 
-- Obtain a fresh C1 attestation within the valid SlotHashes window.
-- Re-run the identical evaluator.
-- Verify C1–C6 bitmap equality and successful Phase 2 certification.
-- Preserve signatures, account state, attestation bytes, epoch evidence, and verifier output.
-
-### Stage 7 — Six-criteria certification
+This stage completes before Phase 2 certification submission, as required by `docs/ops/GY-OPS-RB-05.md` R9.
 
 - Independently verify each criterion and its source.
-- Complete the protocol-wide manual locker screening in `docs/ops/GY-OPS-RB-05.md`.
+- Complete the protocol-wide manual locker screening in `docs/ops/GY-OPS-RB-05.md` with operator execution and independent reviewer countersignature.
 - Confirm no detected non-UNCX lock and no unknown custodian.
 - Confirm D-01 M1 sourcing predicate.
 - Confirm no missing, synthetic, stale, or contradictory evidence.
 
-**Gate:** a qualified locker-screening PASS and complete certification evidence are required. The screening result must carry the mandatory best-effort limitation.
+**Gate:** a qualified locker-screening PASS carrying the mandatory best-effort limitation, with independent reviewer countersignature, must be complete before Phase 2 certification is submitted. Phase 2 certification must not be submitted until this gate is satisfied.
+
+### Stage 7 — Phase 2 evaluation and certification submission
+
+- Obtain a fresh C1 attestation within the valid SlotHashes window.
+- Re-run the identical evaluator.
+- Verify C1–C6 bitmap equality and successful Phase 2 certification.
+- Confirm the Stage 6 qualified locker-screening PASS and independent countersignature are complete and remain within the valid evidence window at submission.
+- Preserve signatures, account state, attestation bytes, epoch evidence, verifier output, and the countersigned screening artifact.
+
+**Gate:** submission requires the completed Stage 6 screening gate. The screening result is re-verified within the certification TTL before salvage when it is not bundled into the same valid evidence window (`docs/ops/GY-OPS-RB-05.md` R9).
 
 ### Stage 8 — Snapshot validation and authorized salvage
 
@@ -157,7 +162,7 @@ Each stage requires a dated evidence record. The stage order below preserves the
 - Record snapshot slot, commitment, endpoints, supply, holder balances, root, artifact hash, and sink ledger.
 - Confirm the full Salvor-controlled wallet set is included.
 - Confirm the Salvor P2 no-claim watchlist.
-- Publish the validated artifact before salvage.
+- Publish and hash the immutable pre-salvage artifact before salvage submission. Once validated and published, the artifact is immutable — it must not be replaced, regenerated, or modified, and the published SHA-256 is the reference for Stage 10 verification.
 - Verify the root submitted to salvage is exactly the root derived from the validated artifact.
 - Simulate and submit one authorized salvage attempt.
 
@@ -175,15 +180,15 @@ Each stage requires a dated evidence record. The stage order below preserves the
 
 **Evidence:** receipt bytes, account balances, transaction signature, reconciliation calculation, project-wallet watchlist results.
 
-### Stage 10 — Snapshot/Merkle artifact publication and verification
+### Stage 10 — Snapshot/Merkle artifact verification and final evidence package
 
-- Publish the pre-salvage Rust snapshot artifact and manifest.
-- Re-derive the Merkle root, leaves, and proofs.
+- Verify the immutable pre-salvage artifact published and hashed at Stage 8: re-derive the Merkle root, leaves, and proofs from that same artifact.
 - Verify artifact root equals the on-chain `PoolRegistry` root.
 - Verify supply, enumeration, sink ledger, custody reconciliation, and hash manifest.
 - Ensure the claims console consumes the same Rust artifact and cannot silently substitute an SDK-produced root.
+- Publish the final evidence package referencing the identical Stage 8 artifact hash.
 
-This stage is the final artifact-integrity and claims-readiness checkpoint. Snapshot capture itself must already have occurred before Stage 8 salvage.
+This stage is the final artifact-integrity verification and evidence-package publication checkpoint. It performs verification only: it does not produce, replace, or regenerate the pre-salvage artifact, and the published evidence package must reference the artifact hash recorded at Stage 8. Snapshot capture itself must already have occurred before Stage 8 salvage.
 
 ### Stage 11 — At least one legitimate LP-holder claim
 

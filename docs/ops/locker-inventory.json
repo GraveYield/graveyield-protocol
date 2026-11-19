@@ -1,0 +1,105 @@
+{
+  "schema": "gy.locker-inventory.v1",
+  "version": "1.0.0",
+  "status": "M1 owner-ratified scope; only UNCX adapter verified in repository",
+  "ratification": {
+    "decision": "DR-003",
+    "date": "2026-11-19",
+    "scope": "protocol-wide",
+    "limitation": "Best-effort screening against a ratified inventory \u2014 not universal detection."
+  },
+  "entries": [
+    {
+      "name": "UNCX Raydium AMM V4 locker",
+      "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
+      "status": "verified_in_repository",
+      "query_authoritative": true,
+      "ratification_details": {
+        "accounts": [
+          {
+            "account_type": "GlobalLpMintMarker (per-pool lock marker PDA; queried directly by address in R2)",
+            "discriminator_hex": "c2d588e24a7e7bb2",
+            "discriminator_derivation": "sha256(\"account:GlobalLpMintMarker\")[..8]",
+            "account_size": 9,
+            "pda": {
+              "seeds": [
+                "global_lp_tracker",
+                "<amm_id> \u2014 the 32-byte Raydium AMM V4 pool (AmmInfo) address"
+              ],
+              "derivation": "Pubkey::find_program_address([b\"global_lp_tracker\", amm_id], program_id)"
+            },
+            "offsets": {},
+            "get_program_accounts_filters": []
+          },
+          {
+            "account_type": "TokenLock (enumerated via getProgramAccounts in R3; supplied as remaining-account evidence on-chain)",
+            "discriminator_hex": "49e490f19a2c5dee",
+            "discriminator_derivation": "sha256(\"account:TokenLock\")[..8]",
+            "account_size": 146,
+            "pda": {
+              "seeds": [
+                "uncx_locker",
+                "<lock_global_id> \u2014 u64 little-endian; sequential global ids, not derivable from the LP mint alone"
+              ],
+              "derivation": "Pubkey::find_program_address([b\"uncx_locker\", lock_global_id.to_le_bytes()], program_id)"
+            },
+            "offsets": {
+              "amm_id": 9,
+              "lp_mint": 41,
+              "lock_global_id": 73,
+              "current_locked_amount": 106
+            },
+            "get_program_accounts_filters": [
+              {
+                "dataSize": 146
+              },
+              {
+                "memcmp": {
+                  "offset": 41,
+                  "bytes": "<base58 LP mint>"
+                }
+              }
+            ]
+          }
+        ],
+        "source_evidence": [
+          "programs/grave-scanner/src/adapters/locker.rs \u2014 in-repository UNCX adapter: PROGRAM_ID, discriminators, PDA seeds, sizes, offsets, and strict account validation",
+          "programs/grave-scanner/src/adapters/locker.rs #[cfg(test)] mainnet vectors \u2014 real mainnet PDA derivation pins; layouts verified against live mainnet accounts (125 locks, 74 pools)",
+          "github.com/uncx-network/raydium-amm-lp-locker \u2014 official upstream source (accounts_ix/lock_lp.rs seed prefixes)"
+        ],
+        "validation_date": "2026-10",
+        "ratifier": "project owner (DR-003 / GY-M1-ODR-001 \u2014 D-05, Q-04)",
+        "approval_timestamp": "2026-11-19"
+      },
+      "notes": "Use the exact adapter/PDA derivation and account validation implemented in programs/grave-scanner/src/adapters/locker.rs. Revalidate against the target fork state for each run."
+    },
+    {
+      "name": "Streamflow",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    },
+    {
+      "name": "Team Finance",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    },
+    {
+      "name": "PinkSale",
+      "program_id": null,
+      "status": "candidate_unverified",
+      "query_authoritative": false,
+      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
+    }
+  ],
+  "policy": {
+    "non_uncx_lock": "disqualify",
+    "unknown_custodian": "disqualify",
+    "incomplete_query_or_inventory": "fail_closed",
+    "single_operator_signature": "incomplete",
+    "retention": "certification lifetime plus at least 2 years"
+  }
+}

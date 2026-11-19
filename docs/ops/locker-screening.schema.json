@@ -1,0 +1,415 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gy.locker-screening.v1",
+  "title": "GY manual locker-screening artifact (gy.locker-screening.v1)",
+  "description": "Validation schema for the per-(run_id, pool) screening evidence artifact required by docs/ops/GY-OPS-RB-05.md R7. One artifact is produced per run and pool; the independent reviewer countersignature is mandatory for a qualified PASS (R6/R8).",
+  "type": "object",
+  "required": [
+    "schema",
+    "run_id",
+    "pool",
+    "rpc",
+    "inventory",
+    "token_program_coverage",
+    "uncx_check",
+    "per_locker_queries",
+    "generic_custody",
+    "determination",
+    "limitations_acknowledgement",
+    "operator",
+    "manifest_sha256",
+    "retention_date"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "gy.locker-screening.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pool": {
+      "type": "object",
+      "required": ["address", "amm_program", "lp_mint", "token_program", "cluster"],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/base58"
+        },
+        "amm_program": {
+          "$ref": "#/$defs/base58"
+        },
+        "lp_mint": {
+          "$ref": "#/$defs/base58"
+        },
+        "token_program": {
+          "$ref": "#/$defs/base58",
+          "description": "Token program that owns the LP mint, as determined in R4."
+        },
+        "cluster": {
+          "type": "string",
+          "description": "Exact cluster identity as recorded. For M1 this must be the local Mainnet fork label — never Testnet or Mainnet production."
+        }
+      }
+    },
+    "rpc": {
+      "type": "object",
+      "required": ["endpoint_identity", "commitment", "request_timestamps", "response_slots"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint_identity": {
+          "type": "string"
+        },
+        "commitment": {
+          "type": "string"
+        },
+        "request_timestamps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "response_slots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "required": ["version", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "SHA-256 of the exact inventory data relied upon."
+        }
+      }
+    },
+    "token_program_coverage": {
+      "type": "object",
+      "required": ["mint_program", "mint_program_determination_evidence", "cross_program_query_result"],
+      "additionalProperties": false,
+      "properties": {
+        "mint_program": {
+          "type": "string",
+          "description": "Token program that owns the LP mint, read from the mint account."
+        },
+        "mint_program_determination_evidence": {
+          "type": "string",
+          "description": "Evidence recorded for the mint-program determination (R4 step 1)."
+        },
+        "cross_program_query_result": {
+          "type": "string",
+          "description": "Recorded result of the same mint-filtered query against the other token program. A nonzero account count fails the run (R4 step 3)."
+        },
+        "token2022_extensions": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["extension", "handling"],
+            "additionalProperties": false,
+            "properties": {
+              "extension": {
+                "type": "string"
+              },
+              "handling": {
+                "type": "string",
+                "description": "Recorded per-extension disposition: verification method applied, reconciliation inclusion, or explicit unsupported (fail closed)."
+              }
+            }
+          },
+          "description": "Recorded extension set and per-extension disposition when the LP mint is a Token-2022 mint (R4 step 4); null otherwise."
+        },
+        "account_validation": {
+          "type": "string",
+          "description": "Recorded statement that every returned token account passed the R4 step 5 checks (owner program, mint, layout, state)."
+        }
+      }
+    },
+    "uncx_check": {
+      "type": "object",
+      "required": ["marker_pda", "marker_present", "raw_response_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "marker_pda": {
+          "$ref": "#/$defs/base58",
+          "description": "Derived per-pool marker PDA ([\"global_lp_tracker\", amm_id])."
+        },
+        "marker_present": {
+          "type": "boolean"
+        },
+        "raw_response_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "token_lock_evidence_sha256": {
+          "type": ["array", "null"],
+          "items": {
+            "$ref": "#/$defs/sha256"
+          },
+          "description": "SHA-256 of each retained TokenLock raw response when a marker is present."
+        }
+      }
+    },
+    "per_locker_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["program_id", "filters", "result", "raw_response_sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "program_id": {
+            "$ref": "#/$defs/base58"
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Exact versioned getProgramAccounts filter objects used."
+          },
+          "result": {
+            "type": "string",
+            "description": "Recorded query result, including pagination limitations; an incomplete query cannot support PASS (R3)."
+          },
+          "raw_response_sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "generic_custody": {
+      "type": "object",
+      "required": ["enumeration", "owners"],
+      "additionalProperties": false,
+      "properties": {
+        "enumeration": {
+          "type": "string",
+          "description": "Enumeration method used; full getProgramAccounts enumeration or the weaker getTokenLargestAccounts fallback (which must be labelled weaker, R4)."
+        },
+        "owners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/owner_classification"
+          }
+        }
+      }
+    },
+    "snapshotter_cross_check": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "output_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reconciliation_status": {
+          "type": "string"
+        }
+      },
+      "description": "Snapshotter custody-reconciliation cross-check (R5); null when the snapshotter has not yet been run for this pool."
+    },
+    "determination": {
+      "enum": [
+        "DISQUALIFIED_NON_UNCX_LOCK",
+        "DISQUALIFIED_UNKNOWN_CUSTODIAN",
+        "INCOMPLETE_FAIL_CLOSED",
+        "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY"
+      ]
+    },
+    "disqualifying_evidence": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": ["array", "null"],
+          "items": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      },
+      "description": "Required for disqualifying or fail-closed determinations; null for a qualified PASS."
+    },
+    "limitations_acknowledgement": {
+      "const": "Best-effort screening against a ratified inventory \u2014 not universal detection.",
+      "description": "Mandatory wording (R6/R10)."
+    },
+    "operator": {
+      "type": "object",
+      "required": ["identity", "signature"],
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        }
+      }
+    },
+    "reviewer": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        }
+      },
+      "description": "Independent reviewer countersignature (R8). Must be non-null for a qualified PASS; enforced by the conditional below."
+    },
+    "manifest_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 over the artifact contents (R7 manifest)."
+    },
+    "retention_date": {
+      "type": "string",
+      "description": "Retention deadline: certification lifetime plus at least two years."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "determination": {
+            "const": "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reviewer": {
+            "type": "object",
+            "required": ["identity", "signature"]
+          },
+          "disqualifying_evidence": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "base58": {
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "owner_classification": {
+      "type": "object",
+      "required": ["owner", "classification"],
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "$ref": "#/$defs/base58"
+        },
+        "classification": {
+          "enum": [
+            "known_holder_wallet",
+            "approved_benign_custody",
+            "known_locker_or_custody_program",
+            "unknown_wallet_pda_custodian"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "description": "Recorded basis. Required for approved_benign_custody (written basis plus owner approval) and for PDA attribution (derivation inputs: program ID and seeds, R4)."
+        },
+        "derivation_evidence": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "program_id": {
+              "$ref": "#/$defs/base58"
+            },
+            "seeds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "derived_address_matches": {
+              "type": "boolean"
+            }
+          },
+          "description": "Documented PDA derivation evidence. Ownership data alone does not attribute a PDA (R4)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema": "gy.locker-screening.v1",
+      "run_id": "EXAMPLE-RUN-001",
+      "pool": {
+        "address": "111111111111111111111111111111114EXAMPLE",
+        "amm_program": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+        "lp_mint": "11111111111111111111111111111112",
+        "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "cluster": "local_mainnet_fork"
+      },
+      "rpc": {
+        "endpoint_identity": "EXAMPLE-fork-endpoint",
+        "commitment": "confirmed",
+        "request_timestamps": ["2026-11-19T00:00:00Z"],
+        "response_slots": [1]
+      },
+      "inventory": {
+        "version": "1.0.0",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "token_program_coverage": {
+        "mint_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "mint_program_determination_evidence": "EXAMPLE: mint account owner read via getAccountInfo",
+        "cross_program_query_result": "EXAMPLE: 0 accounts under Token-2022 for this mint; recorded",
+        "token2022_extensions": null,
+        "account_validation": "EXAMPLE: every returned account passed owner/mint/layout/state checks"
+      },
+      "uncx_check": {
+        "marker_pda": "11111111111111111111111111111113",
+        "marker_present": false,
+        "raw_response_sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "per_locker_queries": [],
+      "generic_custody": {
+        "enumeration": "EXAMPLE: full getProgramAccounts enumeration with mint memcmp filter",
+        "owners": [
+          {
+            "owner": "11111111111111111111111111111114",
+            "classification": "known_holder_wallet",
+            "basis": "EXAMPLE: matches snapshot holder registry"
+          }
+        ]
+      },
+      "snapshotter_cross_check": null,
+      "determination": "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY",
+      "disqualifying_evidence": null,
+      "limitations_acknowledgement": "Best-effort screening against a ratified inventory \u2014 not universal detection.",
+      "operator": {
+        "identity": "EXAMPLE-operator",
+        "signature": "EXAMPLE-signature"
+      },
+      "reviewer": {
+        "identity": "EXAMPLE-reviewer",
+        "signature": "EXAMPLE-countersignature"
+      },
+      "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+      "retention_date": "EXAMPLE: certification lifetime plus at least 2 years"
+    }
+  ]
+}

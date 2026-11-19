@@ -1,48 +1,240 @@
 {
-  "schema": "gy.locker-inventory.v1",
-  "version": "1.0.0",
-  "status": "M1 owner-ratified scope; only UNCX adapter verified in repository",
-  "ratification": {
-    "decision": "DR-003",
-    "date": "2026-11-19",
-    "scope": "protocol-wide",
-    "limitation": "Best-effort screening against a ratified inventory \u2014 not universal detection."
-  },
-  "entries": [
-    {
-      "name": "UNCX Raydium AMM V4 locker",
-      "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
-      "status": "verified_in_repository",
-      "query_authoritative": true,
-      "notes": "Use the exact adapter/PDA derivation and account validation implemented in programs/grave-scanner/src/adapters/locker.rs. Revalidate against the target fork state for each run."
-    },
-    {
-      "name": "Streamflow",
-      "program_id": null,
-      "status": "candidate_unverified",
-      "query_authoritative": false,
-      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
-    },
-    {
-      "name": "Team Finance",
-      "program_id": null,
-      "status": "candidate_unverified",
-      "query_authoritative": false,
-      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
-    },
-    {
-      "name": "PinkSale",
-      "program_id": null,
-      "status": "candidate_unverified",
-      "query_authoritative": false,
-      "notes": "Do not query using guessed identifiers or layouts. Confirm program ID, account model, discriminator, offsets, and filters before adding a ratified inventory version."
-    }
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gy.locker-inventory.v1",
+  "title": "GY locker inventory (gy.locker-inventory.v1)",
+  "description": "Validation schema for the versioned locker inventory consumed by the manual locker-screening runbook (docs/ops/GY-OPS-RB-05.md, R1/R3). The ratified M1 inventory data is committed separately as docs/ops/locker-inventory.json and must validate against this schema before any screening run relies on it.",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "status",
+    "ratification",
+    "entries",
+    "policy"
   ],
-  "policy": {
-    "non_uncx_lock": "disqualify",
-    "unknown_custodian": "disqualify",
-    "incomplete_query_or_inventory": "fail_closed",
-    "single_operator_signature": "incomplete",
-    "retention": "certification lifetime plus at least 2 years"
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "gy.locker-inventory.v1"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Inventory version; every screening run records the version it relied upon."
+    },
+    "status": {
+      "type": "string",
+      "description": "Human-readable ratification scope statement."
+    },
+    "ratification": {
+      "type": "object",
+      "required": ["decision", "date", "scope", "limitation"],
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string",
+          "description": "Owner decision record that ratified this inventory (e.g. DR-003)."
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "limitation": {
+          "type": "string",
+          "description": "Mandatory best-effort limitation wording."
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "non_uncx_lock",
+        "unknown_custodian",
+        "incomplete_query_or_inventory",
+        "single_operator_signature",
+        "retention"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "non_uncx_lock": {
+          "const": "disqualify"
+        },
+        "unknown_custodian": {
+          "const": "disqualify"
+        },
+        "incomplete_query_or_inventory": {
+          "const": "fail_closed"
+        },
+        "single_operator_signature": {
+          "const": "incomplete"
+        },
+        "retention": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["name", "program_id", "status", "query_authoritative"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "program_id": {
+          "type": ["string", "null"],
+          "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+          "description": "Base58 program ID. Must be null for unverified candidates; guessing is forbidden (R1)."
+        },
+        "status": {
+          "enum": ["verified_in_repository", "candidate_unverified"]
+        },
+        "query_authoritative": {
+          "type": "boolean",
+          "description": "true only when program ID, account layouts, and query filters are independently confirmed and ratified. Only query-authoritative entries may be queried in R3."
+        },
+        "ratification_details": {
+          "$ref": "#/$defs/ratification_details"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "query_authoritative": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": ["ratification_details"]
+          },
+          "else": {
+            "properties": {
+              "ratification_details": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ratification_details": {
+      "type": "object",
+      "required": [
+        "accounts",
+        "source_evidence",
+        "validation_date",
+        "ratifier",
+        "approval_timestamp"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/account_spec"
+          }
+        },
+        "source_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "Exact repository paths, test vectors, or upstream sources the layout evidence comes from."
+        },
+        "validation_date": {
+          "type": "string",
+          "description": "Date (or year-month) the layout evidence was last validated, as recorded in the cited evidence."
+        },
+        "ratifier": {
+          "type": "string",
+          "description": "Identity or decision record of the ratifier."
+        },
+        "approval_timestamp": {
+          "type": "string",
+          "description": "Owner approval date for this inventory entry."
+        }
+      }
+    },
+    "account_spec": {
+      "type": "object",
+      "required": [
+        "account_type",
+        "discriminator_hex",
+        "discriminator_derivation",
+        "account_size"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "account_type": {
+          "type": "string"
+        },
+        "discriminator_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$",
+          "description": "8-byte account discriminator, lowercase hex."
+        },
+        "discriminator_derivation": {
+          "type": "string",
+          "description": "Exact derivation expression for the discriminator (e.g. sha256(\"account:TokenLock\")[..8])."
+        },
+        "account_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pda": {
+          "type": "object",
+          "required": ["seeds", "derivation"],
+          "additionalProperties": false,
+          "properties": {
+            "seeds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              },
+              "description": "Documented PDA seed components in order."
+            },
+            "derivation": {
+              "type": "string",
+              "description": "Exact derivation expression including the bump."
+            }
+          }
+        },
+        "offsets": {
+          "type": "object",
+          "description": "Named field byte offsets into the account data.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "get_program_accounts_filters": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Exact Solana RPC getProgramAccounts filter objects (dataSize / memcmp) for R3 sweeps. Empty for PDA-direct accounts queried by address (R2)."
+        }
+      }
+    }
   }
 }

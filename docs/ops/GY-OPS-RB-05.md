@@ -24,7 +24,7 @@ A PASS is always qualified. It means no lock was found within the exact queried 
 - LP mint and token program (SPL Token / Token-2022 as applicable).
 - Cluster identity: local Mainnet fork for M1.
 - Approved RPC endpoint(s), endpoint identity, commitment, and request timestamps.
-- Versioned `locker-inventory.json`.
+- Versioned `locker-inventory.json`, validated against `docs/ops/locker-inventory.schema.json`.
 - Exact account filters and layouts for every inventory entry queried.
 - Operator and reviewer identities.
 - Snapshot context and certification phase.
@@ -37,7 +37,7 @@ Create one run record per `(run_id, pool)`. Record cluster, RPC endpoint, commit
 
 ### R1 — Load the ratified inventory
 
-Load the versioned inventory. Each relied-upon entry must specify:
+Load the versioned inventory. The inventory data (`docs/ops/locker-inventory.json`) must be validated against its schema (`docs/ops/locker-inventory.schema.json`, `gy.locker-inventory.v1`) before use, and the inventory version and SHA-256 must be recorded in the screening artifact. Each relied-upon entry must specify:
 - name and program ID;
 - account type;
 - discriminator and account size;
@@ -76,9 +76,16 @@ Enumerate token accounts for the LP mint using exact mint filters for the applic
 
 1. Determine the token program that owns the LP mint by reading the mint account, and record the determination and its evidence.
 2. Run full `getProgramAccounts` enumeration for the LP mint under that token program.
-3. Run the same mint-filtered query against the other token program (SPL Token or Token-2022) and record its result. Token accounts for a mint exist only under the mint's own token program, so any nonzero result under the other program indicates a misidentified mint program or split custody and fails closed.
-4. If the LP mint is a Token-2022 mint, record its extension set — including any transfer-fee and transfer-hook extensions — and treat hook-mediated custody as reportable. Do not rely on a fixed account-size filter for Token-2022 accounts: extensions change the account data size, so a size filter can silently drop accounts. Use mint memcmp filters; if a size filter must be used, its value must be justified against the recorded extension set, otherwise the query is incomplete and fails closed.
-5. An unsupported token program, an ambiguous mint-program determination, or skipped token-program coverage cannot produce a PASS.
+3. Run the same mint-filtered query against the other token program (SPL Token or Token-2022) and record its result. Token accounts for a mint exist only under the mint's own token program, so any nonzero result under the other program shows that the recorded mint-program determination is wrong or the query was mis-scoped; the run fails closed and must be restarted with a corrected, re-verified determination.
+4. If the LP mint is a Token-2022 mint, record its extension set and apply the per-extension rules below. Do not rely on a fixed account-size filter for Token-2022 accounts: extensions change the account data size, so a size filter can silently drop accounts. Use mint memcmp filters; if a size filter must be used, its value must be justified against the recorded extension set, otherwise the query is incomplete and fails closed.
+
+   Per-extension handling — fail-closed unless an adequate verification method is recorded in the artifact:
+   - **transfer-fee:** withheld-fee amounts are not visible in ordinary balance reads; either include withheld amounts in the relevant balance reconciliation or record the extension as unsupported. A run whose reconciliation omits withheld-fee amounts cannot PASS.
+   - **confidential transfer / confidential balances:** confidential amounts are invisible to public-balance enumeration. Ordinary enumeration must not produce a PASS without an adequate, recorded verification method covering the confidential component; otherwise the run ends `INCOMPLETE_FAIL_CLOSED`.
+   - **transfer-hook:** hook-mediated custody is reportable; attribute the hook program and classify its custody paths under the PDA rules below.
+   - **any other extension:** record it, assess its effect on enumeration and reconciliation, and treat an unverifiable effect as incomplete (fail closed).
+5. Validate every returned token account before it enters the aggregation: the account's owner program matches the queried token program; its mint field equals the LP mint; its data parses to the expected layout (base layout plus the recorded extension layouts for Token-2022); and its account state is recorded. An account failing any of these checks is malformed evidence and fails closed.
+6. An unsupported token program, an ambiguous mint-program determination, or skipped token-program coverage cannot produce a PASS.
 
 Aggregate balances by owner and classify each owner:
 - known holder wallet;
@@ -86,13 +93,13 @@ Aggregate balances by owner and classify each owner:
 - known locker/custody program;
 - unknown wallet/PDA/custodian.
 
-**PDA owner classification (mandatory, fail-closed).** A PDA owner must never be classified as a known holder wallet. For every PDA owner:
+**PDA owner classification (mandatory, fail-closed).** A PDA owner must never be classified as a known holder wallet. An account's on-chain owner program identifies the program that owns the account data; it does not, by itself, prove which program derived an arbitrary PDA or under which seeds. For every PDA owner:
 
 1. fetch the PDA account and record its owning program;
-2. attempt attribution by re-deriving candidate PDAs for every ratified-inventory program and comparing derived addresses;
-3. record the derivation inputs, the owning program, and the custody conclusion in the artifact.
+2. attempt attribution with documented derivation evidence — re-derive candidate PDAs from each ratified-inventory program using known, documented seeds and compare the derived addresses to the observed address;
+3. record the derivation inputs (program ID and seeds), the owning program, and the custody conclusion in the artifact.
 
-If the owning program cannot be determined, is not covered by the ratified inventory, or the custody path cannot be documented, the owner remains classified as an unknown custodian and the run ends `DISQUALIFIED_UNKNOWN_CUSTODIAN`. Reclassification as approved benign custody requires a written basis and owner approval recorded in the artifact; it can never be inferred from enumeration alone.
+Attribution is accepted only when a derived address matches the observed address and the derivation inputs are recorded. If the PDA cannot be attributed reliably — the owning program is undeterminable or outside the ratified inventory, no known seed set reproduces the address, or the custody path cannot be documented — the owner remains classified as an unknown custodian and the run ends `DISQUALIFIED_UNKNOWN_CUSTODIAN`. Reclassification as approved benign custody requires a written basis and owner approval recorded in the artifact; it can never be inferred from enumeration or ownership data alone.
 
 Any detected non-UNCX lock or unknown custodian disqualifies the candidate. Incomplete enumeration, truncation, unsupported token program, or unresolved owner is not a PASS.
 
@@ -120,7 +127,7 @@ Any non-UNCX lock or unknown custodian disqualifies the candidate.
 
 ### R7 — Evidence artifact
 
-Create one artifact per `(run_id, pool)` using schema `gy.locker-screening.v1`. Include:
+Create one artifact per `(run_id, pool)` using schema `gy.locker-screening.v1`, defined in `docs/ops/locker-screening.schema.json`. Include:
 - pool, AMM, LP mint, token program, cluster;
 - RPC endpoint identity, commitment, timestamps, response slots;
 - inventory version and inventory hash;
@@ -147,7 +154,7 @@ The reviewer must:
 
 ### R9 — Lifecycle placement
 
-- Complete screening before Phase 2 certification submission.
+- Complete screening before Phase 2 certification submission (`docs/M1_EXECUTION_SPEC.md` Stage 6 gate).
 - Re-verify within the certification TTL before salvage when the evidence is not bundled into the same valid evidence window.
 - Phase 1 may use R2 as a preliminary UNCX-only check, but it is not the final protocol-wide screening determination.
 
