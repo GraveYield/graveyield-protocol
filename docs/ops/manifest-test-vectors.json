@@ -1,0 +1,115 @@
+{
+  "description": "Reproducible RFC 8785 (JSON Canonicalization Scheme) test vectors for the deterministic gy.locker-screening.v1 manifest recipe defined in docs/ops/GY-OPS-RB-05.md R7. Each vector carries the exact input JSON value, the expected canonical UTF-8 serialization, its byte length, and its SHA-256. For vectors flagged exclude_manifest_sha256, the canonical value and digest are computed after removing the input's top-level manifest_sha256 member (that is the manifest recipe itself). Expected values were verified against an independent RFC 8785 implementation (Node.js JSON.stringify over UTF-16-sorted copies — the ECMAScript serialization normatively referenced by RFC 8785 3.2.2.3) and are enforced by scripts/validate-locker-docs-schemas.py in CI, which additionally cross-checks the Python canonicalizer against the same Node implementation on every run.",
+  "vectors": [
+    {
+      "name": "non_ascii_property_ordering",
+      "note": "Property ordering is by UTF-16 code units (RFC 8785 3.2.3), not Unicode code points: U+1F600 GRINNING FACE (surrogate pair D83D DE00) sorts before U+FF01 FULLWIDTH EXCLAMATION MARK even though its scalar value 0x1F600 is larger than 0xFF01. A code-point sorter would emit the last two members in the opposite order.",
+      "input": {
+        "a": 1,
+        "A": 2,
+        "！": 3,
+        "😀": 4,
+        "é": 5
+      },
+      "expected_canonical": "{\"A\":2,\"a\":1,\"é\":5,\"😀\":4,\"！\":3}",
+      "expected_byte_length": 37,
+      "expected_sha256": "e1c9908c1705bcdd1911cbc70432f0a475d356cd106894e60666c4ced16f6074"
+    },
+    {
+      "name": "numeric_serialization",
+      "note": "Numbers serialize per ECMAScript Number::toString (RFC 8785 3.2.2.3): shortest round-trip decimal, ES6 notation thresholds (no exponential form below 1e21, exponent without leading zeros), minus zero as 0. Several values are RFC 8785 Appendix B.2 entries (5e-324, 1.7976931348623157e+308, 9007199254740992, 1e+21, 1e+23, 0.000001, 9.999999999999997e-7, 1424953923781206.2).",
+      "input": [
+        5e-324, -5e-324, 1.7976931348623157e308, 9007199254740992, 1e21, 1e23, 1424953923781206.2,
+        333333333.33333325, 333333333.3333333, 1e-6, 9.999999999999997e-7, 0.1, 100.0, 1e-7
+      ],
+      "expected_canonical": "[5e-324,-5e-324,1.7976931348623157e+308,9007199254740992,1e+21,1e+23,1424953923781206.2,333333333.33333325,333333333.3333333,0.000001,9.999999999999997e-7,0.1,100,1e-7]",
+      "expected_byte_length": 168,
+      "expected_sha256": "9e06d33c760512c646f3570443e86c4d8bfd3ab2ec1d643f0af4e5092667ef3b"
+    },
+    {
+      "name": "nested_objects",
+      "note": "Canonicalization is recursive: nesting, empty objects, empty arrays, booleans, and null are preserved; member order is sorted at every level.",
+      "input": {
+        "z": 0,
+        "outer": {
+          "empty_arr": [],
+          "empty_obj": {},
+          "deep": {
+            "list": [
+              1,
+              false,
+              null,
+              {
+                "x": "y",
+                "arr": [true]
+              }
+            ],
+            "num": -12
+          }
+        }
+      },
+      "expected_canonical": "{\"outer\":{\"deep\":{\"list\":[1,false,null,{\"arr\":[true],\"x\":\"y\"}],\"num\":-12},\"empty_arr\":[],\"empty_obj\":{}},\"z\":0}",
+      "expected_byte_length": 111,
+      "expected_sha256": "576626c625bfed82f5ac123758cbc3fdd67f73905e500f1fe5295d2338e69011"
+    },
+    {
+      "name": "string_escaping",
+      "note": "Strings escape per RFC 8785 3.2.2.2: quotation mark, backslash, and C0 controls only (b f n r t shortcuts); every other character — em dash, guillemets, emoji — is emitted literally as UTF-8, never as \\u escapes.",
+      "input": {
+        "backslash": "C:\\path\\to",
+        "controls": "\b\f\n\r\t",
+        "quote": "say \"hi\"",
+        "unicode": "em—dash 😀 ‹›"
+      },
+      "expected_canonical": "{\"backslash\":\"C:\\\\path\\\\to\",\"controls\":\"\\b\\f\\n\\r\\t\",\"quote\":\"say \\\"hi\\\"\",\"unicode\":\"em—dash 😀 ‹›\"}",
+      "expected_byte_length": 107,
+      "expected_sha256": "7ea10cb98aa648f9393812c1e6888438dcb69e93dce2f64693908ae55493f121"
+    },
+    {
+      "name": "manifest_exclusion",
+      "note": "The manifest recipe (GY-OPS-RB-05 R7) hashes the artifact with its top-level manifest_sha256 member removed; every other field present in the artifact is included.",
+      "input": {
+        "schema": "gy.locker-screening.v1",
+        "run_id": "VECTOR-RUN-001",
+        "determination": "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY",
+        "operator": {
+          "identity": "EXAMPLE-operator",
+          "signature": "EXAMPLE-signature"
+        },
+        "reviewer": {
+          "identity": "EXAMPLE-reviewer",
+          "signature": "EXAMPLE-countersignature"
+        },
+        "manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "retention_date": "EXAMPLE: certification lifetime plus at least 2 years"
+      },
+      "expected_canonical": "{\"determination\":\"QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY\",\"operator\":{\"identity\":\"EXAMPLE-operator\",\"signature\":\"EXAMPLE-signature\"},\"retention_date\":\"EXAMPLE: certification lifetime plus at least 2 years\",\"reviewer\":{\"identity\":\"EXAMPLE-reviewer\",\"signature\":\"EXAMPLE-countersignature\"},\"run_id\":\"VECTOR-RUN-001\",\"schema\":\"gy.locker-screening.v1\"}",
+      "expected_byte_length": 349,
+      "expected_sha256": "e9d2a8f4d1d473bc6d6b6d898fda1888aaeec91ec6993615c041f0f1ad91a146",
+      "exclude_manifest_sha256": true
+    },
+    {
+      "name": "manifest_exclusion_ignores_digest_value",
+      "note": "Changing the manifest_sha256 value must not change the computed manifest: this vector differs from manifest_exclusion only in its manifest_sha256 member and therefore yields the identical canonical bytes and SHA-256.",
+      "input": {
+        "schema": "gy.locker-screening.v1",
+        "run_id": "VECTOR-RUN-001",
+        "determination": "QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY",
+        "operator": {
+          "identity": "EXAMPLE-operator",
+          "signature": "EXAMPLE-signature"
+        },
+        "reviewer": {
+          "identity": "EXAMPLE-reviewer",
+          "signature": "EXAMPLE-countersignature"
+        },
+        "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "retention_date": "EXAMPLE: certification lifetime plus at least 2 years"
+      },
+      "expected_canonical": "{\"determination\":\"QUALIFIED_PASS_WITHIN_QUERIED_INVENTORY\",\"operator\":{\"identity\":\"EXAMPLE-operator\",\"signature\":\"EXAMPLE-signature\"},\"retention_date\":\"EXAMPLE: certification lifetime plus at least 2 years\",\"reviewer\":{\"identity\":\"EXAMPLE-reviewer\",\"signature\":\"EXAMPLE-countersignature\"},\"run_id\":\"VECTOR-RUN-001\",\"schema\":\"gy.locker-screening.v1\"}",
+      "expected_byte_length": 349,
+      "expected_sha256": "e9d2a8f4d1d473bc6d6b6d898fda1888aaeec91ec6993615c041f0f1ad91a146",
+      "exclude_manifest_sha256": true
+    }
+  ]
+}

@@ -49,7 +49,7 @@
             "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
             "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
           ],
-          "description": "Token program that owns the LP mint, as determined in R4. Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6)."
+          "description": "Token program that owns the LP mint, as determined in R4. Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6). Must equal token_program_coverage.mint_program (enforced by a top-level conditional)."
         },
         "cluster": {
           "type": "string",
@@ -114,7 +114,7 @@
             "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
             "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
           ],
-          "description": "Token program that owns the LP mint, read from the mint account (R4 step 1). Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6)."
+          "description": "Token program that owns the LP mint, read from the mint account (R4 step 1). Only the SPL Token program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) and the Token-2022 program (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb) are valid; any other token program is unsupported and fails closed (R4 step 6). Must equal pool.token_program (enforced by a top-level conditional)."
         },
         "mint_program_determination_evidence": {
           "type": "string",
@@ -245,9 +245,9 @@
           "filters": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/$defs/jcs_safe_object"
             },
-            "description": "Exact versioned getProgramAccounts filter objects used."
+            "description": "Exact versioned getProgramAccounts filter objects used. Constrained to the manifest-hashing supported subset (docs/ops/GY-OPS-RB-05.md R7): ASCII property names and values restricted to strings, booleans, integers, null, arrays, and objects — non-integral numbers cannot occur in a canonicalizable artifact."
           },
           "result": {
             "type": "string",
@@ -347,7 +347,7 @@
     },
     "manifest_sha256": {
       "$ref": "#/$defs/sha256",
-      "description": "SHA-256 over the deterministic canonical serialization of this artifact with manifest_sha256 itself excluded: RFC 8785 (JSON Canonicalization Scheme) — UTF-8, object members sorted recursively by Unicode code-point order of their keys, no insignificant whitespace. The exact recipe, included fields, and verification procedure are defined in docs/ops/GY-OPS-RB-05.md R7. The schema records the digest but cannot recompute it; reproducibility is verified by the independent reviewer (R8) and by scripts/validate-locker-docs-schemas.py."
+      "description": "SHA-256 over the deterministic canonical serialization of this artifact with manifest_sha256 itself excluded: RFC 8785 (JSON Canonicalization Scheme) — UTF-8, object members sorted recursively by UTF-16 code-unit order of their keys, ECMAScript number serialization, RFC 8785 string escaping. The exact recipe, included fields, supported-subset constraints, and verification procedure are defined in docs/ops/GY-OPS-RB-05.md R7. The schema records the digest but cannot recompute it; reproducibility is verified by the independent reviewer (R8) and by scripts/validate-locker-docs-schemas.py against the committed vectors in docs/ops/manifest-test-vectors.json."
     },
     "retention_date": {
       "type": "string",
@@ -387,6 +387,62 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": ["pool"],
+        "properties": {
+          "pool": {
+            "required": ["token_program"],
+            "properties": {
+              "token_program": {
+                "const": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["token_program_coverage"],
+        "properties": {
+          "token_program_coverage": {
+            "required": ["mint_program"],
+            "properties": {
+              "mint_program": {
+                "const": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["pool"],
+        "properties": {
+          "pool": {
+            "required": ["token_program"],
+            "properties": {
+              "token_program": {
+                "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["token_program_coverage"],
+        "properties": {
+          "token_program_coverage": {
+            "required": ["mint_program"],
+            "properties": {
+              "mint_program": {
+                "const": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -397,6 +453,33 @@
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "jcs_safe_object": {
+      "type": "object",
+      "patternProperties": {
+        "^[\\u0000-\\u007f]+$": {
+          "$ref": "#/$defs/jcs_safe_value"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Object restricted to the manifest-hashing supported subset: ASCII (BMP-free) property names and recursively jcs-safe values."
+    },
+    "jcs_safe_value": {
+      "oneOf": [
+        {
+          "type": ["string", "boolean", "null", "integer"]
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jcs_safe_value"
+          }
+        },
+        {
+          "$ref": "#/$defs/jcs_safe_object"
+        }
+      ],
+      "description": "JSON value restricted to the manifest-hashing supported subset (docs/ops/GY-OPS-RB-05.md R7): strings, booleans, integers (IEEE 754-exact), null, arrays, and ASCII-keyed objects. Non-integral numbers are excluded so RFC 8785 canonical serialization is unambiguous."
     },
     "owner_classification": {
       "type": "object",

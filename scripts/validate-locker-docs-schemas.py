@@ -8,10 +8,17 @@ Checks performed:
   1. Both schema documents are valid draft 2020-12 JSON Schemas (meta-validation).
   2. docs/ops/locker-inventory.json validates against docs/ops/locker-inventory.schema.json.
   3. The embedded gy.locker-screening.v1 example validates against its own schema.
-  4. The deterministic manifest_sha256 recipe (RFC 8785 canonicalization, with
-     manifest_sha256 itself excluded — GY-OPS-RB-05 R7) reproduces the digest
-     committed in the example (reproducible test vector), and a tampered
-     artifact yields a different digest.
+  4. The deterministic manifest_sha256 recipe (RFC 8785 JCS canonicalization,
+     with manifest_sha256 itself excluded — GY-OPS-RB-05 R7) reproduces the
+     digest committed in the screening example (reproducible test vector), and
+     a tampered artifact yields a different digest.
+  5. RFC 8785 Appendix B.2 number vectors (IEEE 754 bit patterns from the RFC
+     text at rfc-editor.org) — authoritative expected serializations.
+  6. Committed JCS/manifest test vectors (docs/ops/manifest-test-vectors.json):
+     expected canonical UTF-8 bytes, byte lengths, and SHA-256 values, generated
+     with an independent RFC 8785 implementation (Node.js JSON.stringify over
+     UTF-16-sorted copies) and cross-checked live against that Node
+     implementation on every run when node is available.
 
 Negative-test matrix (fail-closed constraints must actually reject):
   T1  qualified PASS without a reviewer countersignature is rejected
@@ -23,7 +30,9 @@ Negative-test matrix (fail-closed constraints must actually reject):
   T4  candidate_unverified entry with a non-null program_id is rejected
   T5  candidate_unverified entry with query_authoritative=true is rejected
       (plus candidate with ratification_details, verified entry violations)
-  T6  valid SPL Token and valid Token-2022 screening examples are accepted
+  T6  pool.token_program and token_program_coverage.mint_program must agree
+      (changing one while preserving the other is rejected)
+  T7  valid SPL Token and valid Token-2022 screening examples are accepted
 
 Exit code 0 = every check passed; nonzero = at least one failure.
 """
@@ -31,6 +40,9 @@ Exit code 0 = every check passed; nonzero = at least one failure.
 import copy
 import hashlib
 import json
+import shutil
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INVENTORY_SCHEMA_PATH = REPO_ROOT / "docs" / "ops" / "locker-inventory.schema.json"
 INVENTORY_DATA_PATH = REPO_ROOT / "docs" / "ops" / "locker-inventory.json"
 SCREENING_SCHEMA_PATH = REPO_ROOT / "docs" / "ops" / "locker-screening.schema.json"
+VECTORS_PATH = REPO_ROOT / "docs" / "ops" / "manifest-test-vectors.json"
 
 SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
@@ -65,11 +78,7 @@ def assert_rejected(name, validator, instance, expected_substrings=()):
         detail = "expected rejection but instance validated"
     elif expected_substrings:
         text = json.dumps(
-            [
-                (list(e.absolute_path), e.message)
-                for e in errors
-            ],
-            default=str,
+            [(list(e.absolute_path), e.message) for e in errors], default=str
         )
         missing = [s for s in expected_substrings if s not in text]
         if missing:
@@ -80,26 +89,294 @@ def assert_rejected(name, validator, instance, expected_substrings=()):
 
 def assert_accepted(name, validator, instance):
     errors = list(validator.iter_errors(instance))
-    detail = "; ".join(
-        f"{list(e.absolute_path)}: {e.message}" for e in errors[:5]
-    )
+    detail = "; ".join(f"{list(e.absolute_path)}: {e.message}" for e in errors[:5])
     report(name, not errors, detail)
 
 
-def canonical_json(obj):
-    """RFC 8785 (JCS) canonical serialization for schema-conformant artifacts:
-    ASCII keys, string/boolean/integer/array/object values only, so
-    sort_keys code-point ordering matches the RFC's UTF-16 ordering and no
-    float formatting is involved."""
-    return json.dumps(
-        obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
+# --------------------------------------------------------------------------
+# RFC 8785 (JSON Canonicalization Scheme) — genuine implementation.
+#
+# - Object members are sorted by UTF-16 code units (RFC 8785 §3.2.3), which is
+#   implemented by comparing each key's UTF-16 big-endian byte sequence: every
+#   code unit is exactly two bytes, so byte-wise lexicographic order equals
+#   unit-wise order. This differs from Unicode code-point order for keys
+#   containing characters outside the BMP (surrogate pairs).
+# - Numbers are serialized per ECMAScript Number::toString (RFC 8785 §3.2.2.3),
+#   the shortest round-trip decimal form with ES6 notation thresholds; every
+#   number goes through its IEEE 754 double value first. Integers that are not
+#   exactly representable as IEEE 754 doubles are rejected (I-JSON, RFC 8785
+#   §3.2.2.3).
+# - Strings escape per RFC 8785 §3.2.2.2: quotation mark, backslash, and the
+#   C0 control characters only; everything else (including U+2028/U+2029 and
+#   DEL) is emitted literally as UTF-8. Lone surrogates are escaped as
+#   \udXXX, matching well-formed JSON.stringify.
+# --------------------------------------------------------------------------
+_SHORT_ESCAPES = {
+    '"': '\\"',
+    "\\": "\\\\",
+    "\b": "\\b",
+    "\f": "\\f",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def _es6_number(value):
+    """Serialize a JSON number per ECMAScript Number::toString (RFC 8785)."""
+    if isinstance(value, bool):
+        raise TypeError("booleans are not numbers")
+    if isinstance(value, int):
+        as_double = float(value)
+        if as_double != value:
+            raise ValueError(
+                f"integer {value} is not exactly representable as an "
+                "IEEE 754 double (I-JSON / RFC 8785 §3.2.2.3)"
+            )
+    else:
+        as_double = float(value)
+    if as_double != as_double or as_double in (float("inf"), float("-inf")):
+        raise ValueError("NaN/Infinity are not permitted in JSON")
+    if as_double == 0:
+        return "0"  # covers 0 and -0 (RFC 8785 Appendix B: minus zero -> 0)
+    sign = "-" if as_double < 0 else ""
+    text = repr(abs(as_double))  # shortest round-trip digits (same as ES6)
+    mantissa, _, exp_part = text.partition("e")
+    exp10 = int(exp_part) if exp_part else 0
+    if "." in mantissa:
+        before, _, after = mantissa.partition(".")
+        raw_digits = before + after
+        dot_pos = len(before)
+    else:
+        raw_digits = mantissa
+        dot_pos = len(mantissa)
+    if raw_digits.strip("0") == "":
+        return "0"
+    digits1 = raw_digits.lstrip("0")  # leading zeros do not change the value
+    trailing = len(digits1) - len(digits1.rstrip("0"))
+    digits = digits1.rstrip("0") or "0"
+    k = len(digits)
+    # value == int(raw_digits) * 10**(exp10 - (len(raw_digits) - dot_pos))
+    #        == int(digits)  * 10**(exp10 - (len(raw_digits) - dot_pos) + trailing)
+    # ES6 spec convention: s * 10**(n - k) == m  =>  n = q + k.
+    q = exp10 - (len(raw_digits) - dot_pos) + trailing
+    n = q + k
+    if k <= n <= 21:
+        body = digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        body = digits[:n] + "." + digits[n:]
+    elif -6 < n <= 0:
+        body = "0." + "0" * (-n) + digits
+    else:
+        exponent = n - 1
+        body = digits[0]
+        if k > 1:
+            body += "." + digits[1:]
+        body += "e" + ("+" if exponent >= 0 else "-") + str(abs(exponent))
+    return sign + body
+
+
+def _serialize_string(text):
+    out = ['"']
+    for ch in text:
+        code = ord(ch)
+        esc = _SHORT_ESCAPES.get(ch)
+        if esc is not None:
+            out.append(esc)
+        elif code < 0x20 or 0xD800 <= code <= 0xDFFF:
+            out.append("\\u%04x" % code)
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _utf16_key(key):
+    # UTF-16 big-endian byte order == UTF-16 code-unit order (fixed 2-byte
+    # units). surrogatepass tolerates lone surrogates (escaped on output).
+    return key.encode("utf-16-be", "surrogatepass")
+
+
+def jcs_canonicalize(value):
+    """RFC 8785 canonical JSON serialization of a parsed JSON value."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return _serialize_string(value)
+    if isinstance(value, (int, float)):
+        return _es6_number(value)
+    if isinstance(value, list):
+        return "[" + ",".join(jcs_canonicalize(item) for item in value) + "]"
+    if isinstance(value, dict):
+        members = []
+        for key in sorted(value.keys(), key=_utf16_key):
+            members.append(_serialize_string(key) + ":" + jcs_canonicalize(value[key]))
+        return "{" + ",".join(members) + "}"
+    raise TypeError(f"unsupported value type: {type(value)!r}")
 
 
 def manifest_digest(artifact):
+    """GY-OPS-RB-05 R7: SHA-256 of the canonical form of the artifact with
+    its top-level manifest_sha256 member excluded."""
     body = copy.deepcopy(artifact)
     body.pop("manifest_sha256", None)
-    return hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+    canonical = jcs_canonicalize(body)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest(), canonical
+
+
+# RFC 8785 Appendix B.2 number vectors (rfc-editor.org/rfc/rfc8785.txt):
+# (IEEE 754 bit pattern, expected canonical serialization). NaN/Infinity rows
+# are omitted: those values are not permitted in JSON.
+RFC_NUMBER_VECTORS = [
+    ("0000000000000000", "0"),  # Zero
+    ("8000000000000000", "0"),  # Minus zero
+    ("0000000000000001", "5e-324"),  # Min pos number
+    ("8000000000000001", "-5e-324"),  # Min neg number
+    ("7fefffffffffffff", "1.7976931348623157e+308"),  # Max pos number
+    ("ffefffffffffffff", "-1.7976931348623157e+308"),  # Max neg number
+    ("4340000000000000", "9007199254740992"),  # Max pos int
+    ("c340000000000000", "-9007199254740992"),  # Max neg int
+    ("4430000000000000", "295147905179352830000"),  # ~2**68
+    ("44b52d02c7e14af5", "9.999999999999997e+22"),
+    ("44b52d02c7e14af6", "1e+23"),
+    ("44b52d02c7e14af7", "1.0000000000000001e+23"),
+    ("444b1ae4d6e2ef4e", "999999999999999700000"),
+    ("444b1ae4d6e2ef4f", "999999999999999900000"),
+    ("444b1ae4d6e2ef50", "1e+21"),
+    ("3eb0c6f7a0b5ed8c", "9.999999999999997e-7"),
+    ("3eb0c6f7a0b5ed8d", "0.000001"),
+    ("41b3de4355555553", "333333333.3333332"),
+    ("41b3de4355555554", "333333333.33333325"),
+    ("41b3de4355555555", "333333333.3333333"),
+    ("41b3de4355555556", "333333333.3333334"),
+    ("41b3de4355555557", "333333333.33333343"),
+    ("becbf647612f3696", "-0.0000033333333333333333"),
+    ("43143ff3c1cb0959", "1424953923781206.2"),  # Round to even
+]
+
+
+# Independent RFC 8785 implementation: Node.js. ECMAScript JSON.stringify is
+# the serialization RFC 8785 §3.2.2.3 normatively references; JS Array.sort on
+# strings orders by UTF-16 code units, which implements §3.2.3 property
+# ordering. Expected values committed in the vectors file were generated with
+# this implementation, and the live check below re-verifies on every run.
+NODE_CHECK_SCRIPT = r"""
+const crypto = require('crypto');
+const fs = require('fs');
+function jcs(value) {
+  if (value === null || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(jcs).join(',') + ']';
+  const keys = Object.keys(value).sort(); // UTF-16 code-unit order
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + jcs(value[k])).join(',') + '}';
+}
+function sha(canonical) {
+  return crypto.createHash('sha256').update(Buffer.from(canonical, 'utf8')).digest('hex');
+}
+function doubleFromHex(hex) {
+  const buf = Buffer.from(hex, 'hex');
+  const view = new DataView(new ArrayBuffer(8));
+  for (let i = 0; i < 8; i++) view.setUint8(i, buf[i]);
+  return view.getFloat64(0);
+}
+const vectors = JSON.parse(fs.readFileSync('docs/ops/manifest-test-vectors.json', 'utf8'));
+const out = { vectors: {}, rfc: {}, extras: {}, example: null };
+for (const t of vectors.vectors) {
+  const body = t.exclude_manifest_sha256
+    ? Object.fromEntries(Object.entries(t.input).filter(([k]) => k !== 'manifest_sha256'))
+    : t.input;
+  out.vectors[t.name] = { canonical: jcs(body), sha256: sha(jcs(body)) };
+}
+// RFC Appendix B.2 numbers via the independent implementation
+const rfcVectors = JSON.parse(fs.readFileSync(process.env.RFC_VECTORS_TMP, 'utf8'));
+for (const [hex, expected] of rfcVectors) {
+  const d = doubleFromHex(hex);
+  if (!Number.isFinite(d)) { out.rfc[hex] = { error: 'nonfinite' }; continue; }
+  const s = jcs(d);
+  out.rfc[hex] = { canonical: s, expected: expected, matches: s === expected };
+}
+// extra string cases (constructed here to match the Python-side constructions)
+out.extras = JSON.parse(fs.readFileSync(process.env.EXTRAS_TMP, 'utf8'));
+out.extrasCanonical = {};
+for (const [name, input] of Object.entries(JSON.parse(fs.readFileSync(process.env.EXTRAS_INPUT_TMP, 'utf8')))) {
+  out.extrasCanonical[name] = jcs(input);
+}
+// committed screening example
+const schema = JSON.parse(fs.readFileSync('docs/ops/locker-screening.schema.json', 'utf8'));
+const ex = JSON.parse(JSON.stringify(schema.examples[0]));
+delete ex.manifest_sha256;
+out.example = { canonical: jcs(ex), sha256: sha(jcs(ex)) };
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+# In-script constructed string cases beyond the committed vectors file
+# (constructed programmatically so no raw control bytes, U+2028/U+2029, or
+# lone surrogates enter the repository): (name, input, expected canonical)
+EXTRA_STRING_ASSERTIONS = [
+    ("u0001", "\u0001", '"\\u0001"'),
+    ("del_u007f", "\u007f", '"\u007f"'),
+    ("u2028_literal", "a\u2028b", '"a\u2028b"'),
+    ("u2029_literal", "a\u2029b", '"a\u2029b"'),
+    ("lone_surrogate", "\ud800", '"\\ud800"'),
+]
+
+
+def run_node_cross_check(screening_example):
+    """Returns dict with per-vector digests from the Node implementation, or
+    None when node is unavailable."""
+    if shutil.which("node") is None:
+        return None
+    import os
+    import tempfile
+
+    rfc_tmp = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, dir=tempfile.gettempdir()
+    )
+    json.dump(RFC_NUMBER_VECTORS, rfc_tmp)
+    rfc_tmp.close()
+    extras_input = {name: input_ for name, input_, _ in EXTRA_STRING_ASSERTIONS}
+    extras_expected = {name: expected for name, _, expected in EXTRA_STRING_ASSERTIONS}
+    extras_input_tmp = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, dir=tempfile.gettempdir()
+    )
+    json.dump(extras_input, extras_input_tmp, ensure_ascii=True)
+    extras_input_tmp.close()
+    extras_expected_tmp = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, dir=tempfile.gettempdir()
+    )
+    json.dump(extras_expected, extras_expected_tmp, ensure_ascii=True)
+    extras_expected_tmp.close()
+    env = dict(
+        os.environ,
+        RFC_VECTORS_TMP=rfc_tmp.name,
+        EXTRAS_INPUT_TMP=extras_input_tmp.name,
+        EXTRAS_EXPECTED_TMP=extras_expected_tmp.name,
+    )
+    # The inline script reads EXTRAS_TMP for expected values; point it at the
+    # expected map (input map is read separately below).
+    env["EXTRAS_TMP"] = extras_expected_tmp.name
+    env["EXTRAS_INPUT_TMP"] = extras_input_tmp.name
+    proc = subprocess.run(
+        ["node", "-e", NODE_CHECK_SCRIPT],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    for tmp in (rfc_tmp.name, extras_input_tmp.name, extras_expected_tmp.name):
+        Path(tmp).unlink(missing_ok=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"node cross-check failed: {proc.stderr[:2000]}")
+    return json.loads(proc.stdout)
+
+
 
 
 def main():
@@ -136,9 +413,81 @@ def main():
         screening_example,
     )
 
-    # ---- Deterministic manifest hashing (R7) -------------------------------
+    # ---- RFC 8785 Appendix B.2 authoritative number vectors -----------------
+    rfc_failures = []
+    for hex_bits, expected in RFC_NUMBER_VECTORS:
+        double = struct.unpack(">d", bytes.fromhex(hex_bits))[0]
+        try:
+            got = _es6_number(double)
+        except ValueError as exc:
+            rfc_failures.append(f"{hex_bits}: {exc}")
+            continue
+        if got != expected:
+            rfc_failures.append(f"{hex_bits}: expected {expected!r}, got {got!r}")
+    report(
+        "F1a RFC 8785 Appendix B.2 number vectors (24 IEEE 754 bit patterns) "
+        "serialize exactly as the RFC specifies",
+        not rfc_failures,
+        "; ".join(rfc_failures[:6]),
+    )
+
+    # ---- In-script string escaping cases ------------------------------------
+    string_failures = []
+    for name, input_, expected in EXTRA_STRING_ASSERTIONS:
+        got = _serialize_string(input_)
+        if got != expected:
+            string_failures.append(f"{name}: expected {expected!r}, got {got!r}")
+    # integers that are not IEEE 754-exact must be rejected (I-JSON)
+    try:
+        _es6_number(10**60)
+        string_failures.append("non-representable integer 10**60 was not rejected")
+    except ValueError:
+        pass
+    report(
+        "F1b JCS string escaping: control chars, DEL, U+2028/U+2029 literal, "
+        "lone surrogate escaped; non-representable integers rejected",
+        not string_failures,
+        "; ".join(string_failures),
+    )
+
+    # ---- Committed test vectors (docs/ops/manifest-test-vectors.json) -------
+    vectors_doc = json.loads(VECTORS_PATH.read_text())
+    vector_results = {}
+    vector_failures = []
+    for vector in vectors_doc["vectors"]:
+        name = vector["name"]
+        body = vector["input"]
+        if vector.get("exclude_manifest_sha256"):
+            body = {
+                key: value
+                for key, value in body.items()
+                if key != "manifest_sha256"
+            }
+        canonical = jcs_canonicalize(body)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        byte_len = len(canonical.encode("utf-8"))
+        ok = (
+            canonical == vector["expected_canonical"]
+            and digest == vector["expected_sha256"]
+            and byte_len == vector["expected_byte_length"]
+        )
+        vector_results[name] = {"canonical": canonical, "sha256": digest}
+        if not ok:
+            vector_failures.append(
+                f"{name}: canonical_match={canonical == vector['expected_canonical']} "
+                f"digest_match={digest == vector['expected_sha256']} "
+                f"len_match={byte_len == vector['expected_byte_length']}"
+            )
+    report(
+        f"F1c committed JCS/manifest test vectors reproduce expected canonical "
+        f"UTF-8 bytes, byte lengths, and SHA-256 values ({len(vectors_doc['vectors'])} vectors)",
+        not vector_failures,
+        "; ".join(vector_failures),
+    )
+
+    # ---- Screening example manifest (R7) ------------------------------------
     stated = screening_example["manifest_sha256"]
-    recomputed = manifest_digest(screening_example)
+    recomputed, canonical_example = manifest_digest(screening_example)
     report(
         "T7a deterministic manifest recipe reproduces the committed example digest",
         recomputed == stated,
@@ -148,13 +497,53 @@ def main():
     tampered["run_id"] = tampered["run_id"] + "-TAMPERED"
     report(
         "T7b tampered artifact yields a different manifest digest (detected)",
-        manifest_digest(tampered) != stated,
+        manifest_digest(tampered)[0] != stated,
     )
-    roundtrip = json.loads(canonical_json({k: v for k, v in screening_example.items() if k != "manifest_sha256"}))
+    roundtrip = json.loads(canonical_example)
     report(
         "T7c canonical serialization is byte-stable across a JSON round-trip",
-        manifest_digest(roundtrip) == stated,
+        manifest_digest(roundtrip)[0] == stated,
     )
+
+    # ---- Live cross-check against the independent Node implementation -------
+    try:
+        node_out = run_node_cross_check(screening_example)
+    except Exception as exc:  # noqa: BLE001 — surfaced as a failure
+        node_out = None
+        report("F1d independent Node.js RFC 8785 cross-check", False, str(exc))
+    else:
+        if node_out is None:
+            report(
+                "F1d independent Node.js RFC 8785 cross-check (node unavailable; "
+                "committed Node-generated constants still enforced above)",
+                True,
+            )
+        else:
+            node_failures = []
+            for name, got in node_out["vectors"].items():
+                if got["canonical"] != vector_results[name]["canonical"]:
+                    node_failures.append(f"{name}: canonical differs")
+                if got["sha256"] != vector_results[name]["sha256"]:
+                    node_failures.append(f"{name}: sha256 differs")
+            for hex_bits, got in node_out["rfc"].items():
+                if not got.get("matches", False):
+                    node_failures.append(f"rfc {hex_bits}: {got}")
+            for name, canonical in node_out.get("extrasCanonical", {}).items():
+                expected = dict(
+                    (n, e) for n, _i, e in EXTRA_STRING_ASSERTIONS
+                )[name]
+                if canonical != expected:
+                    node_failures.append(
+                        f"extra {name}: expected {expected!r}, got {canonical!r}"
+                    )
+            if node_out["example"]["sha256"] != stated:
+                node_failures.append("screening example digest differs from Node")
+            report(
+                "F1d independent Node.js RFC 8785 cross-check (vectors, RFC "
+                "numbers, string cases, example digest)",
+                not node_failures,
+                "; ".join(node_failures[:6]),
+            )
 
     # ---- T1: reviewer required for qualified PASS --------------------------
     base = copy.deepcopy(screening_example)
@@ -299,6 +688,57 @@ def main():
         "T3g valid SPL Token example (committed base example) is accepted",
         screening_validator,
         base,
+    )
+
+    # ---- T6: pool.token_program == token_program_coverage.mint_program -----
+    # Both mutations start from a fully valid artifact so the ONLY schema
+    # violation is the pool/mint-program mismatch.
+    mismatch_2022_pool = copy.deepcopy(base)
+    mismatch_2022_pool["pool"]["token_program"] = TOKEN_2022_PROGRAM
+    assert_rejected(
+        "T6a pool=Token-2022 with mint_program=SPL Token is rejected",
+        screening_validator,
+        mismatch_2022_pool,
+    )
+    mismatch_spl_pool = copy.deepcopy(valid_token2022)
+    mismatch_spl_pool["pool"]["token_program"] = SPL_TOKEN_PROGRAM
+    assert_rejected(
+        "T6b pool=SPL Token with mint_program=Token-2022 is rejected",
+        screening_validator,
+        mismatch_spl_pool,
+    )
+
+    # ---- F2: manifest-hashing supported subset for filters ------------------
+    valid_filters = copy.deepcopy(base)
+    valid_filters["per_locker_queries"] = [
+        {
+            "program_id": "GsSCS3vPWrtJ5Y9aEVVT65fmrex5P5RGHXdZvsdbWgfo",
+            "filters": [
+                {"dataSize": 146},
+                {"memcmp": {"offset": 41, "bytes": "EXAMPLEb58bytes"}},
+            ],
+            "result": "EXAMPLE: complete result recorded",
+            "raw_response_sha256": "bb" * 32,
+        }
+    ]
+    assert_accepted(
+        "F2a filters with ASCII keys and schema-safe values are accepted",
+        screening_validator,
+        valid_filters,
+    )
+    float_filters = copy.deepcopy(valid_filters)
+    float_filters["per_locker_queries"][0]["filters"][0] = {"dataSize": 146.5}
+    assert_rejected(
+        "F2b filters containing a non-integral number are rejected (manifest subset)",
+        screening_validator,
+        float_filters,
+    )
+    nonascii_key_filters = copy.deepcopy(valid_filters)
+    nonascii_key_filters["per_locker_queries"][0]["filters"][0] = {"サイズ": 146}
+    assert_rejected(
+        "F2c filters containing a non-ASCII property name are rejected (manifest subset)",
+        screening_validator,
+        nonascii_key_filters,
     )
 
     # ---- T4/T5: inventory entry status/program_id/query_authoritative ------
