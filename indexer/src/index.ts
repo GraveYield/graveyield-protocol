@@ -82,9 +82,11 @@ export class GraveScannerV2 {
     this.opts = opts;
     this.activityIndexer = new ActivityIndexer();
     // The queue is the single candidate-ingestion choke point: with M1
-    // sourcing enforced (default) it independently refuses any candidate
-    // that does not satisfy the D-01 WSOL quote-side predicate — no
-    // alternate discovery/pre-filter path can bypass it.
+    // sourcing enforced (default) it screens every candidate's
+    // discovery-record mint metadata against the D-01 WSOL quote-side
+    // predicate, so no alternate discovery/pre-filter path can bypass
+    // the metadata filter. Screening only — the authoritative on-chain
+    // verification happens in the submission gate (submit.ts).
     this.queue = new CandidateQueue({ m1SourcingEnforced: opts.m1SourcingEnforced ?? true });
   }
 

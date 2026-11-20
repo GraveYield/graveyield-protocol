@@ -22,6 +22,21 @@
 // the SDK's canonical `evaluateM1Sourcing` guard — no second predicate
 // implementation and no second WSOL definition here. Non-M1 operation
 // can disable the gate explicitly via `m1SourcingEnforced: false`.
+//
+// TRUST BOUNDARY — the gate is metadata screening ONLY. It evaluates
+// the mint fields the discovery record carries; it does NOT fetch,
+// decode, or verify the actual on-chain Raydium V4 pool account, and
+// the CandidateQueue holds no RPC connection at all. A caller that
+// forges `discovery.pool` to CLAIM the M1-eligible orientation while
+// the on-chain account is oriented differently IS admitted here. That
+// is by design: the queue is a cheap, RPC-free funnel (clearly invalid
+// metadata never occupies queue capacity), not an on-chain verification
+// authority. The authoritative check is the submission gate
+// (`submitCandidate`, indexer/src/submit.ts): it re-fetches the pool
+// via the SDK's validated `fetchV4Pool` path and re-applies this same
+// shared predicate to the DECODED values before any attestation
+// material or transaction is built — so a forged-metadata candidate
+// can occupy queue capacity but can never be submitted.
 
 import { evaluateM1Sourcing, type M1SourcingRejectionReason } from "@graveyield/sdk";
 import type { ScoredCandidate } from "./types.js";
@@ -43,10 +58,15 @@ export type M1QueueAdmission =
  * Deduplicates by pool address (highest score wins). Ordered by score
  * descending so the `drain(n)` method yields the top N candidates.
  *
- * With M1 sourcing enforced (default), `enqueue` independently verifies
- * the candidate's pool orientation (coin_mint non-WSOL, pc_mint WSOL,
- * exactly one WSOL side) and refuses admission on any failure — the
- * returned `M1QueueAdmission` records the exact rejection reason.
+ * With M1 sourcing enforced (default), `enqueue` screens the
+ * candidate's discovery-record mint metadata (coin_mint non-WSOL,
+ * pc_mint WSOL, exactly one WSOL side) and refuses admission on any
+ * failure — the returned `M1QueueAdmission` records the exact rejection
+ * reason. This is metadata screening ONLY: the actual on-chain pool
+ * account is not fetched or verified here (the queue holds no RPC
+ * connection), so a discovery record forged to claim a valid
+ * orientation is admitted and is later rejected by the authoritative
+ * on-chain gate in `submitCandidate` (indexer/src/submit.ts).
  */
 export class CandidateQueue {
   private readonly entries = new Map<string, ScoredCandidate>();
@@ -72,8 +92,11 @@ export class CandidateQueue {
    */
   enqueue(scored: ScoredCandidate): M1QueueAdmission {
     if (this.m1SourcingEnforced) {
-      // The candidate's discovery record carries the parsed Raydium V4
-      // AmmInfo fields: baseMint IS coin_mint, quoteMint IS pc_mint.
+      // Metadata screening only (no on-chain fetch here): the
+      // candidate's discovery record carries the parsed Raydium V4
+      // AmmInfo fields — baseMint IS coin_mint, quoteMint IS pc_mint —
+      // trusted as CLAIMED, with the authoritative on-chain verification
+      // deferred to the submitCandidate gate.
       const verdict = evaluateM1Sourcing({
         coinMint: scored.candidate.discovery.pool.baseMint,
         pcMint: scored.candidate.discovery.pool.quoteMint,

@@ -156,6 +156,62 @@ describe("CandidateQueue — D-01 M1 sourcing admission (default enforced)", () 
     assert.equal(queue.size(), 0);
   });
 
+  test("trust boundary: forged metadata claiming a valid orientation is ADMITTED (metadata screening only) and rejected by the authoritative submission gate", async () => {
+    // Honest trust-boundary pin (review finding): the queue gate
+    // evaluates the discovery record's mint metadata and holds NO RPC
+    // connection — it never fetches the on-chain pool account. A record
+    // forged to CLAIM the M1-eligible orientation (coin=memecoin,
+    // pc=WSOL) while the ACTUAL on-chain account is coin-WSOL is
+    // therefore ADMITTED here and occupies queue capacity. The
+    // authoritative on-chain verification is the submission gate:
+    // submitCandidate re-fetches + decodes the pool account
+    // (fetchV4Pool — Raydium owner + canonical 752-byte layout) and
+    // re-applies the SAME shared predicate to the decoded values, so
+    // the forged candidate is skipped before any attestation material
+    // or transaction is built.
+    const pool = synth(0x07);
+    let rpcCalls = 0;
+    const actualPoolIsCoinWsol = {
+      async getAccountInfo(address: PublicKey) {
+        rpcCalls++;
+        if (address.equals(pool)) {
+          return {
+            lamports: 1_000_000,
+            data: Buffer.from(ammInfoBytes({ baseMint: WSOL_MINT, quoteMint: MEMECOIN })),
+            owner: AMM,
+            executable: false,
+            rentEpoch: 0n,
+          } as unknown as AccountInfo<Uint8Array>;
+        }
+        return null;
+      },
+    } as unknown as Connection;
+
+    const queue = new CandidateQueue();
+    const admission = queue.enqueue(score(makeCandidate(pool, BASE_MINT, WSOL_MINT), 1));
+    assert.deepEqual(
+      admission,
+      { admitted: true },
+      "the queue screens metadata only — a record claiming the M1-eligible orientation is admitted",
+    );
+    assert.equal(queue.size(), 1);
+    assert.equal(
+      rpcCalls,
+      0,
+      "enqueue must NOT fetch the on-chain pool account — metadata screening boundary",
+    );
+
+    // The authoritative gate decides on the DECODED account, not the
+    // claimed metadata: the forged candidate is rejected at submission.
+    const result = await submitCandidate(
+      actualPoolIsCoinWsol,
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT),
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(result.error?.startsWith("m1-sourcing-rejected: wsol-on-coin-side"), result.error);
+  });
+
   test("non-M1 mode: enforcement off preserves the existing admission behavior", () => {
     const queue = new CandidateQueue({ m1SourcingEnforced: false });
     const coinWsol = makeCandidate(synth(0x06), WSOL_MINT, MEMECOIN);
