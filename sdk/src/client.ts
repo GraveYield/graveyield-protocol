@@ -65,6 +65,7 @@ import {
   readLpMintSupply,
   quotePerBaseQ64x64,
 } from "./raydiumV4.js";
+import { assertM1SourcingForPool, type M1SourcingAccepted } from "./m1Sourcing.js";
 import { snapshotLpHolders as snapshotLpHoldersImpl, type SnapshotResult } from "./snapshot.js";
 import { SnapshotMerkleTree, type HolderEntry } from "./merkle.js";
 import { shouldRejectFee, buildPriorityFeePolicy } from "./priorityFee.js";
@@ -433,6 +434,24 @@ export class GraveYieldClient {
       },
       uncxMarkerPresent,
     };
+  }
+
+  // --------------------------------------------- assertM1CandidateSourcing
+  //
+  // D-01 M1 sourcing guard (GY-M1-ODR-001 §3) at the SDK candidate
+  // acceptance boundary. Independently re-validates a pool from chain
+  // state (owner + canonical 752-byte layout + exact WSOL quote-side
+  // orientation) AFTER any earlier discovery/pre-filter decision, so a
+  // wrongly sourced candidate cannot be accepted merely because it
+  // passed an upstream filter.
+  //
+  // Fail-closed: missing accounts, non-Raydium owners, non-canonical
+  // layouts and ambiguous orientations all throw (M1SourcingError for
+  // orientation rejections). M1 sourcing only — this guard never touches
+  // the settlement-adjacent orientation logic in `evaluatePool`.
+
+  assertM1CandidateSourcing(poolAddress: PublicKey): Promise<M1SourcingAccepted> {
+    return assertM1SourcingForPool(this.connection, poolAddress);
   }
 
   // --------------------------------------------------- recordLaunchPrice

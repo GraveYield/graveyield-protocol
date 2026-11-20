@@ -1,0 +1,528 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// D-01 M1 WSOL quote-side sourcing enforcement tests (GY-M1-ODR-001 §3)
+// across the indexer pipeline boundaries:
+//
+//   * CandidateQueue.enqueue — the single candidate-ingestion choke
+//     point: mis-oriented candidates are refused admission (never
+//     stored), including direct programmatic injection (the bypass
+//     attempt).
+//   * GraveScannerV2.runOnce — the discovery gate rejects non-M1 pools
+//     BEFORE any enrichment work, from ANY registered source, so an
+//     adversarial/alternate discovery source cannot bypass the filter.
+//   * submitCandidate — defense-in-depth before any attestation material
+//     or transaction is produced.
+//   * Non-M1 behavior is preserved when enforcement is explicitly off.
+//   * M1_SOURCING_ENFORCED config parsing fails closed.
+
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+
+import { PublicKey, type AccountInfo, type Connection } from "@solana/web3.js";
+
+import {
+  CandidateQueue,
+  GraveScannerV2,
+  loadConfig,
+  submitCandidate,
+  type AmmSource,
+  type Candidate,
+  type DiscoveredPool,
+  type IndexerConfig,
+} from "../src/index.js";
+import { DEVNET_SCANNER_PROGRAM_ID, DEVNET_VAULT_PROGRAM_ID } from "../src/index.js";
+import {
+  encodeBase58,
+  RAYDIUM_V4_PROGRAM_ID,
+  SPL_TOKEN_PROGRAM_ID,
+  WSOL_MINT,
+} from "@graveyield/sdk";
+
+const MEMECOIN = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const AMM = RAYDIUM_V4_PROGRAM_ID;
+
+function synth(seed: number): PublicKey {
+  return new PublicKey(new Uint8Array(32).fill(seed));
+}
+
+/** Valid pool: coin_mint = memecoin (non-WSOL), pc_mint = WSOL. */
+const VALID_POOL = synth(0x01);
+const COIN_VAULT = synth(0xc1);
+const PC_VAULT = synth(0xc2);
+const LP_MINT = synth(0x04);
+const BASE_MINT = synth(0x05); // memecoin (coin_mint)
+const NOW_SEC = Math.floor(Date.now() / 1000);
+
+function makeCandidate(pool: PublicKey, baseMint: PublicKey, quoteMint: PublicKey): Candidate {
+  return {
+    poolAddress: pool,
+    ammProgramId: AMM,
+    discovery: {
+      poolAddress: pool,
+      pool: {
+        coinVault: synth(0xa1),
+        pcVault: synth(0xa2),
+        baseMint,
+        quoteMint,
+        lpMint: synth(0xa4),
+      },
+      fetchedAtSlot: 0,
+    },
+    activity: {
+      poolAddress: pool,
+      lastSwapUnixTs: NOW_SEC - 100 * 86_400,
+      lastSwapSlot: 900_000,
+      lastSwapSignature: "5" + "a".repeat(86),
+      noSwapFound: false,
+      unresolved: false,
+    },
+    reserves: {
+      poolAddress: pool,
+      coinReserve: 1_000_000n,
+      pcReserve: 600_000_000n,
+      lpSupply: 10_000_000n,
+      wsolSideIdentified: true,
+      tvlLamports: 600_000_000n,
+    },
+    metadata: {
+      poolAddress: pool,
+      baseMint,
+      baseDecimals: 6,
+      baseSupply: 1_000_000_000n,
+      quoteMint,
+      quoteDecimals: 9,
+      quoteSupply: 0n,
+      lpMint: synth(0xa4),
+      lpDecimals: 2,
+      lpSupply: 10_000_000n,
+    },
+    preFilter: { poolAddress: pool, passed: true, failedCriteria: [], criteriaBitmap: 0x3f },
+  };
+}
+
+function score(candidate: Candidate, scoreValue: number) {
+  return {
+    candidate,
+    score: scoreValue,
+    scoreBreakdown: { inactivityMargin: 0, tvlMargin: 0, priceCollapseMargin: 0 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CandidateQueue — the ingestion choke point
+// ---------------------------------------------------------------------------
+
+describe("CandidateQueue — D-01 M1 sourcing admission (default enforced)", () => {
+  test("PASS: pc_mint WSOL + coin_mint non-WSOL is admitted", () => {
+    const queue = new CandidateQueue();
+    const admission = queue.enqueue(score(makeCandidate(VALID_POOL, BASE_MINT, WSOL_MINT), 1));
+    assert.deepEqual(admission, { admitted: true });
+    assert.equal(queue.size(), 1);
+  });
+
+  test("REJECT: WSOL on coin_mint — refused and never stored", () => {
+    const pool = synth(0x02);
+    const queue = new CandidateQueue();
+    const admission = queue.enqueue(score(makeCandidate(pool, WSOL_MINT, MEMECOIN), 1));
+    assert.equal(admission.admitted, false);
+    if (!admission.admitted) {
+      assert.equal(admission.reason, "wsol-on-coin-side");
+      assert.ok(admission.detail.includes("quote side"));
+    }
+    assert.equal(queue.size(), 0, "rejected candidate must NOT enter the M1 candidate queue");
+    assert.equal(queue.has(pool.toBase58()), false);
+  });
+
+  test("REJECT: neither mint WSOL / both mints WSOL", () => {
+    const queue = new CandidateQueue();
+    const none = queue.enqueue(score(makeCandidate(synth(0x03), MEMECOIN, synth(0x33)), 1));
+    assert.equal(none.admitted, false);
+    if (!none.admitted) assert.equal(none.reason, "no-wsol-side");
+    const both = queue.enqueue(score(makeCandidate(synth(0x04), WSOL_MINT, WSOL_MINT), 1));
+    assert.equal(both.admitted, false);
+    if (!both.admitted) assert.equal(both.reason, "both-sides-wsol");
+    assert.equal(queue.size(), 0);
+  });
+
+  test("REJECT: direct programmatic injection cannot bypass the gate", () => {
+    // The queue is the choke point — a candidate injected directly (no
+    // discovery, no pre-filter) still fails the exact predicate.
+    const pool = synth(0x05);
+    const queue = new CandidateQueue();
+    const bad = makeCandidate(pool, WSOL_MINT, MEMECOIN); // coin-WSOL
+    bad.preFilter = { poolAddress: pool, passed: true, failedCriteria: [], criteriaBitmap: 0x3f };
+    const admission = queue.enqueue(score(bad, 100));
+    assert.equal(admission.admitted, false);
+    assert.equal(queue.size(), 0);
+  });
+
+  test("non-M1 mode: enforcement off preserves the existing admission behavior", () => {
+    const queue = new CandidateQueue({ m1SourcingEnforced: false });
+    const coinWsol = makeCandidate(synth(0x06), WSOL_MINT, MEMECOIN);
+    assert.deepEqual(queue.enqueue(score(coinWsol, 1)), { admitted: true });
+    assert.equal(queue.size(), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GraveScannerV2.runOnce — no bypass through an alternate discovery source
+// ---------------------------------------------------------------------------
+
+/** Canonical 165-byte SPL token account (mint @0, amount @64 LE). */
+function tokenAccountBytes(mint: PublicKey, amount: bigint): Uint8Array {
+  const buf = new Uint8Array(165);
+  buf.set(mint.toBytes(), 0);
+  new DataView(buf.buffer).setBigUint64(64, amount, true);
+  buf[108] = 1; // state = initialized
+  return buf;
+}
+
+/** Canonical 82-byte SPL mint account (supply @36, decimals @44). */
+function mintBytes(decimals: number, supply: bigint): Uint8Array {
+  const buf = new Uint8Array(82);
+  new DataView(buf.buffer).setBigUint64(36, supply, true);
+  buf[44] = decimals;
+  buf[45] = 1;
+  return buf;
+}
+
+/** Raydium V4 instruction data for `tag` + 16 zero arg bytes. */
+function v4TagData(tag: number): string {
+  const data = new Uint8Array(17);
+  data[0] = tag;
+  return encodeBase58(data);
+}
+
+/**
+ * Fake connection serving the enrichment surface for the VALID pool
+ * (reserves, metadata, verified last-swap history) and NOTHING for the
+ * adversarial pools — any RPC touch on an adversarial pool would fail
+ * the test, proving the discovery gate rejects before enrichment.
+ */
+class PipelineFakeRpc {
+  queried = new Set<string>();
+
+  asConnection(): Connection {
+    return this as unknown as Connection;
+  }
+
+  assertNotQueried(address: PublicKey, what: string): void {
+    assert.ok(
+      !this.queried.has(address.toBase58()),
+      `${what} must be rejected before any enrichment RPC (queried ${address.toBase58()})`,
+    );
+  }
+
+  async getSignaturesForAddress(address: PublicKey): Promise<Array<unknown>> {
+    this.queried.add(address.toBase58());
+    return [
+      {
+        signature: "SIG_VERIFIED",
+        slot: BigInt(900_000),
+        blockTime: BigInt(NOW_SEC - 100 * 86_400),
+        err: null,
+        confirmationStatus: "finalized",
+      },
+    ];
+  }
+
+  async getTransaction(_signature: string): Promise<unknown> {
+    return {
+      slot: 900_000n,
+      blockTime: BigInt(NOW_SEC - 100 * 86_400),
+      transaction: {
+        message: {
+          getAccountKeys: () => ({
+            keySegments: () => [[AMM, VALID_POOL, COIN_VAULT, PC_VAULT]],
+          }),
+          compiledInstructions: [
+            {
+              programIdIndex: 0,
+              accountKeyIndexes: [1, 2, 3],
+              data: v4TagData(9), // SwapBaseIn — verified economic swap
+            },
+          ],
+        },
+      },
+      meta: {
+        err: null,
+        innerInstructions: [],
+        loadedAddresses: { writable: [], readonly: [] },
+        preTokenBalances: [
+          { accountIndex: 2, uiTokenAmount: { amount: "1000000" } },
+          { accountIndex: 3, uiTokenAmount: { amount: "100000" } },
+        ],
+        postTokenBalances: [
+          { accountIndex: 2, uiTokenAmount: { amount: "1100000" } },
+          { accountIndex: 3, uiTokenAmount: { amount: "90000" } },
+        ],
+      },
+    };
+  }
+
+  async getAccountInfo(address: PublicKey): Promise<AccountInfo<Uint8Array> | null> {
+    this.queried.add(address.toBase58());
+    const info = (data: Uint8Array, owner: PublicKey) =>
+      ({
+        lamports: 1_000_000,
+        data: Buffer.from(data),
+        owner,
+        executable: false,
+        rentEpoch: 0n,
+      }) as unknown as AccountInfo<Uint8Array>;
+    if (address.equals(VALID_POOL)) {
+      return info(
+        (() => {
+          const buf = new Uint8Array(752);
+          buf.set(COIN_VAULT.toBytes(), 336);
+          buf.set(PC_VAULT.toBytes(), 368);
+          return buf;
+        })(),
+        AMM,
+      );
+    }
+    if (address.equals(COIN_VAULT))
+      return info(tokenAccountBytes(BASE_MINT, 1_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(PC_VAULT))
+      return info(tokenAccountBytes(WSOL_MINT, 600_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(LP_MINT)) return info(mintBytes(2, 10_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(BASE_MINT)) return info(mintBytes(6, 1_000_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(WSOL_MINT)) return info(mintBytes(9, 0n), SPL_TOKEN_PROGRAM_ID);
+    return null;
+  }
+}
+
+function staticSource(name: string, pools: DiscoveredPool[]): AmmSource {
+  return {
+    name,
+    programId: AMM,
+    async *enumeratePools(): AsyncIterable<DiscoveredPool> {
+      for (const pool of pools) yield pool;
+    },
+  };
+}
+
+function validDiscoveredPool(): DiscoveredPool {
+  return {
+    poolAddress: VALID_POOL,
+    pool: {
+      coinVault: COIN_VAULT,
+      pcVault: PC_VAULT,
+      baseMint: BASE_MINT,
+      quoteMint: WSOL_MINT,
+      lpMint: LP_MINT,
+    },
+    fetchedAtSlot: 0,
+  };
+}
+
+describe("GraveScannerV2.runOnce — the discovery filter cannot be bypassed", () => {
+  test("adversarial alternate source: every mis-oriented pool rejected before enrichment; only the M1-eligible pool reaches the queue", async () => {
+    const rpc = new PipelineFakeRpc();
+    const coinWsolPool = synth(0x20);
+    const noWsolPool = synth(0x21);
+    const bothWsolPool = synth(0x22);
+
+    const scanner = new GraveScannerV2({
+      connection: rpc as unknown as Connection,
+      // Source A — the canonical discovery path; Source B — an
+      // adversarial/alternate ingestion path feeding mis-oriented pools.
+      sources: [
+        staticSource("canonical", [validDiscoveredPool()]),
+        staticSource("adversarial", [
+          {
+            poolAddress: coinWsolPool,
+            pool: {
+              coinVault: synth(0xd1),
+              pcVault: synth(0xd2),
+              baseMint: WSOL_MINT,
+              quoteMint: MEMECOIN,
+              lpMint: synth(0xd4),
+            },
+            fetchedAtSlot: 0,
+          },
+          {
+            poolAddress: noWsolPool,
+            pool: {
+              coinVault: synth(0xd5),
+              pcVault: synth(0xd6),
+              baseMint: MEMECOIN,
+              quoteMint: synth(0xd7),
+              lpMint: synth(0xd8),
+            },
+            fetchedAtSlot: 0,
+          },
+          {
+            poolAddress: bothWsolPool,
+            pool: {
+              coinVault: synth(0xd9),
+              pcVault: synth(0xda),
+              baseMint: WSOL_MINT,
+              quoteMint: WSOL_MINT,
+              lpMint: synth(0xdb),
+            },
+            fetchedAtSlot: 0,
+          },
+        ]),
+      ],
+      maxCandidatesPerCycle: 0, // no submission in this test — ingestion only
+      scannerProgramId: DEVNET_SCANNER_PROGRAM_ID,
+      vaultProgramId: DEVNET_VAULT_PROGRAM_ID,
+      thresholds: {
+        inactivitySeconds: 7_776_000n,
+        priceCollapseBps: 9_900,
+        minTvlLamports: 500_000_000n,
+        lpBurnDustThreshold: 1_000n,
+      },
+    });
+
+    const results = await scanner.runOnce();
+    assert.deepEqual(results, [], "no submissions configured (drain 0)");
+
+    // The M1-eligible pool passed discovery + pre-filter + the queue gate.
+    assert.equal(scanner.queueSize(), 1, "exactly the M1-eligible candidate is queued");
+    assert.ok(scanner["queue"].has(VALID_POOL.toBase58()));
+
+    // Every adversarial pool was rejected by the discovery gate BEFORE
+    // any enrichment RPC — they are absent from the queue and were never
+    // touched by the activity/reserve/metadata stages.
+    for (const pool of [coinWsolPool, noWsolPool, bothWsolPool]) {
+      rpc.assertNotQueried(pool, "mis-oriented pool");
+      assert.ok(!scanner["queue"].has(pool.toBase58()));
+    }
+  });
+
+  test("enforcement explicitly off (non-M1): mis-oriented pools are no longer gated at discovery", async () => {
+    const rpc = new PipelineFakeRpc();
+    const coinWsolPool = synth(0x30);
+    const scanner = new GraveScannerV2({
+      connection: rpc as unknown as Connection,
+      sources: [
+        staticSource("adversarial", [
+          {
+            poolAddress: coinWsolPool,
+            pool: {
+              coinVault: synth(0xe1),
+              pcVault: synth(0xe2),
+              baseMint: WSOL_MINT,
+              quoteMint: MEMECOIN,
+              lpMint: synth(0xe4),
+            },
+            fetchedAtSlot: 0,
+          },
+        ]),
+      ],
+      maxCandidatesPerCycle: 0,
+      m1SourcingEnforced: false, // explicit non-M1 operation
+      scannerProgramId: DEVNET_SCANNER_PROGRAM_ID,
+      vaultProgramId: DEVNET_VAULT_PROGRAM_ID,
+      thresholds: {
+        inactivitySeconds: 7_776_000n,
+        priceCollapseBps: 9_900,
+        minTvlLamports: 500_000_000n,
+        lpBurnDustThreshold: 1_000n,
+      },
+    });
+    await scanner.runOnce();
+    // The gate is off; the pool reaches enrichment (the RPC fake serves
+    // nothing for it, so the pipeline skips it downstream) — the point is
+    // that the M1 gate itself no longer rejects at discovery.
+    assert.ok(
+      rpc.queried.has(coinWsolPool.toBase58()),
+      "pool reached enrichment with the gate off",
+    );
+    assert.equal(scanner.queueSize(), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// submitCandidate — defense-in-depth before any submission
+// ---------------------------------------------------------------------------
+
+function makeSubmitConfig(m1SourcingEnforced?: boolean): IndexerConfig {
+  return {
+    rpcUrl: "http://127.0.0.1:8899",
+    cluster: "devnet",
+    scannerProgramId: DEVNET_SCANNER_PROGRAM_ID,
+    vaultProgramId: DEVNET_VAULT_PROGRAM_ID,
+    activityOracleSecretKey: null,
+    activityOraclePublicKey: PublicKey.default,
+    minTvlLamports: 500_000_000n,
+    inactivitySeconds: 7_776_000n,
+    priceCollapseBps: 9_900,
+    lpBurnDustThreshold: 1_000n,
+    maxCandidatesPerCycle: 10,
+    pollIntervalMs: 1_000,
+    maxPoolsPerScan: 100,
+    signatureScanLimit: 1000,
+    ...(m1SourcingEnforced !== undefined ? { m1SourcingEnforced } : {}),
+  };
+}
+
+describe("submitCandidate — D-01 defense-in-depth", () => {
+  test("mis-oriented candidate is skipped with a machine-checkable reason; no tx is built or sent", async () => {
+    let sendCalled = false;
+    const send = async (): Promise<string> => {
+      sendCalled = true;
+      return "should-never-happen";
+    };
+    const result = await submitCandidate(
+      new PublicKey(new Uint8Array(32).fill(1)) as unknown as Connection,
+      makeSubmitConfig(),
+      makeCandidate(synth(0x40), WSOL_MINT, MEMECOIN), // coin-WSOL
+      { sendOverride: send as never },
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(result.error?.startsWith("m1-sourcing-rejected: wsol-on-coin-side"), result.error);
+    assert.equal(sendCalled, false, "no transaction may be sent for a mis-oriented candidate");
+  });
+
+  test("with enforcement explicitly off, the same candidate reaches the ordinary guards (non-M1 behavior)", async () => {
+    const result = await submitCandidate(
+      new PublicKey(new Uint8Array(32).fill(1)) as unknown as Connection,
+      makeSubmitConfig(false),
+      makeCandidate(synth(0x41), WSOL_MINT, MEMECOIN),
+    );
+    // No oracle key configured → the ordinary discovery-only skip fires;
+    // the M1 gate did not reject this candidate.
+    assert.equal(result.status, "skipped");
+    assert.ok(result.error?.includes("no activity oracle key"), result.error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config — fail-closed parsing
+// ---------------------------------------------------------------------------
+
+describe("M1_SOURCING_ENFORCED config parsing", () => {
+  function withEnv(env: Record<string, string | undefined>): IndexerConfig {
+    const saved = { ...process.env };
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      return loadConfig();
+    } finally {
+      process.env = saved;
+    }
+  }
+
+  test("unset → enforced (default ON for the M1 milestone)", () => {
+    assert.equal(withEnv({ M1_SOURCING_ENFORCED: undefined }).m1SourcingEnforced, true);
+  });
+
+  test('exactly "false" disables (explicit non-M1 operation)', () => {
+    assert.equal(withEnv({ M1_SOURCING_ENFORCED: "false" }).m1SourcingEnforced, false);
+  });
+
+  test("any other value fails closed to enforced", () => {
+    for (const v of ["", "0", "no", "FALSE", "true", "1"]) {
+      assert.equal(
+        withEnv({ M1_SOURCING_ENFORCED: v }).m1SourcingEnforced,
+        true,
+        `M1_SOURCING_ENFORCED=${JSON.stringify(v)}`,
+      );
+    }
+  });
+});

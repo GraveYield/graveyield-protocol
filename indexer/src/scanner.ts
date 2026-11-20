@@ -53,6 +53,16 @@ export interface ScannerOptions {
     minTvlLamports: bigint;
     lpBurnDustThreshold: bigint;
   };
+  /**
+   * D-01 M1 WSOL quote-side sourcing enforcement (GY-M1-ODR-001 §3).
+   * When true (the default for the M1 milestone), every discovery source
+   * and the candidate queue independently enforce the exact predicate:
+   * exactly one WSOL mint, WSOL on pc_mint (quote side), coin_mint
+   * non-WSOL. Fail-closed — missing/malformed/ambiguous orientation data
+   * is rejected. Set false ONLY for non-M1 operation; this restriction
+   * must not be tightened into the settlement-adjacent orientation logic.
+   */
+  m1SourcingEnforced?: boolean;
   /** Scanner program ID (for submission + tracking). */
   scannerProgramId: PublicKey;
   /** Vault program ID (for ProtocolConfig decoding). */

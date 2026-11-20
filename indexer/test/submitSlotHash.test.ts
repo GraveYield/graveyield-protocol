@@ -26,7 +26,7 @@ import {
   type AccountInfo,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
-import { buildAttestationMessage, parseAttestationMessage } from "@graveyield/sdk";
+import { buildAttestationMessage, parseAttestationMessage, WSOL_MINT } from "@graveyield/sdk";
 
 import { type Candidate } from "../src/index.js";
 import { submitCandidate } from "../src/submit.js";
@@ -122,8 +122,9 @@ function makeCandidate(): Candidate {
       pool: {
         coinVault: PublicKey.default,
         pcVault: PublicKey.default,
-        baseMint: PublicKey.default,
-        quoteMint: PublicKey.default,
+        // M1-eligible orientation (D-01): coin_mint non-WSOL, pc_mint WSOL.
+        baseMint: new PublicKey(new Uint8Array(32).fill(0x13)),
+        quoteMint: WSOL_MINT,
         lpMint: PublicKey.default,
       },
       fetchedAtSlot: 0,

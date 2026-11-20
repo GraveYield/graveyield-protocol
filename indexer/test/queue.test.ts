@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
 
 import { CandidateQueue } from "../src/index.js";
+import { WSOL_MINT } from "@graveyield/sdk";
 import type { ScoredCandidate, Candidate } from "../src/index.js";
 
 function makeCandidate(poolByte: number): Candidate {
@@ -22,8 +23,9 @@ function makeCandidate(poolByte: number): Candidate {
       pool: {
         coinVault: PublicKey.default,
         pcVault: PublicKey.default,
-        baseMint: PublicKey.default,
-        quoteMint: PublicKey.default,
+        // M1-eligible orientation (D-01): coin_mint non-WSOL, pc_mint WSOL.
+        baseMint: new PublicKey(new Uint8Array(32).fill(0x13)),
+        quoteMint: WSOL_MINT,
         lpMint: PublicKey.default,
       },
       fetchedAtSlot: 0,

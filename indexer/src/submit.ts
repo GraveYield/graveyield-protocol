@@ -33,6 +33,7 @@ import nacl from "tweetnacl";
 import {
   GraveYieldClient,
   buildAttestationMessage,
+  evaluateM1Sourcing,
   fetchRecentSlotHash,
   findProgramAddressSync,
   type Phase1Input,
@@ -73,6 +74,29 @@ export async function submitCandidate(
   },
 ): Promise<SubmissionResult> {
   const anchorPda = deriveAnchorPda(config.scannerProgramId, candidate);
+
+  // D-01 M1 sourcing defense-in-depth (GY-M1-ODR-001 §3): a candidate
+  // that reached this path through a stale queue snapshot, manual
+  // injection, or an unguarded discovery source must STILL not be
+  // submitted unless it satisfies the exact WSOL quote-side predicate
+  // (pc_mint WSOL, coin_mint non-WSOL, exactly one WSOL side). Fail
+  // closed BEFORE any attestation material is produced or any
+  // transaction is built — the candidate cannot proceed, and the refusal
+  // is machine-checkable on the SubmissionResult.
+  if (config.m1SourcingEnforced ?? true) {
+    const verdict = evaluateM1Sourcing({
+      coinMint: candidate.discovery.pool.baseMint,
+      pcMint: candidate.discovery.pool.quoteMint,
+    });
+    if (!verdict.accepted) {
+      return {
+        poolAddress: candidate.poolAddress,
+        status: "skipped",
+        error: `m1-sourcing-rejected: ${verdict.reason} — ${verdict.detail}`,
+        anchorPda,
+      };
+    }
+  }
 
   // If no oracle keypair is available, skip submission.
   const oracleKeypair = opts?.oracleKeypair;
