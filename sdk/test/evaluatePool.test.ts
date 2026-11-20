@@ -161,12 +161,17 @@ describe("evaluatePool C2 orientation (F5 regression)", () => {
   });
 
   test("mirror orientation (WSOL on the coin side) compares the same coin/pc ratio", async () => {
+    // NON-M1 behavior pin: the C2 math handles either single-WSOL
+    // orientation. Under D-01 the default `evaluatePool` mode enforces
+    // the M1 quote-side sourcing predicate (a coin-side-WSOL pool throws
+    // M1SourcingError), so this regression leg opts out explicitly —
+    // non-M1 operation keeps the legacy either-orientation evaluation.
     const { client, poolAddress } = buildPool({
       coinMint: WSOL_MINT,
       pcMint: memecoinSortedAfterWsol(),
       currentPriceInt: 10,
     });
-    const outcome = await client.evaluatePool(poolAddress);
+    const outcome = await client.evaluatePool(poolAddress, { m1SourcingEnforced: false });
     assert.equal(outcome.criteria.c2PriceCollapse, true);
   });
 

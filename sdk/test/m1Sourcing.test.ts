@@ -16,17 +16,29 @@ import { PublicKey } from "@solana/web3.js";
 import {
   assertM1Sourcing,
   assertM1SourcingForPool,
+  DEVNET_SCANNER_PROGRAM_ID,
+  DEVNET_VAULT_PROGRAM_ID,
   evaluateM1Sourcing,
   fetchV4Pool,
   GraveYieldClient,
   identifyBaseToken,
   M1SourcingError,
   RAYDIUM_V4_PROGRAM_ID,
+  scannerProtocolConfigPda,
+  vaultProtocolConfigPda,
   WSOL_MINT,
   type M1SourcingRejected,
   type M1SourcingVerdict,
 } from "../src/index.js";
-import { encodeAmmInfo, EvaluatePoolFakeRpc } from "./fakeRpc.js";
+import {
+  encodeAmmInfo,
+  encodeMint,
+  encodeScannerConfig,
+  encodeTokenAccount,
+  encodeVaultConfig,
+  EvaluatePoolFakeRpc,
+  TOKEN_PROGRAM,
+} from "./fakeRpc.js";
 
 const MEMECOIN = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const OTHER = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
@@ -281,5 +293,162 @@ describe("non-M1 orientation behavior is preserved (settlement-adjacent logic un
       lpMint: PublicKey.default,
     };
     assert.throws(() => identifyBaseToken(bothWsol), /7019/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GraveYieldClient.evaluatePool — the production M1 candidate acceptance /
+// evaluation path. The guard runs INSIDE evaluatePool on the freshly
+// fetched + decoded AmmInfo account (owner + canonical 752-byte layout
+// validated by fetchV4Pool; coin_mint @400 / pc_mint @432 decoded by
+// parseV4AmmInfo), so direct invocation cannot bypass the D-01 predicate
+// and candidate-supplied metadata is never consulted.
+// ---------------------------------------------------------------------------
+
+const SCANNER_ID = new PublicKey(DEVNET_SCANNER_PROGRAM_ID);
+const VAULT_ID = new PublicKey(DEVNET_VAULT_PROGRAM_ID);
+const FIXTURE_COIN_VAULT = new PublicKey(new Uint8Array(32).fill(0x51));
+const FIXTURE_PC_VAULT = new PublicKey(new Uint8Array(32).fill(0x52));
+const FIXTURE_LP_MINT = new PublicKey(new Uint8Array(32).fill(0x53));
+
+/** Full evaluatePool surface: pool + vaults + LP mint + both ProtocolConfigs. */
+function evaluatePoolFixture(opts: { baseMint: PublicKey; quoteMint: PublicKey }): {
+  client: GraveYieldClient;
+  poolAddress: PublicKey;
+  rpc: EvaluatePoolFakeRpc;
+} {
+  const rpc = new EvaluatePoolFakeRpc();
+  rpc.setAccount(
+    POOL,
+    encodeAmmInfo({
+      coinVault: FIXTURE_COIN_VAULT,
+      pcVault: FIXTURE_PC_VAULT,
+      baseMint: opts.baseMint,
+      quoteMint: opts.quoteMint,
+      lpMint: FIXTURE_LP_MINT,
+    }),
+    RAYDIUM_V4_PROGRAM_ID,
+  );
+  rpc.setAccount(FIXTURE_COIN_VAULT, encodeTokenAccount(opts.baseMint, 1_000_000n), TOKEN_PROGRAM);
+  rpc.setAccount(FIXTURE_PC_VAULT, encodeTokenAccount(opts.quoteMint, 600_000_000n), TOKEN_PROGRAM);
+  rpc.setAccount(FIXTURE_LP_MINT, encodeMint(2, 10_000_000n), TOKEN_PROGRAM);
+  rpc.setAccount(
+    scannerProtocolConfigPda(SCANNER_ID),
+    encodeScannerConfig({
+      authority: SCANNER_ID,
+      activityOracle: SCANNER_ID,
+      launchPriceOracle: SCANNER_ID,
+    }),
+    SCANNER_ID,
+  );
+  rpc.setAccount(
+    vaultProtocolConfigPda(VAULT_ID),
+    encodeVaultConfig({ authority: SCANNER_ID }),
+    VAULT_ID,
+  );
+  const client = new GraveYieldClient({
+    connection: rpc.asConnection(),
+    cluster: "localnet",
+    graveScannerProgramId: SCANNER_ID,
+    graveVaultProgramId: VAULT_ID,
+  });
+  return { client, poolAddress: POOL, rpc };
+}
+
+describe("evaluatePool — the production M1 acceptance path enforces D-01 on the decoded pool account", () => {
+  test("PASS: direct invocation (default M1 mode) accepts a decoded pool with WSOL as pc_mint", async () => {
+    const { client, poolAddress } = evaluatePoolFixture({
+      baseMint: MEMECOIN,
+      quoteMint: WSOL_MINT,
+    });
+    const outcome = await client.evaluatePool(poolAddress);
+    // The guard passed: the six-criteria evaluation ran and the decoded
+    // orientation is carried through untouched.
+    assert.ok(outcome.pool.baseMint.equals(MEMECOIN));
+    assert.ok(outcome.pool.quoteMint.equals(WSOL_MINT));
+    assert.ok(
+      outcome.failedCriteria.every((c) => !c.startsWith("m1")),
+      "a correctly oriented pool must not be M1-rejected",
+    );
+  });
+
+  test("REJECT: direct invocation cannot bypass — WSOL on coin_mint throws M1SourcingError", async () => {
+    const { client, poolAddress } = evaluatePoolFixture({
+      baseMint: WSOL_MINT,
+      quoteMint: MEMECOIN,
+    });
+    await assert.rejects(
+      client.evaluatePool(poolAddress),
+      (err: unknown) => err instanceof M1SourcingError && err.reason === "wsol-on-coin-side",
+    );
+  });
+
+  test("REJECT: neither mint is WSOL", async () => {
+    const { client, poolAddress } = evaluatePoolFixture({ baseMint: MEMECOIN, quoteMint: OTHER });
+    await assert.rejects(
+      client.evaluatePool(poolAddress),
+      (err: unknown) => err instanceof M1SourcingError && err.reason === "no-wsol-side",
+    );
+  });
+
+  test("REJECT: both mints are WSOL", async () => {
+    const { client, poolAddress } = evaluatePoolFixture({
+      baseMint: WSOL_MINT,
+      quoteMint: WSOL_MINT,
+    });
+    await assert.rejects(
+      client.evaluatePool(poolAddress),
+      (err: unknown) => err instanceof M1SourcingError && err.reason === "both-sides-wsol",
+    );
+  });
+
+  test("REJECT: missing pool account — fail-closed fetch", async () => {
+    const { client, poolAddress, rpc } = evaluatePoolFixture({
+      baseMint: MEMECOIN,
+      quoteMint: WSOL_MINT,
+    });
+    rpc.accounts.delete(poolAddress.toBase58());
+    await assert.rejects(client.evaluatePool(poolAddress), /not found/);
+  });
+
+  test("REJECT: malformed pool account (non-canonical 752-byte layout)", async () => {
+    const { client, poolAddress, rpc } = evaluatePoolFixture({
+      baseMint: MEMECOIN,
+      quoteMint: WSOL_MINT,
+    });
+    rpc.setAccount(poolAddress, new Uint8Array(700), RAYDIUM_V4_PROGRAM_ID);
+    await assert.rejects(client.evaluatePool(poolAddress), /not a canonical 752-byte/);
+  });
+
+  test("REJECT: non-Raydium owner (layout cannot be validated)", async () => {
+    const { client, poolAddress, rpc } = evaluatePoolFixture({
+      baseMint: MEMECOIN,
+      quoteMint: WSOL_MINT,
+    });
+    rpc.setAccount(
+      poolAddress,
+      encodeAmmInfo({
+        coinVault: FIXTURE_COIN_VAULT,
+        pcVault: FIXTURE_PC_VAULT,
+        baseMint: MEMECOIN,
+        quoteMint: WSOL_MINT,
+        lpMint: FIXTURE_LP_MINT,
+      }),
+      PublicKey.default, // wrong owner
+    );
+    await assert.rejects(client.evaluatePool(poolAddress), /not Raydium V4/);
+  });
+
+  test("explicit non-M1 opt-out preserves the legacy either-orientation evaluation", async () => {
+    // The same coin-side-WSOL pool that the default mode rejects is
+    // evaluable again with m1SourcingEnforced: false — non-M1 operation
+    // keeps the pre-D-01 behavior (C2/C3 math handles either orientation).
+    const { client, poolAddress } = evaluatePoolFixture({
+      baseMint: WSOL_MINT,
+      quoteMint: MEMECOIN,
+    });
+    const outcome = await client.evaluatePool(poolAddress, { m1SourcingEnforced: false });
+    assert.ok(outcome.pool.baseMint.equals(WSOL_MINT));
+    assert.ok(outcome.pool.quoteMint.equals(MEMECOIN));
   });
 });

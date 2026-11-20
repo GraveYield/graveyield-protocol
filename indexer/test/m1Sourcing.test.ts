@@ -436,8 +436,47 @@ describe("GraveScannerV2.runOnce — the discovery filter cannot be bypassed", (
 });
 
 // ---------------------------------------------------------------------------
-// submitCandidate — defense-in-depth before any submission
+// submitCandidate — defense-in-depth before any submission.
+//
+// The submission gate validates the ACTUAL on-chain pool account via the
+// SDK's established fetch/decode path (`fetchV4Pool`: Raydium V4 owner
+// check + canonical 752-byte AmmInfo, coin_mint @400 / pc_mint @432) and
+// applies the shared predicate to the DECODED values — candidate-supplied
+// mint metadata is never authoritative here.
 // ---------------------------------------------------------------------------
+
+/** Canonical 752-byte Raydium V4 AmmInfo with the SDK-parsed fields. */
+function ammInfoBytes(opts: { baseMint: PublicKey; quoteMint: PublicKey }): Uint8Array {
+  const buf = new Uint8Array(752);
+  buf.set(COIN_VAULT.toBytes(), 336);
+  buf.set(PC_VAULT.toBytes(), 368);
+  buf.set(opts.baseMint.toBytes(), 400); // coin_mint
+  buf.set(opts.quoteMint.toBytes(), 432); // pc_mint
+  buf.set(LP_MINT.toBytes(), 464);
+  return buf;
+}
+
+/** Minimal fake connection serving ONE pool account for `fetchV4Pool` (and nothing else). */
+function poolAccountRpc(
+  pool: PublicKey,
+  data: Uint8Array | null,
+  owner: PublicKey = AMM,
+): Connection {
+  return {
+    async getAccountInfo(address: PublicKey) {
+      if (data && address.equals(pool)) {
+        return {
+          lamports: 1_000_000,
+          data: Buffer.from(data),
+          owner,
+          executable: false,
+          rentEpoch: 0n,
+        } as unknown as AccountInfo<Uint8Array>;
+      }
+      return null;
+    },
+  } as unknown as Connection;
+}
 
 function makeSubmitConfig(m1SourcingEnforced?: boolean): IndexerConfig {
   return {
@@ -459,22 +498,95 @@ function makeSubmitConfig(m1SourcingEnforced?: boolean): IndexerConfig {
   };
 }
 
-describe("submitCandidate — D-01 defense-in-depth", () => {
-  test("mis-oriented candidate is skipped with a machine-checkable reason; no tx is built or sent", async () => {
+describe("submitCandidate — D-01 defense-in-depth (actual pool account, not candidate metadata)", () => {
+  test("mis-oriented ACTUAL pool account is skipped with a machine-checkable reason; no tx is built or sent", async () => {
     let sendCalled = false;
     const send = async (): Promise<string> => {
       sendCalled = true;
       return "should-never-happen";
     };
+    const pool = synth(0x40);
     const result = await submitCandidate(
-      new PublicKey(new Uint8Array(32).fill(1)) as unknown as Connection,
+      poolAccountRpc(pool, ammInfoBytes({ baseMint: WSOL_MINT, quoteMint: MEMECOIN })), // actual on-chain account: coin-WSOL
       makeSubmitConfig(),
-      makeCandidate(synth(0x40), WSOL_MINT, MEMECOIN), // coin-WSOL
+      makeCandidate(pool, WSOL_MINT, MEMECOIN),
       { sendOverride: send as never },
     );
     assert.equal(result.status, "skipped");
     assert.ok(result.error?.startsWith("m1-sourcing-rejected: wsol-on-coin-side"), result.error);
     assert.equal(sendCalled, false, "no transaction may be sent for a mis-oriented candidate");
+  });
+
+  test("candidate metadata claiming a valid orientation cannot override an invalid ACTUAL pool account", async () => {
+    const pool = synth(0x42);
+    // The discovery record claims (coin=memecoin, pc=WSOL) — the exact
+    // M1-eligible orientation — but the on-chain account is coin-WSOL.
+    // The gate must decide on the DECODED account, not the metadata.
+    const result = await submitCandidate(
+      poolAccountRpc(pool, ammInfoBytes({ baseMint: WSOL_MINT, quoteMint: MEMECOIN })),
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT), // metadata CLAIMS pc_mint WSOL
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(result.error?.startsWith("m1-sourcing-rejected: wsol-on-coin-side"), result.error);
+  });
+
+  test("decoded pool account with WSOL as pc_mint passes the gate and proceeds to the ordinary guards", async () => {
+    const pool = synth(0x43);
+    const result = await submitCandidate(
+      poolAccountRpc(pool, ammInfoBytes({ baseMint: BASE_MINT, quoteMint: WSOL_MINT })),
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT),
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(result.error?.includes("no activity oracle key"), result.error);
+    assert.ok(!result.error?.includes("m1-sourcing-rejected"), result.error);
+  });
+
+  test("missing pool account is rejected (fail-closed, never accepted on claimed metadata)", async () => {
+    const pool = synth(0x44);
+    const result = await submitCandidate(
+      poolAccountRpc(pool, null),
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT), // metadata claims a valid orientation
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(
+      result.error?.startsWith("m1-sourcing-rejected: unverifiable-orientation"),
+      result.error,
+    );
+  });
+
+  test("malformed pool account (non-canonical layout) is rejected (fail-closed)", async () => {
+    const pool = synth(0x45);
+    const result = await submitCandidate(
+      poolAccountRpc(pool, new Uint8Array(700)),
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT),
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(
+      result.error?.startsWith("m1-sourcing-rejected: unverifiable-orientation"),
+      result.error,
+    );
+  });
+
+  test("non-Raydium pool owner is rejected (fail-closed)", async () => {
+    const pool = synth(0x46);
+    const result = await submitCandidate(
+      poolAccountRpc(
+        pool,
+        ammInfoBytes({ baseMint: BASE_MINT, quoteMint: WSOL_MINT }),
+        PublicKey.default,
+      ),
+      makeSubmitConfig(),
+      makeCandidate(pool, BASE_MINT, WSOL_MINT),
+    );
+    assert.equal(result.status, "skipped");
+    assert.ok(
+      result.error?.startsWith("m1-sourcing-rejected: unverifiable-orientation"),
+      result.error,
+    );
   });
 
   test("with enforcement explicitly off, the same candidate reaches the ordinary guards (non-M1 behavior)", async () => {
@@ -484,7 +596,7 @@ describe("submitCandidate — D-01 defense-in-depth", () => {
       makeCandidate(synth(0x41), WSOL_MINT, MEMECOIN),
     );
     // No oracle key configured → the ordinary discovery-only skip fires;
-    // the M1 gate did not reject this candidate.
+    // the M1 gate did not reject this candidate (and did not touch the RPC).
     assert.equal(result.status, "skipped");
     assert.ok(result.error?.includes("no activity oracle key"), result.error);
   });
@@ -524,5 +636,176 @@ describe("M1_SOURCING_ENFORCED config parsing", () => {
         `M1_SOURCING_ENFORCED=${JSON.stringify(v)}`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GraveScannerV2.runOnce → submitCandidate — enforcement-mode propagation.
+//
+// Finding-2 regression: runOnce must pass the SAME resolved
+// m1SourcingEnforced mode it used for discovery/queueing into the
+// submission configuration. A unit test of submitCandidate alone cannot
+// prove this — these tests drive the full scanner cycle with the explicit
+// non-M1 setting and observe the submission outcome.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fake connection for the full pipeline: enrichment surface for the
+ * discovered pool (verified last-swap history, vault reserves, mint
+ * metadata) PLUS the ACTUAL on-chain pool account served at the pool
+ * address (what `fetchV4Pool` decodes at the submission gate). The
+ * discovery record's metadata is independent of these bytes — which is
+ * exactly the trust gap the submission gate must close.
+ */
+class SubmissionPipelineFakeRpc {
+  queried = new Set<string>();
+
+  constructor(
+    readonly poolAddress: PublicKey,
+    readonly actualPoolBytes: Uint8Array,
+  ) {}
+
+  asConnection(): Connection {
+    return this as unknown as Connection;
+  }
+
+  async getSignaturesForAddress(address: PublicKey): Promise<Array<unknown>> {
+    this.queried.add(address.toBase58());
+    return [
+      {
+        signature: "SIG_VERIFIED",
+        slot: BigInt(900_000),
+        blockTime: BigInt(NOW_SEC - 100 * 86_400),
+        err: null,
+        confirmationStatus: "finalized",
+      },
+    ];
+  }
+
+  async getTransaction(_signature: string): Promise<unknown> {
+    return {
+      slot: 900_000n,
+      blockTime: BigInt(NOW_SEC - 100 * 86_400),
+      transaction: {
+        message: {
+          getAccountKeys: () => ({
+            keySegments: () => [[AMM, VALID_POOL, COIN_VAULT, PC_VAULT]],
+          }),
+          compiledInstructions: [
+            {
+              programIdIndex: 0,
+              accountKeyIndexes: [1, 2, 3],
+              data: v4TagData(9), // SwapBaseIn — verified economic swap
+            },
+          ],
+        },
+      },
+      meta: {
+        err: null,
+        innerInstructions: [],
+        loadedAddresses: { writable: [], readonly: [] },
+        preTokenBalances: [
+          { accountIndex: 2, uiTokenAmount: { amount: "1000000" } },
+          { accountIndex: 3, uiTokenAmount: { amount: "100000" } },
+        ],
+        postTokenBalances: [
+          { accountIndex: 2, uiTokenAmount: { amount: "1100000" } },
+          { accountIndex: 3, uiTokenAmount: { amount: "90000" } },
+        ],
+      },
+    };
+  }
+
+  async getAccountInfo(address: PublicKey): Promise<AccountInfo<Uint8Array> | null> {
+    this.queried.add(address.toBase58());
+    const info = (data: Uint8Array, owner: PublicKey) =>
+      ({
+        lamports: 1_000_000,
+        data: Buffer.from(data),
+        owner,
+        executable: false,
+        rentEpoch: 0n,
+      }) as unknown as AccountInfo<Uint8Array>;
+    if (address.equals(this.poolAddress)) {
+      return info(this.actualPoolBytes, AMM); // the ACTUAL on-chain account
+    }
+    if (address.equals(COIN_VAULT))
+      return info(tokenAccountBytes(BASE_MINT, 1_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(PC_VAULT))
+      return info(tokenAccountBytes(WSOL_MINT, 600_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(LP_MINT)) return info(mintBytes(2, 10_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(BASE_MINT)) return info(mintBytes(6, 1_000_000_000n), SPL_TOKEN_PROGRAM_ID);
+    if (address.equals(WSOL_MINT)) return info(mintBytes(9, 0n), SPL_TOKEN_PROGRAM_ID);
+    return null;
+  }
+}
+
+describe("GraveScannerV2.runOnce → submitCandidate — enforcement-mode propagation", () => {
+  function propagationScanner(rpc: SubmissionPipelineFakeRpc, m1SourcingEnforced?: boolean) {
+    return new GraveScannerV2({
+      connection: rpc.asConnection(),
+      // The discovery record CLAIMS the M1-eligible orientation
+      // (coin=memecoin, pc=WSOL) — discovery and the queue gate accept it
+      // in both tests below; the decisive check is the submission gate's
+      // view of the ACTUAL on-chain account.
+      sources: [staticSource("canonical", [validDiscoveredPool()])],
+      maxCandidatesPerCycle: 5,
+      ...(m1SourcingEnforced !== undefined ? { m1SourcingEnforced } : {}),
+      scannerProgramId: DEVNET_SCANNER_PROGRAM_ID,
+      vaultProgramId: DEVNET_VAULT_PROGRAM_ID,
+      thresholds: {
+        inactivitySeconds: 7_776_000n,
+        priceCollapseBps: 9_900,
+        minTvlLamports: 500_000_000n,
+        lpBurnDustThreshold: 1_000n,
+      },
+    });
+  }
+
+  const misOrientedActualBytes = ammInfoBytes({ baseMint: WSOL_MINT, quoteMint: MEMECOIN });
+
+  test("absent configuration (default enforced): a candidate whose ACTUAL pool account is mis-oriented is rejected at submission", async () => {
+    const rpc = new SubmissionPipelineFakeRpc(VALID_POOL, misOrientedActualBytes);
+    const scanner = propagationScanner(rpc); // m1SourcingEnforced absent → fail-closed default (enforced)
+    const results = await scanner.runOnce();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "skipped");
+    assert.ok(
+      results[0].error?.startsWith("m1-sourcing-rejected: wsol-on-coin-side"),
+      results[0].error,
+    );
+    // The discovery metadata claimed a valid orientation, so the candidate
+    // passed discovery and the queue gate and reached the submission gate —
+    // which rejected it on the decoded on-chain account.
+  });
+
+  test("M1_SOURCING_ENFORCED=false: the explicit non-M1 mode propagates through runOnce into submitCandidate — the M1-only restriction is NOT applied at submission", async () => {
+    const rpc = new SubmissionPipelineFakeRpc(VALID_POOL, misOrientedActualBytes);
+    const scanner = propagationScanner(rpc, false); // explicit non-M1 operation
+    const results = await scanner.runOnce();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "skipped");
+    // The candidate reached the ordinary discovery-only guard — the M1
+    // sourcing gate did NOT fire at submission, proving the resolved
+    // non-M1 mode was propagated from the scanner into the submission
+    // configuration (a missing propagation would have returned
+    // "m1-sourcing-rejected" here despite the explicit opt-out).
+    assert.ok(results[0].error?.includes("no activity oracle key"), results[0].error);
+    assert.ok(!results[0].error?.includes("m1-sourcing-rejected"), results[0].error);
+  });
+
+  test("default-enforced mode keeps the existing discovery + queue behavior consistent with the submission gate", async () => {
+    // A genuinely valid pool (actual bytes agree with the metadata) flows
+    // through discovery → queue → submission without any M1 rejection.
+    const rpc = new SubmissionPipelineFakeRpc(
+      VALID_POOL,
+      ammInfoBytes({ baseMint: BASE_MINT, quoteMint: WSOL_MINT }),
+    );
+    const scanner = propagationScanner(rpc);
+    const results = await scanner.runOnce();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, "skipped");
+    assert.ok(results[0].error?.includes("no activity oracle key"), results[0].error);
+    assert.ok(!results[0].error?.includes("m1-sourcing-rejected"), results[0].error);
   });
 });

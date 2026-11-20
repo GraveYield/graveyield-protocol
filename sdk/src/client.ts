@@ -65,7 +65,11 @@ import {
   readLpMintSupply,
   quotePerBaseQ64x64,
 } from "./raydiumV4.js";
-import { assertM1SourcingForPool, type M1SourcingAccepted } from "./m1Sourcing.js";
+import {
+  assertM1Sourcing,
+  assertM1SourcingForPool,
+  type M1SourcingAccepted,
+} from "./m1Sourcing.js";
 import { snapshotLpHolders as snapshotLpHoldersImpl, type SnapshotResult } from "./snapshot.js";
 import { SnapshotMerkleTree, type HolderEntry } from "./merkle.js";
 import { shouldRejectFee, buildPriorityFeePolicy } from "./priorityFee.js";
@@ -310,7 +314,22 @@ export class GraveYieldClient {
 
   async evaluatePool(
     poolAddress: PublicKey,
-    opts?: { ammProgramId?: PublicKey },
+    opts?: {
+      ammProgramId?: PublicKey;
+      /**
+       * D-01 M1 WSOL quote-side sourcing enforcement (GY-M1-ODR-001 §3).
+       * DEFAULT TRUE — fail-closed: `evaluatePool` IS the production M1
+       * candidate acceptance/evaluation path, so the sourcing predicate is
+       * enforced here on the freshly fetched + decoded AmmInfo account
+       * (never on caller-supplied metadata). A pool account that is
+       * missing, non-Raydium, non-canonical, or whose decoded orientation
+       * is not exactly (pc_mint == WSOL, coin_mint != WSOL) throws before
+       * any criterion is evaluated — direct invocation cannot bypass the
+       * guard. Set false ONLY for explicit non-M1 operation, which
+       * restores the legacy either-orientation evaluation behavior.
+       */
+      m1SourcingEnforced?: boolean;
+    },
   ): Promise<EvaluatePoolOutcome> {
     const ammProgramId =
       opts?.ammProgramId ?? (await this.connection.getAccountInfo(poolAddress))?.owner;
@@ -319,6 +338,20 @@ export class GraveYieldClient {
     }
     const { scanner } = await this.ensureConfigs();
     const pool = await fetchV4Pool(this.connection, poolAddress);
+
+    // D-01 M1 sourcing guard at the production acceptance boundary. The
+    // pool above came from `fetchV4Pool` (owner + canonical 752-byte
+    // layout validated, coin_mint/pc_mint decoded at offsets 400/432) —
+    // the decoded values are authoritative; candidate-supplied metadata
+    // is never consulted. Fail-closed: assertM1Sourcing throws
+    // M1SourcingError on any missing/ambiguous/mis-oriented input, so a
+    // wrongly sourced candidate cannot be accepted, evaluated further,
+    // queued, or submitted. M1 sourcing only — with the explicit non-M1
+    // opt-out the settlement-adjacent orientation logic below (C2/C3
+    // math) keeps its legacy either-orientation behavior.
+    if (opts?.m1SourcingEnforced ?? true) {
+      assertM1Sourcing(pool);
+    }
     const coinReserve = await readVaultReserve(this.connection, pool.coinVault);
     const pcReserve = await readVaultReserve(this.connection, pool.pcVault);
     const lpSupply = await readLpMintSupply(this.connection, pool.lpMint);

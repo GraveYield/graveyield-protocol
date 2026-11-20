@@ -204,6 +204,16 @@ export class GraveScannerV2 {
           pollIntervalMs: this.opts.intervalMs ?? 300_000,
           maxPoolsPerScan: this.opts.maxPoolsPerScan ?? 1000,
           signatureScanLimit: this.opts.signatureScanLimit ?? 1000,
+          // D-01 M1 sourcing: the SAME resolved enforcement mode used by
+          // the discovery gate and the queue gate above is propagated
+          // explicitly into the submission configuration. Without this
+          // field, submitCandidate would default to enforced (`?? true`)
+          // even when the scanner was explicitly configured for non-M1
+          // operation (M1_SOURCING_ENFORCED=false), so an explicit non-M1
+          // run would still have the M1-only restriction applied at
+          // submission. The resolved value here is fail-closed: absent or
+          // invalid configuration resolves to `true` (enforced) upstream.
+          m1SourcingEnforced: m1Enforced,
         },
         scored.candidate,
         submitOpts,
