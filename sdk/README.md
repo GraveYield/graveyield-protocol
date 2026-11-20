@@ -114,6 +114,53 @@ The SDK mirrors these on-chain byte layouts exactly:
 - **Ed25519 precompile wire format**: 112 bytes (header + pk + sig) —
   the runtime's OWN layout, not the pre-Phase-6 "14-byte header" form.
 
+## SlotHashes sysvar reader (C1 slot/hash pairing)
+
+The C1 attestation binds an `issued_slot` to the 32-byte hash that the
+on-chain GraveScanner verifier resolves from the **SlotHashes sysvar**
+(`attestation.rs::slot_hash_lookup`, byte-exact). That entry is NOT the
+`getBlock(slot).blockhash`: on agave 3.x the two values diverge on every
+slot (lifecycle-rehearsal finding F1), so a blockhash-sourced attestation
+reverted `AttestationSlotHashMismatch` (6030) on chain. The SDK therefore
+never calls `getBlock()` for a slot hash.
+
+How the canonical `(slot, hash)` pair is obtained:
+
+- **`fetchRecentSlotHash(connection)`** — reads the sysvar once and
+  returns a REAL recent entry as `{ slot, hash }`. The slot is the actual
+  sysvar entry's slot (never manufactured from `getSlot()` arithmetic —
+  slots can be skipped) and the hash is that entry's hash (never
+  substituted from another entry). This is what the indexer signs.
+- **`fetchSlotHash(connection, slot)`** — returns the 32-byte hash for an
+  exact slot, or `null` when that slot is not present. Both readers share
+  the same parser (`fetchSlotHashesSnapshot` / `parseSlotHashesAccount`).
+
+What is validated on every read (fail closed):
+
+- the account is read at the canonical `SYSVAR_SLOT_HASHES_PUBKEY`
+  address, with **`finalized`** commitment;
+- the account is not executable and is owned by the Sysvar program
+  (`Sysvar1111111111111111111111111111111111111`);
+- the serialized layout is exact: 8-byte u64 LE entry count (≤ 512, the
+  protocol freshness window), then `count` × 40-byte entries
+  (u64 LE slot + 32-byte hash) — a truncated entry and unexpected
+  trailing bytes are both rejected;
+- entries are strictly descending by slot — duplicates and ordering
+  anomalies are rejected;
+- the requested slot must exist exactly in the parsed entries; a nearby
+  slot is never substituted, and no hash is ever returned for a different
+  slot. Returned hashes are private copies.
+
+When data is unavailable: a missing account, malformed sysvar data, or an
+absent/aged-out slot makes the readers return `null` (fail closed — no
+fabricated attestation). A genuine RPC failure (network/transport) is
+NOT swallowed: it rejects with the underlying error. An invalid slot
+argument to `fetchSlotHash` rejects with `TypeError`.
+
+Freshness assumption: an entry read at `finalized` commitment stays
+resolvable on chain for the remaining ~512-slot window; attestations
+should be signed and submitted promptly (the indexer does this inline).
+
 ## SDK source of truth & sync policy (NS-4)
 
 The modules under `sdk/src/` are the **single source of truth** for the

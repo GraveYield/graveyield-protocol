@@ -424,25 +424,25 @@ export function applySimCompat(connection, getAltAddress = null) {
 }
 
 // --- SLOT-HASH from the sysvar itself (fix 10 / finding F1) --------------------------------
-// SDK.fetchSlotHash uses getBlock(slot).blockhash which NEVER equals the
-// SlotHashes sysvar entry on agave 3.0.10 → 6030 on every SDK-sourced hash.
-// The canonical (slot,hash) pairs must be read from the sysvar account.
+// F1 REMEDIATED SDK-side: sdk/src/lastSwapAttestation.ts now reads the
+// canonical SlotHashes sysvar itself (fetchSlotHash / fetchRecentSlotHash —
+// strict owner/executable/ordering/count validation, finalized commitment),
+// so `getBlock(slot).blockhash` is no longer reachable from the SDK and an
+// SDK-sourced hash no longer reverts 6030 on phase_1.
+//
+// SINGLE-PARSER POLICY (sdk/README.md NS-4): this helper no longer maintains
+// a second, subtly different SlotHashes scan (the old hand-rolled loop had
+// no owner/executable/count/ordering validation and silently skipped
+// truncated entries). It delegates to the canonical SDK reader. The
+// independent raw-bytes check the probe needs lives in probe_slothash.mjs
+// (RPC read at the canonical address + SDK.parseSlotHashesAccount).
+// Requires the SDK dist to be built (pnpm --filter @graveyield/sdk build) —
+// every consumer of this module (drive_lifecycle, probe_slothash) already
+// imports the SDK dist.
 export const SLOT_HASHES_SYSVAR = "SysvarS1otHashes111111111111111111111111111";
 export async function readSlotHashesEntry(connection, slot) {
-  const info = await connection.getAccountInfo(new (w().PublicKey)(SLOT_HASHES_SYSVAR));
-  if (!info) return null;
-  const data = Buffer.from(info.data);
-  const target = BigInt(slot);
-  // SlotHashes sysvar is bincode Vec<(u64 slot, [u8;32] hash)>: 8-byte LE
-  // length prefix, then 40-byte entries NEWEST-FIRST (run-12/13 probes).
-  let off = 8;
-  const count = Number(data.readBigUInt64LE(0));
-  for (let i = 0; i < count && off + 40 <= data.length; i++, off += 40) {
-    if (data.readBigUInt64LE(off) === target) {
-      return new Uint8Array(data.subarray(off + 8, off + 40));
-    }
-  }
-  return null;
+  const SDK = await importSdk();
+  return SDK.fetchSlotHash(connection, slot);
 }
 
 // --- address lookup table (fix 11 / finding F2) ----------------------------------------------
