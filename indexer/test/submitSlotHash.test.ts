@@ -26,7 +26,7 @@ import {
   type AccountInfo,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
-import { buildAttestationMessage, parseAttestationMessage } from "@graveyield/sdk";
+import { buildAttestationMessage, parseAttestationMessage, WSOL_MINT } from "@graveyield/sdk";
 
 import { type Candidate } from "../src/index.js";
 import { submitCandidate } from "../src/submit.js";
@@ -40,6 +40,21 @@ import type { IndexerConfig } from "../src/config.js";
 const RAYDIUM_V4_PROGRAM_ID = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 /** Wrong owner — a real program id that is NOT the Sysvar program. */
 const WRONG_OWNER = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+/** The candidate pool address (must match makeCandidate()). */
+const CANDIDATE_POOL = new PublicKey("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
+
+/** Canonical 752-byte AmmInfo, M1-eligible orientation (coin_mint @400
+ *  non-WSOL, pc_mint @432 WSOL) — what the D-01 gate's fetchV4Pool must
+ *  decode from the actual account before the C1 path runs. */
+function eligiblePoolBytes(): Buffer {
+  const buf = Buffer.alloc(752);
+  buf.set(new PublicKey(new Uint8Array(32).fill(0x11)).toBytes(), 336); // coin_vault
+  buf.set(new PublicKey(new Uint8Array(32).fill(0x22)).toBytes(), 368); // pc_vault
+  buf.set(new PublicKey(new Uint8Array(32).fill(0x13)).toBytes(), 400); // coin_mint (non-WSOL)
+  buf.set(WSOL_MINT.toBytes(), 432); // pc_mint (WSOL)
+  buf.set(new PublicKey(new Uint8Array(32).fill(0x44)).toBytes(), 464); // lp_mint
+  return buf;
+}
 
 function hashFor(slot: number, fill: number): Uint8Array {
   const hash = new Uint8Array(32).fill(fill);
@@ -66,6 +81,11 @@ class SubmitFakeRpc {
     [300_000_001, 0xd1],
   ]);
   sysvarOwner: PublicKey = new PublicKey("Sysvar1111111111111111111111111111111111111");
+  /** The ACTUAL on-chain pool account served at the candidate pool address
+   *  (read by the D-01 M1 sourcing gate's `fetchV4Pool` before anything
+   *  else). Canonical 752-byte AmmInfo, M1-eligible orientation:
+   *  coin_mint non-WSOL @400, pc_mint WSOL @432. */
+  poolData: Buffer | null = eligiblePoolBytes();
   readonly getAccountInfoCalls: Array<{ address: string; commitment: string | undefined }> = [];
 
   asConnection(): Connection {
@@ -74,6 +94,16 @@ class SubmitFakeRpc {
 
   async getAccountInfo(address: PublicKey, commitment?: string) {
     this.getAccountInfoCalls.push({ address: address.toBase58(), commitment });
+    if (address.equals(CANDIDATE_POOL)) {
+      if (this.poolData === null) return null;
+      return {
+        lamports: 1_000_000,
+        data: Buffer.from(this.poolData),
+        owner: RAYDIUM_V4_PROGRAM_ID,
+        executable: false,
+        rentEpoch: 0n,
+      } as AccountInfo<Uint8Array>;
+    }
     if (!address.equals(SYSVAR_SLOT_HASHES_PUBKEY) || this.sysvarData === null) return null;
     return {
       lamports: 1_000_000,
@@ -122,8 +152,9 @@ function makeCandidate(): Candidate {
       pool: {
         coinVault: PublicKey.default,
         pcVault: PublicKey.default,
-        baseMint: PublicKey.default,
-        quoteMint: PublicKey.default,
+        // M1-eligible orientation (D-01): coin_mint non-WSOL, pc_mint WSOL.
+        baseMint: new PublicKey(new Uint8Array(32).fill(0x13)),
+        quoteMint: WSOL_MINT,
         lpMint: PublicKey.default,
       },
       fetchedAtSlot: 0,
@@ -229,10 +260,12 @@ describe("submitCandidate C1 (slot, hash) pairing (F1 regression)", () => {
       "the oracle signature must verify over the embedded 112-byte message",
     );
 
-    // One canonical finalized sysvar read, nothing else on the connection.
-    assert.equal(rpc.getAccountInfoCalls.length, 1);
-    assert.equal(rpc.getAccountInfoCalls[0].address, SYSVAR_SLOT_HASHES_PUBKEY.toBase58());
-    assert.equal(rpc.getAccountInfoCalls[0].commitment, "finalized");
+    // One M1-gate pool-account read + one canonical finalized sysvar read,
+    // nothing else on the connection.
+    assert.equal(rpc.getAccountInfoCalls.length, 2);
+    assert.equal(rpc.getAccountInfoCalls[0].address, CANDIDATE_POOL.toBase58());
+    assert.equal(rpc.getAccountInfoCalls[1].address, SYSVAR_SLOT_HASHES_PUBKEY.toBase58());
+    assert.equal(rpc.getAccountInfoCalls[1].commitment, "finalized");
   });
 
   test("the message the SDK builds from the pair matches the signed message", async () => {
@@ -299,6 +332,9 @@ describe("submitCandidate C1 (slot, hash) pairing (F1 regression)", () => {
     });
     assert.equal(result.status, "skipped");
     assert.equal(transactions.length, 0);
-    assert.equal(rpc.getAccountInfoCalls.length, 0, "no sysvar read before the oracle check");
+    // The D-01 M1 gate decoded the actual pool account before the oracle
+    // check; no sysvar read may happen before the oracle check.
+    assert.equal(rpc.getAccountInfoCalls.length, 1);
+    assert.equal(rpc.getAccountInfoCalls[0].address, CANDIDATE_POOL.toBase58());
   });
 });

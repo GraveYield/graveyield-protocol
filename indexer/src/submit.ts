@@ -33,9 +33,12 @@ import nacl from "tweetnacl";
 import {
   GraveYieldClient,
   buildAttestationMessage,
+  evaluateM1Sourcing,
   fetchRecentSlotHash,
+  fetchV4Pool,
   findProgramAddressSync,
   type Phase1Input,
+  type V4PoolAccount,
 } from "@graveyield/sdk";
 import { RAYDIUM_V4_PROGRAM_ID } from "@graveyield/sdk";
 import type { IndexerConfig } from "./config.js";
@@ -73,6 +76,50 @@ export async function submitCandidate(
   },
 ): Promise<SubmissionResult> {
   const anchorPda = deriveAnchorPda(config.scannerProgramId, candidate);
+
+  // D-01 M1 sourcing defense-in-depth (GY-M1-ODR-001 §3): a candidate
+  // that reached this path through a stale queue snapshot, manual
+  // injection, or an unguarded discovery source must STILL not be
+  // submitted unless it satisfies the exact WSOL quote-side predicate
+  // (pc_mint WSOL, coin_mint non-WSOL, exactly one WSOL side). Fail
+  // closed BEFORE any attestation material is produced or any
+  // transaction is built — the candidate cannot proceed, and the refusal
+  // is machine-checkable on the SubmissionResult.
+  //
+  // The ACTUAL on-chain pool account is authoritative: this gate
+  // re-fetches the pool with the SDK's established account-fetching and
+  // decoding path (`fetchV4Pool` — Raydium V4 owner check + canonical
+  // 752-byte AmmInfo layout, coin_mint @400 / pc_mint @432) and applies
+  // the shared predicate to the DECODED values. Candidate-supplied mint
+  // metadata (`candidate.discovery.pool`) is never trusted here, so a
+  // discovery record claiming a valid orientation cannot smuggle through
+  // a pool whose on-chain account is oriented differently. Fail-closed:
+  // a missing, non-Raydium, or malformed pool account is a rejection
+  // ("unverifiable-orientation"), never an acceptance.
+  if (config.m1SourcingEnforced ?? true) {
+    let actualPool: V4PoolAccount;
+    try {
+      actualPool = await fetchV4Pool(connection, candidate.poolAddress);
+    } catch (err) {
+      return {
+        poolAddress: candidate.poolAddress,
+        status: "skipped",
+        error:
+          `m1-sourcing-rejected: unverifiable-orientation — pool account could not be ` +
+          `fetched/decoded (fail-closed): ${String((err as { message?: string }).message ?? err)}`,
+        anchorPda,
+      };
+    }
+    const verdict = evaluateM1Sourcing(actualPool);
+    if (!verdict.accepted) {
+      return {
+        poolAddress: candidate.poolAddress,
+        status: "skipped",
+        error: `m1-sourcing-rejected: ${verdict.reason} — ${verdict.detail}`,
+        anchorPda,
+      };
+    }
+  }
 
   // If no oracle keypair is available, skip submission.
   const oracleKeypair = opts?.oracleKeypair;

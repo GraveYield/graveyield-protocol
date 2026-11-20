@@ -52,6 +52,7 @@ export * from "./submit.js";
 export * from "./tracking.js";
 
 import { Connection, PublicKey } from "@solana/web3.js";
+import { evaluateM1Sourcing } from "@graveyield/sdk";
 import { loadConfig, type IndexerConfig } from "./config.js";
 import { RaydiumV4Source } from "./sources/raydiumV4.js";
 import { ActivityIndexer } from "./activity.js";
@@ -80,7 +81,13 @@ export class GraveScannerV2 {
   constructor(opts: ScannerOptions) {
     this.opts = opts;
     this.activityIndexer = new ActivityIndexer();
-    this.queue = new CandidateQueue();
+    // The queue is the single candidate-ingestion choke point: with M1
+    // sourcing enforced (default) it screens every candidate's
+    // discovery-record mint metadata against the D-01 WSOL quote-side
+    // predicate, so no alternate discovery/pre-filter path can bypass
+    // the metadata filter. Screening only — the authoritative on-chain
+    // verification happens in the submission gate (submit.ts).
+    this.queue = new CandidateQueue({ m1SourcingEnforced: opts.m1SourcingEnforced ?? true });
   }
 
   /**
@@ -97,13 +104,37 @@ export class GraveScannerV2 {
     };
 
     const results: SubmissionResult[] = [];
+    // D-01 M1 sourcing enforcement (GY-M1-ODR-001 §3): default ON for the
+    // M1 milestone. The gate below rejects non-WSOL-quote-side pools
+    // BEFORE any enrichment work; the queue gate (constructor) re-checks
+    // every candidate at admission so no alternate ingestion path can
+    // bypass the predicate; submit.ts re-checks before any submission.
+    const m1Enforced = this.opts.m1SourcingEnforced ?? true;
 
     for (const source of this.opts.sources) {
       let discoveredCount = 0;
       let candidateCount = 0;
+      let m1SourcingRejected = 0;
 
       for await (const pool of source.enumeratePools(this.opts.connection)) {
         discoveredCount++;
+
+        // D-01 M1 sourcing gate — fail closed BEFORE enrichment. The
+        // parsed AmmInfo fields are authoritative: baseMint IS coin_mint,
+        // quoteMint IS pc_mint (SDK parseV4AmmInfo offsets 400/432).
+        // Uncertain orientation can never be eligible; the SDK's
+        // evaluateM1Sourcing resolves every ambiguous input to a
+        // rejection.
+        if (m1Enforced) {
+          const verdict = evaluateM1Sourcing(pool.pool);
+          if (!verdict.accepted) {
+            m1SourcingRejected++;
+            console.log(
+              `[m1-sourcing] rejected ${pool.poolAddress.toBase58()} (${verdict.reason}) — ${verdict.detail}`,
+            );
+            continue;
+          }
+        }
 
         // 2. Index activity (cached).
         const activity = await this.activityIndexer.indexActivity(this.opts.connection, pool, {
@@ -144,7 +175,7 @@ export class GraveScannerV2 {
       }
 
       console.log(
-        `[${source.name}] discovered ${discoveredCount} pools, ${candidateCount} passed pre-filter, queue size ${this.queue.size()}`,
+        `[${source.name}] discovered ${discoveredCount} pools, ${m1SourcingRejected} m1-sourcing-rejected, ${candidateCount} passed pre-filter, queue size ${this.queue.size()}`,
       );
     }
 
@@ -175,6 +206,16 @@ export class GraveScannerV2 {
           pollIntervalMs: this.opts.intervalMs ?? 300_000,
           maxPoolsPerScan: this.opts.maxPoolsPerScan ?? 1000,
           signatureScanLimit: this.opts.signatureScanLimit ?? 1000,
+          // D-01 M1 sourcing: the SAME resolved enforcement mode used by
+          // the discovery gate and the queue gate above is propagated
+          // explicitly into the submission configuration. Without this
+          // field, submitCandidate would default to enforced (`?? true`)
+          // even when the scanner was explicitly configured for non-M1
+          // operation (M1_SOURCING_ENFORCED=false), so an explicit non-M1
+          // run would still have the M1-only restriction applied at
+          // submission. The resolved value here is fail-closed: absent or
+          // invalid configuration resolves to `true` (enforced) upstream.
+          m1SourcingEnforced: m1Enforced,
         },
         scored.candidate,
         submitOpts,
@@ -260,6 +301,9 @@ export function buildScanner(config: IndexerConfig): GraveScannerV2 {
     signatureScanLimit: config.signatureScanLimit,
     scannerProgramId: config.scannerProgramId,
     vaultProgramId: config.vaultProgramId,
+    // D-01 M1 sourcing: default enforced (config may disable explicitly
+    // for non-M1 operation via M1_SOURCING_ENFORCED=false).
+    m1SourcingEnforced: config.m1SourcingEnforced ?? true,
     thresholds: {
       inactivitySeconds: config.inactivitySeconds,
       priceCollapseBps: config.priceCollapseBps,

@@ -45,6 +45,13 @@ export const DEFAULT_LP_BURN_DUST_THRESHOLD = 1_000n;
 /** Spec default: minimum epoch confirmation (2 consecutive epochs). */
 export const DEFAULT_MIN_EPOCH_CONFIRMATION = 2n;
 
+/**
+ * D-01 M1 sourcing enforcement default — ON for the M1 milestone.
+ * The exact predicate: exactly one WSOL mint, WSOL on pc_mint (quote
+ * side), coin_mint non-WSOL. Disable ONLY for non-M1 operation.
+ */
+export const DEFAULT_M1_SOURCING_ENFORCED = true;
+
 /** Indexer configuration — read from env with safe defaults. */
 export interface IndexerConfig {
   /** Solana RPC endpoint. */
@@ -75,6 +82,12 @@ export interface IndexerConfig {
   maxPoolsPerScan: number;
   /** Signature scan limit for deriveLastSwapV4. */
   signatureScanLimit: number;
+  /**
+   * D-01 M1 WSOL quote-side sourcing enforcement (default true).
+   * Enforced at the discovery gate, the candidate-queue choke point and
+   * submission. Set false ONLY for non-M1 operation.
+   */
+  m1SourcingEnforced?: boolean;
 }
 
 /**
@@ -93,6 +106,8 @@ export interface IndexerConfig {
  *   - POLL_INTERVAL_MS (defaults to 300000 = 5 minutes)
  *   - MAX_POOLS_PER_SCAN (defaults to 1000)
  *   - SIGNATURE_SCAN_LIMIT (defaults to 1000)
+ *   - M1_SOURCING_ENFORCED (defaults to "true"; set "false" only for
+ *     non-M1 operation — disables the D-01 WSOL quote-side sourcing gate)
  */
 export function loadConfig(): IndexerConfig {
   const rpcUrl = process.env.RPC_URL ?? "https://api.devnet.solana.com";
@@ -159,5 +174,10 @@ export function loadConfig(): IndexerConfig {
     signatureScanLimit: process.env.SIGNATURE_SCAN_LIMIT
       ? parseInt(process.env.SIGNATURE_SCAN_LIMIT, 10)
       : 1000,
+    // D-01 M1 sourcing: anything other than the exact string "false"
+    // (including unset, empty, or an unrecognized value) enforces — fail
+    // closed on configuration ambiguity.
+    m1SourcingEnforced:
+      process.env.M1_SOURCING_ENFORCED === "false" ? false : DEFAULT_M1_SOURCING_ENFORCED,
   };
 }

@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { PublicKey } from "@solana/web3.js";
 
 import { CandidateQueue } from "../src/index.js";
+import { WSOL_MINT } from "@graveyield/sdk";
 import type { ScoredCandidate, Candidate } from "../src/index.js";
 
 function makeCandidate(poolByte: number): Candidate {
@@ -22,8 +23,9 @@ function makeCandidate(poolByte: number): Candidate {
       pool: {
         coinVault: PublicKey.default,
         pcVault: PublicKey.default,
-        baseMint: PublicKey.default,
-        quoteMint: PublicKey.default,
+        // M1-eligible orientation (D-01): coin_mint non-WSOL, pc_mint WSOL.
+        baseMint: new PublicKey(new Uint8Array(32).fill(0x13)),
+        quoteMint: WSOL_MINT,
         lpMint: PublicKey.default,
       },
       fetchedAtSlot: 0,
@@ -143,5 +145,26 @@ describe("CandidateQueue", () => {
     q.enqueue(makeScored(0x20, 2.0));
     q.clear();
     assert.equal(q.size(), 0);
+  });
+});
+
+describe("CandidateQueue trust boundary — metadata screening only", () => {
+  test("forged metadata claiming the M1-eligible orientation is ADMITTED (no on-chain verification here)", () => {
+    // Honest boundary pin: CandidateQueue holds no RPC connection —
+    // enqueue screens the discovery record's mint metadata only, so a
+    // record forged to CLAIM the M1-eligible orientation (coin_mint
+    // non-WSOL, pc_mint WSOL) while the actual on-chain account is
+    // oriented differently IS admitted and occupies queue capacity.
+    // The authoritative on-chain check is the submission gate
+    // (submit.ts: fetchV4Pool + the shared predicate on the decoded
+    // account); the end-to-end forged-metadata → submission-rejection
+    // case is pinned in m1Sourcing.test.ts.
+    const q = new CandidateQueue();
+    // makeCandidate builds the CLAIMED M1-eligible orientation
+    // (baseMint=0x13 non-WSOL, quoteMint=WSOL) — the forged shape.
+    const admission = q.enqueue(makeScored(0x99, 9));
+    assert.deepEqual(admission, { admitted: true });
+    assert.equal(q.size(), 1);
+    assert.equal(q.has(new PublicKey(new Uint8Array(32).fill(0x99)).toBase58()), true);
   });
 });

@@ -16,7 +16,12 @@ import {
   CandidateQueue,
   type PreFilterThresholds,
 } from "@graveyield/indexer";
-import { quotePerBaseQ64x64, shouldRejectFee, buildPriorityFeePolicy } from "@graveyield/sdk";
+import {
+  quotePerBaseQ64x64,
+  shouldRejectFee,
+  buildPriorityFeePolicy,
+  WSOL_MINT,
+} from "@graveyield/sdk";
 import { key, POOL_A, MEME_MINT } from "./helpers.js";
 
 const THRESHOLDS: PreFilterThresholds = {
@@ -170,7 +175,7 @@ describe("ADV-RP — repeated attempts at the funnel level", () => {
   test("ADV-RP-03: the queue keeps ONE entry per pool and the higher score wins", () => {
     const q = new CandidateQueue();
     const mkScored = (score: number) => ({
-      candidate: makeCandidate(passedResult()),
+      candidate: m1EligibleCandidate(makeCandidate(passedResult())),
       score,
       scoreBreakdown: { inactivityMargin: 1, tvlMargin: 1, priceCollapseMargin: 1 },
     });
@@ -186,6 +191,24 @@ describe("ADV-RP — repeated attempts at the funnel level", () => {
       "drain removes — re-scan re-enqueues (pinned: chain is the replay authority)",
     );
   });
+
+  // D-01 (GY-M1-ODR-001 §3): the candidate queue enforces the exact M1
+  // WSOL quote-side sourcing predicate at admission. The dedup battery's
+  // funnel fixtures therefore carry the CANONICAL WSOL mint on the pc
+  // (quote) side — the network constant, not a synthetic lookalike — so
+  // the case exercises the queue as the M1 milestone configures it.
+  function m1EligibleCandidate(
+    c: import("@graveyield/indexer").Candidate,
+  ): import("@graveyield/indexer").Candidate {
+    return {
+      ...c,
+      discovery: {
+        ...c.discovery,
+        pool: { ...c.discovery.pool, baseMint: MEME_MINT, quoteMint: WSOL_MINT },
+      },
+      metadata: { ...c.metadata, baseMint: MEME_MINT, quoteMint: WSOL_MINT },
+    };
+  }
 });
 
 describe("ADV-DC — token decimals edge cases", () => {
