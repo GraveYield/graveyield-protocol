@@ -23,7 +23,12 @@
 // The byte layout below is NORMATIVE and mirrored byte-for-byte by
 // programs/grave-scanner/src/attestation.rs. Do not reorder fields.
 
-import { PublicKey, TransactionInstruction, type Connection } from "@solana/web3.js";
+import {
+  PublicKey,
+  SYSVAR_SLOT_HASHES_PUBKEY,
+  TransactionInstruction,
+  type Connection,
+} from "@solana/web3.js";
 
 import { fetchV4Pool } from "./raydiumV4.js";
 import {
@@ -696,19 +701,247 @@ export async function deriveLastSwapV4(
   throw new LastSwapEvidenceIncompleteError(result);
 }
 
+// ---------------------------------------------------------------------------
+// Canonical SlotHashes sysvar access — the C1 (slot, hash) source of truth.
+//
+// History (lifecycle-rehearsal finding F1, `probe_slothash.mjs`): this read
+// previously returned `getBlock(slot).blockhash`. On agave 3.x that value is
+// NOT the `(slot, hash)` entry the SlotHashes sysvar stores for the slot —
+// the two sources diverged on every probed slot, so every SDK-sourced
+// attestation failed the on-chain byte-exact check with
+// `AttestationSlotHashMismatch` (6030). A blockhash and a SlotHashes entry
+// are different values and must never be treated as interchangeable, and a
+// slot manufactured by subtracting an offset from `getSlot()` may not even
+// exist in the sysvar (slots can be skipped).
+//
+// The on-chain GraveScanner verifier (`attestation.rs::slot_hash_lookup`) is
+// the authoritative behavior: it reads raw SlotHashes sysvar data — 8-byte
+// u64 LE entry count, then 40-byte `(u64 LE slot, [u8; 32] hash)` entries,
+// newest-first — and requires the attested `issued_slot` to resolve with a
+// byte-exact hash before `verify_attestation_message` passes. This module is
+// the off-chain producer side of that same contract: it reads the SAME
+// sysvar, validates strictly, and always returns a slot and its hash as an
+// inseparable pair.
+// ---------------------------------------------------------------------------
+
+/** Owner of every sysvar account — the native Sysvar program
+ *  `Sysvar1111111111111111111111111111111111111`. web3.js exports the
+ *  per-sysvar addresses (`SYSVAR_SLOT_HASHES_PUBKEY`, …) but not this id. */
+export const SYSVAR_PROGRAM_ID = new PublicKey("Sysvar1111111111111111111111111111111111111");
+
 /**
- * Fetch the 32-byte slot hash (blockhash) for a slot — the value that
- * GraveScanner cross-checks against the SlotHashes sysvar. Attestations
- * must be issued for a recent slot: once the slot ages out of the
- * ~512-entry SlotHashes window the on-chain check fails closed.
+ * Protocol freshness window: GraveScanner resolves an attested slot only
+ * while it is still present in the SlotHashes sysvar, which the runtime
+ * caps at ~512 recent entries (older slots revert `AttestationStale`
+ * on-chain). The parser rejects any account claiming more entries.
+ */
+export const SLOT_HASHES_MAX_ENTRIES = 512;
+
+/** Serialized SlotHashes sysvar layout: u64 LE entry count, then
+ *  `count` × (u64 LE slot + 32-byte hash) entries, newest-first. */
+export const SLOT_HASHES_HEADER_LEN = 8;
+export const SLOT_HASHES_ENTRY_LEN = 40; // 8-byte slot + 32-byte hash
+
+/** One `(slot, hash)` pair as stored in the SlotHashes sysvar. */
+export interface SlotHashEntry {
+  /** Slot number (safe integer; u64 slots above 2^53 fail closed). */
+  slot: number;
+  /** 32-byte hash for that exact slot — a private copy, safe to mutate. */
+  hash: Uint8Array;
+}
+
+/**
+ * Thrown by `parseSlotHashesAccount` when sysvar data fails validation.
+ * The convenience readers (`fetchSlotHash` / `fetchRecentSlotHash`)
+ * convert this into `null` — fail closed — per their documented API.
+ */
+export class SlotHashesAccountInvalidError extends Error {
+  override readonly name = "SlotHashesAccountInvalidError";
+
+  constructor(reason: string) {
+    super(`SlotHashes sysvar account invalid: ${reason}`);
+  }
+}
+
+/**
+ * Parse and strictly validate raw SlotHashes sysvar account data.
+ *
+ * Layout: 8-byte u64 LE entry count, then `count` 40-byte entries
+ * (8-byte u64 LE slot + 32-byte hash), newest-first. Every violation
+ * throws `SlotHashesAccountInvalidError` — nothing is skipped, patched,
+ * or guessed:
+ *
+ *   * the 8-byte header must be complete;
+ *   * the entry count must be within the protocol window (≤ 512);
+ *   * the serialized length must be exactly `8 + count × 40` — a
+ *     truncated entry and unexpected trailing bytes are both invalid;
+ *   * every entry slot must be a positive safe integer (a u64 slot ≥ 2^53
+ *     cannot be represented in the attestation wire format and fails
+ *     closed rather than losing precision);
+ *   * entries must be STRICTLY DESCENDING by slot — duplicates and any
+ *     ordering anomaly are rejected.
+ *
+ * Returns the parsed entries newest-first; each `hash` is a private copy
+ * (never a view into the caller's buffer).
+ */
+export function parseSlotHashesAccount(data: Uint8Array): SlotHashEntry[] {
+  if (data.length < SLOT_HASHES_HEADER_LEN) {
+    throw new SlotHashesAccountInvalidError(
+      `truncated header: ${data.length} bytes < ${SLOT_HASHES_HEADER_LEN}`,
+    );
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const countBig = view.getBigUint64(0, true);
+  if (countBig > BigInt(SLOT_HASHES_MAX_ENTRIES)) {
+    throw new SlotHashesAccountInvalidError(
+      `entry count ${countBig} exceeds the ${SLOT_HASHES_MAX_ENTRIES}-entry window`,
+    );
+  }
+  const count = Number(countBig);
+  const expectedLen = SLOT_HASHES_HEADER_LEN + count * SLOT_HASHES_ENTRY_LEN;
+  if (data.length !== expectedLen) {
+    throw new SlotHashesAccountInvalidError(
+      `serialized length ${data.length} != ${expectedLen} (8 + ${count} × 40)`,
+    );
+  }
+  const entries: SlotHashEntry[] = [];
+  for (let i = 0; i < count; i++) {
+    const base = SLOT_HASHES_HEADER_LEN + i * SLOT_HASHES_ENTRY_LEN;
+    const slotBig = view.getBigUint64(base, true);
+    if (slotBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new SlotHashesAccountInvalidError(
+        `entry ${i} slot ${slotBig} exceeds the safe-integer range`,
+      );
+    }
+    const slot = Number(slotBig);
+    if (slot <= 0) {
+      throw new SlotHashesAccountInvalidError(
+        `entry ${i} slot ${slot} is not a positive slot number`,
+      );
+    }
+    const hash = new Uint8Array(SLOT_HASHES_ENTRY_LEN - 8);
+    hash.set(data.subarray(base + 8, base + SLOT_HASHES_ENTRY_LEN));
+    entries.push({ slot, hash });
+  }
+  let prev: SlotHashEntry | null = null;
+  for (const entry of entries) {
+    if (prev !== null && entry.slot >= prev.slot) {
+      throw new SlotHashesAccountInvalidError(
+        `entries not strictly descending (${prev.slot} → ${entry.slot}; ` +
+          `duplicates and ordering anomalies are rejected)`,
+      );
+    }
+    prev = entry;
+  }
+  return entries;
+}
+
+/**
+ * Read and validate ONE SlotHashes sysvar snapshot, at `finalized`
+ * commitment, from the canonical `SYSVAR_SLOT_HASHES_PUBKEY` address.
+ *
+ * Returns the parsed entries newest-first, or `null` when the sysvar
+ * account is absent. Throws `SlotHashesAccountInvalidError` when the
+ * account is executable, owned by anything other than the Sysvar program,
+ * or structurally invalid (see `parseSlotHashesAccount`). Genuine RPC
+ * failures from `getAccountInfo` propagate — they are never swallowed.
+ *
+ * This is the shared, single parser behind `fetchSlotHash` and
+ * `fetchRecentSlotHash`; callers that need the structured failure detail
+ * consume it directly.
+ */
+export async function fetchSlotHashesSnapshot(
+  connection: Connection,
+): Promise<SlotHashEntry[] | null> {
+  const info = await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, "finalized");
+  if (!info) return null;
+  if (info.executable) {
+    throw new SlotHashesAccountInvalidError("account is executable");
+  }
+  if (!SYSVAR_PROGRAM_ID.equals(info.owner)) {
+    throw new SlotHashesAccountInvalidError(
+      `owner ${info.owner.toBase58()} is not the Sysvar program ` +
+        `(${SYSVAR_PROGRAM_ID.toBase58()})`,
+    );
+  }
+  return parseSlotHashesAccount(info.data);
+}
+
+/**
+ * Fetch the 32-byte slot hash for a slot from the canonical SlotHashes
+ * sysvar — the exact value GraveScanner cross-checks on-chain
+ * (`attestation.rs::slot_hash_lookup`). Attestations must be issued for a
+ * slot still present in the ~512-entry window: once it ages out the
+ * on-chain check fails closed (`AttestationStale`).
+ *
+ * Semantics (fail-closed; the legacy `null` API is preserved):
+ *
+ *   * returns `null` when the hash cannot be resolved from the canonical
+ *     sysvar — the account is missing, its data is invalid (executable,
+ *     wrong owner, truncated, oversized entry count, trailing bytes,
+ *     ordering anomaly), or the requested slot is absent (never produced
+ *     a hash entry, or aged out). A nearby slot is NEVER substituted and
+ *     a hash is NEVER returned for a different slot.
+ *   * rejects with `TypeError` when `slot` is not a positive safe integer.
+ *   * rejects with the underlying RPC error when `getAccountInfo` fails —
+ *     a genuine RPC failure is not an "unavailable slot" and is never
+ *     swallowed.
+ *
+ * Do not reintroduce a `getBlock()`-based lookup: `getBlock(slot)
+ * .blockhash` is not the SlotHashes entry for the slot (finding F1).
  */
 export async function fetchSlotHash(
   connection: Connection,
   slot: number,
 ): Promise<Uint8Array | null> {
-  const block = await connection.getBlock(slot, {
-    maxSupportedTransactionVersion: 0,
-  });
-  if (!block) return null;
-  return new PublicKey(block.blockhash).toBytes();
+  if (!Number.isSafeInteger(slot) || slot <= 0) {
+    throw new TypeError(`slot must be a positive safe integer, got ${String(slot)}`);
+  }
+  let entries: SlotHashEntry[];
+  try {
+    const snapshot = await fetchSlotHashesSnapshot(connection);
+    if (!snapshot) return null;
+    entries = snapshot;
+  } catch (err) {
+    // Malformed / non-canonical sysvar data is a documented `null`
+    // (fail-closed) for this legacy surface; the structured detail is
+    // available via `fetchSlotHashesSnapshot` / `parseSlotHashesAccount`.
+    if (err instanceof SlotHashesAccountInvalidError) return null;
+    throw err;
+  }
+  const found = entries.find((e) => e.slot === slot);
+  return found ? found.hash : null;
+}
+
+/**
+ * Read ONE validated SlotHashes snapshot and return a REAL recent
+ * `(slot, hash)` entry as an inseparable pair.
+ *
+ * Selection: the NEWEST entry of the snapshot (entries are strictly
+ * descending, so `entries[0]`) — the most recent slot that actually
+ * produced a hash entry, maximizing the remaining freshness margin before
+ * the on-chain `AttestationStale` gate. The slot is never manufactured
+ * (no `getSlot()` arithmetic — slots can be skipped) and the hash is
+ * never substituted from another entry: the pair is exactly what the
+ * sysvar serialized.
+ *
+ * Callers MUST place the returned `slot` into the signed attestation
+ * message and the returned `hash` into the matching field — the pairing
+ * is only valid as a pair, and the on-chain verifier resolves BOTH from
+ * the same sysvar.
+ *
+ * Semantics: `null` when the sysvar account is missing, empty, or
+ * invalid (as `fetchSlotHash`); `TypeError` never applies (no slot
+ * argument); genuine RPC failures propagate.
+ */
+export async function fetchRecentSlotHash(connection: Connection): Promise<SlotHashEntry | null> {
+  try {
+    const snapshot = await fetchSlotHashesSnapshot(connection);
+    if (!snapshot || snapshot.length === 0) return null;
+    const newest = snapshot[0];
+    return newest ?? null;
+  } catch (err) {
+    if (err instanceof SlotHashesAccountInvalidError) return null;
+    throw err;
+  }
 }

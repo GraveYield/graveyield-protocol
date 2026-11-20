@@ -87,10 +87,19 @@ signature fee, recorded, never normalized away):
 
 ## Findings the harness proved (F1–F3)
 
-- **F1 — SLOT-HASH**: `SDK.fetchSlotHash` (`getBlock(slot).blockhash`) NEVER
-  equals the `SlotHashes` sysvar entry on agave 3.0.10 → every SDK-sourced
-  hash reverts `6030`. The harness reads `(slot, hash)` pairs from the sysvar
-  itself. Evidence: `probe_slothash.mjs`.
+- **F1 — SLOT-HASH (REMEDIATED SDK-side)**: `SDK.fetchSlotHash`
+  (`getBlock(slot).blockhash`) NEVER equaled the `SlotHashes` sysvar entry
+  on agave 3.0.10 → every SDK-sourced hash reverted `6030`. The SDK now
+  reads the canonical sysvar itself (`fetchSlotHash` /
+  `fetchRecentSlotHash` — strict validation, finalized commitment, exact
+  `(slot, hash)` pairing), and the harness consumes that same reader
+  (single-parser policy, `sdk/README.md` NS-4) instead of maintaining a
+  second, subtly different scan. Evidence/gate: `probe_slothash.mjs`, now
+  a REGRESSION probe — it independently reads the raw sysvar bytes, parses
+  them with `SDK.parseSlotHashesAccount`, and asserts the SDK's answer is
+  byte-exact for the newest and an older entry, that
+  `fetchRecentSlotHash` returns the newest pair exactly, and that an
+  absent slot resolves `null`.
 - **F2 — 1232-byte packet limit**: the salvage ix (21 named + 13 V4 remaining
   ≈ 1.4 kB) cannot fit a legacy packet. The SAME instructions compile into a
   `VersionedTransaction` v0 over a REAL local address-lookup table, created

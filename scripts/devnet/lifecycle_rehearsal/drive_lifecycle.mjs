@@ -66,7 +66,6 @@ import {
   snapshotTokenAccounts,
   evaluateZeroMovement,
   solBalance,
-  readSlotHashesEntry,
   createAndFillAlt,
   applySimCompat,
   uncxMarkerPda,
@@ -422,14 +421,18 @@ async function expectRevert({
 }
 
 // C1 attestation: real local slot anchor + fork-precedented synthetic
-// last-swap timestamp (documented boundary). issuedSlot points a few slots
-// back so the (slot,hash) pair is in the SlotHashes sysvar window.
-// FIX 10 (F1): the hash comes from the SYSVAR, never SDK.fetchSlotHash.
+// last-swap timestamp (documented boundary). The (slot, hash) pair is a
+// REAL recent SlotHashes sysvar entry taken as one pair from the SDK's
+// canonical reader (F1 fix landed SDK-side — SDK.fetchRecentSlotHash reads
+// the sysvar itself, at finalized commitment, with strict validation), so
+// the attested slot is exactly the slot whose hash is signed. No getSlot()
+// arithmetic: slots can be skipped, and a manufactured slot need not exist
+// in the sysvar window.
 async function buildC1Attestation({ oracleKeypair, lastSwapUnixTs }) {
-  const tip = Number(await connection.getSlot());
-  const issuedSlot = Math.max(1, tip - 4);
-  const slotHash = await readSlotHashesEntry(connection, issuedSlot);
-  if (!slotHash) throw new Error(`no slot hash in sysvar for slot ${issuedSlot}`);
+  const recent = await SDK.fetchRecentSlotHash(connection);
+  if (!recent) throw new Error("no valid SlotHashes sysvar entry for attestation issuance");
+  const issuedSlot = recent.slot;
+  const slotHash = recent.hash;
   const msg = SDK.buildAttestationMessage({
     ammProgramId: IDS.raydiumV4,
     poolAddress: POOL,

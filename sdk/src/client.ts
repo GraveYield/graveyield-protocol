@@ -154,9 +154,16 @@ export interface RecordLaunchPriceInput {
 export interface Phase1Input {
   ammProgramId: PublicKey;
   poolAddress: PublicKey;
-  /** Last-swap derivation (from `deriveLastSwapV4`). */
+  /** Last-swap derivation (from `deriveLastSwapV4`). NOTE: `buildPhase1Ix`
+   *  reads `derivation.slot` as the attestation's `issuedSlot`, so it MUST
+   *  be the exact slot paired with `slotHash` below — both from one
+   *  SlotHashes sysvar snapshot (`fetchRecentSlotHash`, or
+   *  `fetchSlotHash` for a specific slot). A slot manufactured by
+   *  `getSlot()` arithmetic is not guaranteed to exist in the sysvar. */
   derivation: LastSwapDerivation;
-  /** Slot hash for the issuance slot (from `fetchSlotHash`). */
+  /** 32-byte SlotHashes sysvar hash for `derivation.slot` (from
+   *  `fetchSlotHash` / `fetchRecentSlotHash`) — never
+   *  `getBlock(slot).blockhash`, which is not the sysvar entry. */
   slotHash: Uint8Array;
   /** 64-byte Ed25519 signature over `buildAttestationMessage(att)` with the activity oracle key. */
   signature: Uint8Array;
@@ -477,6 +484,9 @@ export class GraveYieldClient {
     precompileIx: TransactionInstruction;
     phase1Ix: TransactionInstruction;
   } {
+    // The on-chain verifier resolves (issued_slot, slotHash) together from
+    // the SlotHashes sysvar: the slot placed here must be exactly the slot
+    // whose hash is in `input.slotHash` — one pair from one snapshot.
     const att = {
       ammProgramId: input.ammProgramId,
       poolAddress: input.poolAddress,

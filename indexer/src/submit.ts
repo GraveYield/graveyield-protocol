@@ -33,7 +33,7 @@ import nacl from "tweetnacl";
 import {
   GraveYieldClient,
   buildAttestationMessage,
-  fetchSlotHash,
+  fetchRecentSlotHash,
   findProgramAddressSync,
   type Phase1Input,
 } from "@graveyield/sdk";
@@ -45,8 +45,11 @@ import type { Candidate, SubmissionResult } from "./types.js";
  * Submit a candidate to the on-chain GraveScanner Phase 1.
  *
  * If the indexer holds the activity oracle key, it:
- *   1. Builds the 112-byte C1 attestation message from the activity record.
- *   2. Fetches the slot hash for the issuance slot.
+ *   1. Reads ONE validated SlotHashes sysvar snapshot and takes a REAL
+ *      recent `(slot, hash)` entry as a pair (`fetchRecentSlotHash`).
+ *   2. Builds the 112-byte C1 attestation message from the activity record,
+ *      binding the returned slot and hash EXACTLY as the pair the on-chain
+ *      GraveScanner verifier resolves from the same sysvar.
  *   3. Signs the message with the oracle key (Ed25519).
  *   4. Builds the (precompile, phase1) instruction pair via the SDK.
  *   5. Submits the transaction.
@@ -58,7 +61,16 @@ export async function submitCandidate(
   connection: Connection,
   config: IndexerConfig,
   candidate: Candidate,
-  opts?: { writer?: Keypair; oracleKeypair?: Keypair },
+  opts?: {
+    writer?: Keypair;
+    oracleKeypair?: Keypair;
+    /**
+     * Test seam: replaces `sendAndConfirmTransaction` so unit tests can
+     * capture the assembled transaction without a network. Production
+     * callers never pass it.
+     */
+    sendOverride?: (connection: Connection, tx: Transaction, signers: Keypair[]) => Promise<string>;
+  },
 ): Promise<SubmissionResult> {
   const anchorPda = deriveAnchorPda(config.scannerProgramId, candidate);
 
@@ -86,17 +98,25 @@ export async function submitCandidate(
   }
 
   try {
-    // 1. Build the C1 attestation message.
-    const issuedSlot = Number(await connection.getSlot());
-    const slotHash = await fetchSlotHash(connection, issuedSlot);
-    if (!slotHash) {
+    // 1. Canonical (slot, hash) pairing: the issuance slot and its hash
+    //    come from ONE validated SlotHashes sysvar snapshot as a REAL
+    //    entry — never `getBlock(slot).blockhash` (not the sysvar entry;
+    //    rehearsal finding F1 → 6030 on every SDK-sourced hash) and never
+    //    a slot manufactured by subtracting an offset from `getSlot()`
+    //    (slots can be skipped; only a sysvar entry is guaranteed to
+    //    resolve on-chain). The exact returned slot is placed into the
+    //    attestation message and signed by the oracle below.
+    const recent = await fetchRecentSlotHash(connection);
+    if (!recent) {
       return {
         poolAddress: candidate.poolAddress,
         status: "failed",
-        error: "could not fetch slot hash for issuance slot",
+        error: "no valid SlotHashes sysvar entry available for attestation issuance",
         anchorPda,
       };
     }
+    const issuedSlot = recent.slot;
+    const slotHash = recent.hash;
 
     const att = {
       ammProgramId: RAYDIUM_V4_PROGRAM_ID,
@@ -123,6 +143,10 @@ export async function submitCandidate(
     const phase1Input: Phase1Input = {
       ammProgramId: RAYDIUM_V4_PROGRAM_ID,
       poolAddress: candidate.poolAddress,
+      // NOTE: `buildPhase1Ix` reads `derivation.slot` as the attestation's
+      // `issuedSlot`, so it MUST be the same slot whose hash is passed in
+      // `slotHash` — here, exactly the pair returned by
+      // `fetchRecentSlotHash` from one sysvar snapshot.
       derivation: {
         lastSwapUnixTs: candidate.activity.lastSwapUnixTs,
         slot: issuedSlot,
@@ -138,7 +162,8 @@ export async function submitCandidate(
 
     // 4. Assemble + submit the transaction.
     const tx = new Transaction().add(precompileIx, phase1Ix);
-    const sig = await sendAndConfirmTransaction(connection, tx, [writer]);
+    const send = opts?.sendOverride ?? sendAndConfirmTransaction;
+    const sig = await send(connection, tx, [writer]);
 
     return {
       poolAddress: candidate.poolAddress,

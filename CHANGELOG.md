@@ -1,5 +1,69 @@
 # Changelog
 
+## [Unreleased — C1 slot-hash source of truth (SlotHashes sysvar)]
+
+### Fixed
+
+- **`sdk/src/lastSwapAttestation.ts` — `fetchSlotHash` no longer returns
+  `getBlock(slot).blockhash` (lifecycle-rehearsal finding F1).** The old
+  implementation treated the RPC blockhash as the SlotHashes entry for the
+  slot; on agave 3.x the two diverge on every probed slot, so every
+  SDK-sourced attestation failed the on-chain byte-exact check with
+  `AttestationSlotHashMismatch` (6030). The reader now fetches the
+  canonical `SYSVAR_SLOT_HASHES_PUBKEY` account at `finalized` commitment
+  and resolves the hash through one strict parser
+  (`parseSlotHashesAccount`): exact bincode layout (8-byte u64 LE entry
+  count ≤ 512, then 40-byte `(slot, hash)` entries), complete entries
+  with no trailing bytes, strictly descending slots (duplicates and
+  ordering anomalies rejected), safe-integer slots, non-executable
+  account owned by the Sysvar program. The hash is returned only for the
+  exact requested slot (no nearby-slot substitution, no cross-entry
+  hash), as a private copy; missing/malformed data and absent slots
+  return `null` (fail closed), genuine RPC failures propagate, and an
+  invalid slot argument throws `TypeError`.
+- **`sdk/src/lastSwapAttestation.ts` — new `fetchRecentSlotHash`
+  returning a real recent `(slot, hash)` pair.** Reads one validated
+  sysvar snapshot and returns the newest entry's slot and hash together,
+  so a caller can never pair a slot with a hash from a different entry —
+  the pairing defect behind F1 was slot/hash dissociation, not merely a
+  wrong hash source. Shared parser with `fetchSlotHash` (single
+  SlotHashes parser policy).
+- **`indexer/src/submit.ts` — the C1 attestation is issued from the
+  sysvar pair.** The indexer previously built the attestation around
+  `getSlot()` + `fetchSlotHash(issuedSlot)`; it now calls
+  `fetchRecentSlotHash` and places the returned slot into the signed
+  message and the returned hash into the matching field, keeping the
+  exact pair the on-chain verifier resolves from the same sysvar. When
+  no valid sysvar entry is available the submission fails closed — no
+  fabricated or fallback attestation is assembled or sent.
+- **Rehearsal harness unified on the canonical parser (no second
+  SlotHashes parser).** `scripts/devnet/lifecycle_rehearsal/lib.mjs`
+  delegates `readSlotHashesEntry` to the SDK reader; `drive_lifecycle.mjs`
+  anchors C1 attestations with `SDK.fetchRecentSlotHash` (the old
+  `getSlot() - 4` arithmetic could select a slot absent from the sysvar
+  — slots can be skipped); `probe_slothash.mjs` is now an F1 regression
+  gate (independent raw sysvar read + canonical parser, asserting
+  byte-exact SDK answers and `null` for absent slots) instead of an
+  evidence probe for the defect.
+
+### Tests
+
+- **`sdk/test/slotHashes.test.ts` (new)** — 30 cases over mocked RPC
+  account responses: exact-slot retrieval, multi-entry parsing, the
+  newest-pair contract, canonical address + finalized commitment, hash
+  copy semantics; negatives for missing/absent/aged-out slots, invalid
+  slot arguments, truncated headers/entries, oversized entry counts,
+  trailing bytes, wrong owner, executable accounts, duplicate slots,
+  wrong ordering, and malformed data; regressions pinning that
+  `getBlock()`/`getSlot()` are never called, that no hash from a
+  different slot can ever be returned, and that a reader pair embeds
+  byte-exactly into a built attestation.
+- **`indexer/test/submitSlotHash.test.ts` (new)** — pairing regression:
+  the submitted phase-1 instruction embeds exactly the sysvar pair
+  (slot 300_000_004, its hash) signed by the oracle over the embedded
+  112-byte message; missing/malformed sysvar → `failed` with no
+  transaction sent; discovery-only skip behavior unchanged.
+
 ## [Unreleased — IMPL-001 Correction 001: core SDK evidence safety]
 
 ### Changed
