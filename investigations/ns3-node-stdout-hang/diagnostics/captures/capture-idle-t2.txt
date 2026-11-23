@@ -1,0 +1,101 @@
+### cmdline
+node checker/ns3_check_provenance.mjs --manifest fixtures/manifest.big.json --platform-tools-tarball fixtures/big.tar.bz2 
+### status
+Name:	MainThread
+Umask:	0002
+State:	S (sleeping)
+Tgid:	28787
+Ngid:	0
+Pid:	28787
+PPid:	28786
+TracerPid:	0
+Uid:	1001	1001	1001	1001
+Gid:	1001	1001	1001	1001
+FDSize:	64
+Groups:	1001 
+NStgid:	28787
+NSpid:	28787
+NSpgid:	28785
+NSsid:	28785
+VmPeak:	 1769592 kB
+VmSize:	 1769564 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	  347380 kB
+VmRSS:	  347380 kB
+RssAnon:	  296996 kB
+RssFile:	   50384 kB
+RssShmem:	       0 kB
+VmData:	  872724 kB
+VmStk:	     132 kB
+VmExe:	   43728 kB
+VmLib:	    3928 kB
+VmPTE:	    2024 kB
+VmSwap:	       0 kB
+HugetlbPages:	       0 kB
+CoreDumping:	0
+THP_enabled:	1
+Threads:	3
+SigQ:	0/462
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000001001000
+SigCgt:	0000000100004602
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	00000000a80425fb
+CapAmb:	0000000000000000
+NoNewPrivs:	0
+Seccomp:	2
+Seccomp_filters:	1
+Speculation_Store_Bypass:	thread force mitigated
+Cpus_allowed:	3
+Cpus_allowed_list:	0-1
+Mems_allowed:	00000000,00000001
+Mems_allowed_list:	0
+voluntary_ctxt_switches:	14
+nonvoluntary_ctxt_switches:	8
+### wchan
+futex_wait_queue_me### syscall
+202 0x7fb344866990 0x109 0x7077 0x0 0x0 0xffffffff 0x7ffe1e09ea78 0x7fb345a3772e
+### stat
+28787 (MainThread) S 28786 28785 28785 0 -1 1077936384 9672 0 0 0 33 8 0 0 20 0 3 0 791351 1812033536 86845 18446744073709551615 7655424 52430497 140729402393632 0 0 0 0 16781312 17922 0 0 0 17 0 0 0 0 0 0 112727472 112899296 136630272 140729402399420 140729402399542 140729402399542 140729402400746 0
+### fds
+total 0
+lr-x------ 1 z z 64 Nov 10 17:32 0 -> /dev/null
+l-wx------ 1 z z 64 Nov 10 17:32 1 -> /tmp/idle-hang.log
+lrwx------ 1 z z 64 Nov 10 17:32 15 -> anon_inode:[eventpoll]
+lrwx------ 1 z z 64 Nov 10 17:32 16 -> anon_inode:[io_uring]
+lr-x------ 1 z z 64 Nov 10 17:32 17 -> pipe:[249093]
+l-wx------ 1 z z 64 Nov 10 17:32 18 -> pipe:[249093]
+lrwx------ 1 z z 64 Nov 10 17:32 19 -> anon_inode:[eventfd]
+l-wx------ 1 z z 64 Nov 10 17:32 2 -> /tmp/idle-hang.log
+lrwx------ 1 z z 64 Nov 10 17:32 3 -> anon_inode:[eventpoll]
+lrwx------ 1 z z 64 Nov 10 17:32 4 -> anon_inode:[io_uring]
+lr-x------ 1 z z 64 Nov 10 17:32 7 -> pipe:[249092]
+l-wx------ 1 z z 64 Nov 10 17:32 8 -> pipe:[249092]
+lrwx------ 1 z z 64 Nov 10 17:32 9 -> anon_inode:[eventfd]
+### threads: 3
+--- task 28787
+  comm:    MainThread
+  state:   State:	S (sleeping)
+  wchan:   futex_wait_queue_me
+  syscall: 202 0x7fb344866990 0x109 0x7077 0x0 0x0 0xffffffff 0x7ffe1e09ea78 0x7fb345a3772e
+  kernel_stack:
+    (unavailable)
+--- task 28791
+  comm:    V8Worker
+  state:   State:	S (sleeping)
+  wchan:   futex_wait_queue_me
+  syscall: 202 0x7fb345989a40 0x189 0x0 0x0 0x0 0xffffffffffffffff 0x7fb344864cc8 0x7fb345aab4f9
+  kernel_stack:
+    (unavailable)
+--- task 28794
+  comm:    SignalInspector
+  state:   State:	S (sleeping)
+  wchan:   futex_wait_queue_me
+  syscall: 202 0x6bb0ce0 0x189 0x0 0x0 0x0 0xffffffff 0x7fb34405dc18 0x7fb345a3772e
+  kernel_stack:
+    (unavailable)
