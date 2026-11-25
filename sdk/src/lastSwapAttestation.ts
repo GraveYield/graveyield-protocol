@@ -252,7 +252,10 @@ export interface LastSwapEvidenceResult {
   status: LastSwapEvidenceStatus;
   /** Set only when `status === "verified"`. */
   lastSwap: LastSwapDerivation | null;
-  /** Per-candidate records, newest-first, bounded by the scan limit. */
+  /** Per-candidate records, newest-first, bounded by the scan limit. With
+   *  early exit enabled (the default) the array is TRUNCATED at the
+   *  early-exit point: records for older signatures that were never
+   *  examined are absent — they are "not examined", never "not swaps". */
   candidates: LastSwapCandidateRecord[];
   scan: {
     requestedLimit: number;
@@ -260,6 +263,15 @@ export interface LastSwapEvidenceResult {
     /** True when the RPC returned fewer signatures than requested — the
      *  pool's full available history was covered. */
     reachedHistoryEnd: boolean;
+    /** True ONLY when the scan loop actually stopped before processing
+     *  all returned signatures because the early-exit rule fired (a
+     *  verified swap was established and no newer candidate is
+     *  unresolved). Never true when `earlyExit: false` was requested. */
+    earlyExit: boolean;
+    /** Number of candidate records examined (equals
+     *  `candidates.length`): the prefix of the RPC's signature list that
+     *  was actually classified before the loop stopped. */
+    candidatesExamined: number;
   };
   /** True when the result is a sound basis for an inactivity claim. */
   definitive: boolean;
@@ -279,6 +291,17 @@ export interface DeriveLastSwapEvidenceOptions {
    * (pure confirmation-status gate).
    */
   finalizedDepthSlots?: number;
+  /**
+   * Early exit (default TRUE): stop the signature scan as soon as the
+   * newest verified economic swap is established and no NEWER candidate
+   * remains unresolved. Older (not-yet-examined) signatures are never
+   * fetched and never appear in `candidates` (truncated, not "not
+   * swaps" — see the fail-closed guarantees above
+   * `deriveLastSwapEvidenceV4`). `false` restores the exhaustive scan
+   * (byte-identical to the pre-early-exit implementation) for parity
+   * testing.
+   */
+  earlyExit?: boolean;
 }
 
 /**
@@ -448,6 +471,34 @@ async function fetchCandidateTx(
  *     RPC is indistinguishable from a pool that never transacted);
  *   * a bounded scan that did not reach the end of history is
  *     `incomplete` unless a verified swap was found.
+ *
+ * Early exit (default ON, `opts.earlyExit === false` restores the
+ * exhaustive scan byte-for-byte):
+ *   The scan processes candidates newest-first and may stop as soon as
+ *   the newest verified economic swap is established. Stop rule: after
+ *   finalizing a candidate record, IF a verified swap has been recorded
+ *   AND every candidate NEWER than it (smaller index) has a non-
+ *   `unresolved` outcome, the loop breaks — older signatures are never
+ *   fetched. CONSTRAINT: the scan never stops while any newer candidate
+ *   is `unresolved` — the blocking rule is absolute; a newer unresolved
+ *   candidate keeps the loop running exactly as the exhaustive scan
+ *   does (bounded by `scanLimit`). Because the verified-branch result
+ *   (status/lastSwap/definitive) never depends on candidates older than
+ *   the verified swap, the early-stopped result is IDENTICAL in those
+ *   fields to what the full scan would return for the same inputs.
+ *   TRUNCATION SEMANTICS: `candidates` is naturally truncated at the
+ *   early-exit point — records for signatures that were never examined
+ *   are absent, meaning "not examined", NEVER "not swaps" (no record is
+ *   fabricated). The `scan.earlyExit` flag reports that the loop
+ *   actually stopped before processing all returned signatures, and
+ *   `scan.candidatesExamined` reports how many records were examined.
+ *   Early exit also benefits INACTIVE pools whose last verified swap
+ *   lies within the newest `scanLimit` signatures (the scan stops at
+ *   that swap instead of walking the entire older history). It does NOT
+ *   help when no verified swap is found in the examined window — that
+ *   path always runs to the end of the returned signatures/history as
+ *   before. The three-state result model and ALL blocking rules are
+ *   unchanged.
  */
 export async function deriveLastSwapEvidenceV4(
   connection: Connection,
@@ -457,6 +508,9 @@ export async function deriveLastSwapEvidenceV4(
 ): Promise<LastSwapEvidenceResult> {
   const scanLimit = opts?.scanLimit ?? 1000;
   const finalizedDepthSlots = opts?.finalizedDepthSlots ?? 0;
+  // Early exit is the DEFAULT; `earlyExit: false` restores the exhaustive
+  // scan (byte-identical to the pre-early-exit implementation).
+  const earlyExit = opts?.earlyExit ?? true;
 
   // Authoritative vaults: from the caller when provided, otherwise the
   // on-chain AmmInfo (never inferred from instruction layouts — the v1
@@ -492,7 +546,32 @@ export async function deriveLastSwapEvidenceV4(
 
   const candidates: LastSwapCandidateRecord[] = [];
   const seen = new Set<string>();
+
+  // Early-exit state (all no-ops when `earlyExit` is false — the loop
+  // below then behaves exactly as the exhaustive scan always did):
+  //   - firstVerifiedIdx: candidates index of the FIRST (newest) record
+  //     whose outcome is `verified_swap`, or -1 while none is established.
+  //   - newerUnresolved: number of `unresolved` records finalized before
+  //     the first verified swap (i.e. NEWER than it). While this is > 0
+  //     the stop rule MUST NOT fire (blocking rule preserved).
+  //   - stopScan: set inside `finalize` the moment the stop rule fires;
+  //     the loop breaks at the top of the NEXT iteration, so if the rule
+  //     fires on the last returned signature the loop simply ends there.
+  //   - earlyExited: set together with `stopScan` — true exactly when the
+  //     early-exit rule terminated the scan (reported as `scan.earlyExit`).
+  let firstVerifiedIdx = -1;
+  let newerUnresolved = 0;
+  let stopScan = false;
+  let earlyExited = false;
+
   for (const info of sigInfos) {
+    if (stopScan) {
+      // The early-exit rule fired after the previously finalized record:
+      // stop here — older (not-yet-examined) signatures are never
+      // fetched and never appear in `candidates` (truncated, not "not
+      // swaps").
+      break;
+    }
     if (seen.has(info.signature)) continue; // defensive: dedupe RPC pages
     seen.add(info.signature);
     const slot = Number(info.slot);
@@ -511,6 +590,20 @@ export async function deriveLastSwapEvidenceV4(
     const finalize = (outcome: SwapCandidateOutcome): void => {
       record.outcome = outcome;
       candidates.push(record);
+      // Early-exit stop rule, evaluated exactly once per finalized record
+      // (see the guarantees block above): stop only when a verified swap
+      // is established AND no newer candidate is unresolved. When
+      // `earlyExit` is false this block is skipped entirely.
+      if (earlyExit) {
+        if (firstVerifiedIdx < 0) {
+          if (outcome.kind === "verified_swap") firstVerifiedIdx = candidates.length - 1;
+          else if (outcome.kind === "unresolved") newerUnresolved += 1;
+        }
+        if (firstVerifiedIdx >= 0 && newerUnresolved === 0) {
+          stopScan = true;
+          earlyExited = true;
+        }
+      }
     };
 
     // ADR D5 / Deliverable 3 §7: non-finalized candidates are excluded
@@ -576,6 +669,16 @@ export async function deriveLastSwapEvidenceV4(
   const newestVerifiedIdx = candidates.findIndex((c) => c.outcome.kind === "verified_swap");
   const newestVerified = newestVerifiedIdx >= 0 ? candidates[newestVerifiedIdx] : undefined;
   const reachedHistoryEnd = sigInfos.length < scanLimit;
+  // Additive scan telemetry: `candidatesExamined` is exactly the number of
+  // classified records; `earlyExit` is true only when the loop actually
+  // stopped with returned signatures left unprocessed.
+  const scan = {
+    requestedLimit: scanLimit,
+    signaturesReturned: sigInfos.length,
+    reachedHistoryEnd,
+    earlyExit: earlyExited,
+    candidatesExamined: candidates.length,
+  };
 
   if (newestVerified) {
     const newestVerifiedIdxSafe = candidates.indexOf(newestVerified);
@@ -587,7 +690,7 @@ export async function deriveLastSwapEvidenceV4(
         status: "incomplete",
         lastSwap: null,
         candidates,
-        scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+        scan,
         definitive: false,
       };
     }
@@ -599,7 +702,7 @@ export async function deriveLastSwapEvidenceV4(
         signature: newestVerified.signature,
       },
       candidates,
-      scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+      scan,
       definitive: true,
     };
   }
@@ -614,7 +717,7 @@ export async function deriveLastSwapEvidenceV4(
     status: definitive ? "no_swap_in_scan" : "incomplete",
     lastSwap: null,
     candidates,
-    scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+    scan,
     definitive,
   };
 }

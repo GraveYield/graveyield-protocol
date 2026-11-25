@@ -759,7 +759,14 @@ describe("candidate selection and completeness", () => {
       CAND(swapV2Outer), // older — verified swap (tag 16)
       CAND(failedSwap), // oldest — failed
     ]);
-    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    // `earlyExit: false` (exhaustive scan): this test asserts selection
+    // among ALL candidates, which requires the pre-early-exit full scan.
+    // With the default early exit the loop stops at the newest verified
+    // swap and the truncated `candidates` array holds only examined
+    // records ("not examined", never "not swaps").
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL, {
+      earlyExit: false,
+    });
     assert.equal(result.status, "verified");
     assert.equal(result.lastSwap?.signature, swapV1Inner.signature);
     assert.equal(result.candidates.length, 3);
