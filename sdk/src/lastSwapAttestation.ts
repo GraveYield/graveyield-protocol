@@ -639,11 +639,11 @@ export async function deriveLastSwapEvidenceV4(
       },
       candidates,
       scan: {
-          requestedLimit: scanLimit,
-          signaturesReturned: sigInfos.length,
-          reachedHistoryEnd,
-          ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
-        },
+        requestedLimit: scanLimit,
+        signaturesReturned: sigInfos.length,
+        reachedHistoryEnd,
+        ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
+      },
       definitive: true,
     };
   }
@@ -659,11 +659,11 @@ export async function deriveLastSwapEvidenceV4(
     lastSwap: null,
     candidates,
     scan: {
-          requestedLimit: scanLimit,
-          signaturesReturned: sigInfos.length,
-          reachedHistoryEnd,
-          ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
-        },
+      requestedLimit: scanLimit,
+      signaturesReturned: sigInfos.length,
+      reachedHistoryEnd,
+      ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
+    },
     definitive,
   };
 }

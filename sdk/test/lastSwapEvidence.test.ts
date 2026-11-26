@@ -907,7 +907,10 @@ describe("Option 2 — SDK early exit", () => {
     assert.equal(result.scan.earlyExit, true);
     assert.equal(result.scan.signaturesExamined, 3);
     const fetched = new Set(rpc.txFetches.map((t) => t.signature));
-    assert.ok(!fetched.has(swapV0Alt.signature), "the deposit older than the anchor is never fetched");
+    assert.ok(
+      !fetched.has(swapV0Alt.signature),
+      "the deposit older than the anchor is never fetched",
+    );
   });
 
   test("inactive pool whose last verified swap lies INSIDE the window benefits identically", async () => {
