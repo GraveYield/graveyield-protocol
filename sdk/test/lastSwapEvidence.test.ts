@@ -762,7 +762,15 @@ describe("candidate selection and completeness", () => {
     const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
     assert.equal(result.status, "verified");
     assert.equal(result.lastSwap?.signature, swapV1Inner.signature);
-    assert.equal(result.candidates.length, 3);
+    // Option 2 early exit: the anchor is established at the FIRST (newest)
+    // verified swap with every newer candidate resolved, so the OLDER
+    // candidates are no longer examined or recorded. The DECISION fields
+    // (status, anchor signature, definitiveness) are byte-identical to the
+    // former full-window scan; only the redundant tail work is gone.
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.scan.earlyExit, true);
+    assert.equal(result.scan.signaturesExamined, 1);
+    assert.equal(rpc.txFetches.length, 1);
   });
 
   test("a newer liquidity operation does not hide an older verified swap", async () => {
@@ -845,5 +853,156 @@ describe("pool account binding", () => {
     const bytes = loadPoolAccountBytes();
     assert.ok(bytes);
     assert.equal(new PublicKey(POOL).equals(POOL), true);
+  });
+});
+
+// ─── Option 2 — SDK early exit (newest verified swap) ────────────────────────
+//
+// The signature window is NEWEST-FIRST. When a verified economic swap is
+// finalized and every NEWER candidate has already been resolved, the scan
+// stops: older candidates cannot influence status / lastSwap /
+// definitiveness / reachedHistoryEnd. Parity with the unoptimized
+// full-window scan is pinned three ways: (1) the entire pre-existing
+// suite (decision-field pins over real fixtures) passes unchanged except
+// for the one explicit candidate-truncation pin above; (2) the decision
+// fields below are pinned to exact fixture values; (3) every blocking
+// scenario (unresolved / malformed newer candidate, failed fetch) keeps
+// the full-window behavior. scan.earlyExit / scan.signaturesExamined
+// record the truncation explicitly; the redundant older fetches are
+// observable via LastSwapFakeRpc.txFetches.
+
+describe("Option 2 — SDK early exit", () => {
+  /** A DEPOSIT (non-economic V4 interaction, tag 3) over fixture `fx`. */
+  const depositOf = (fx: ReturnType<typeof loadTxFixture>) =>
+    CAND(fx, { response: withV4InstructionData(fx, v4TagData(3)) });
+
+  test("early exit fires at the newest verified swap; the older deposit is never fetched", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV2Outer), // newest — verified swap (tag 16)
+      depositOf(swapV1Inner), // older — provably non-economic
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.definitive, true);
+    assert.equal(result.lastSwap?.signature, swapV2Outer.signature);
+    assert.equal(result.scan.reachedHistoryEnd, true);
+    assert.equal(result.scan.signaturesReturned, 2);
+    assert.equal(result.scan.earlyExit, true);
+    assert.equal(result.scan.signaturesExamined, 1);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(rpc.txFetches.length, 1, "the older irrelevant candidate is never fetched");
+  });
+
+  test("swap AFTER newer non-economic candidates: anchor unchanged, deposits stay resolved", async () => {
+    const rpc = new LastSwapFakeRpc([
+      depositOf(swapV1Inner), // newer, resolved non-economic
+      depositOf(swapV2InnerV1), // newer, resolved non-economic
+      CAND(swapV2Outer), // the anchor
+      depositOf(swapV0Alt), // OLDER than the anchor — never examined
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.definitive, true);
+    assert.equal(result.lastSwap?.signature, swapV2Outer.signature);
+    assert.equal(result.scan.earlyExit, true);
+    assert.equal(result.scan.signaturesExamined, 3);
+    const fetched = new Set(rpc.txFetches.map((t) => t.signature));
+    assert.ok(
+      !fetched.has(swapV0Alt.signature),
+      "the deposit older than the anchor is never fetched",
+    );
+  });
+
+  test("inactive pool whose last verified swap lies INSIDE the window benefits identically", async () => {
+    const rpc = new LastSwapFakeRpc([
+      depositOf(swapV1Inner),
+      CAND(swapV2Outer),
+      depositOf(swapV2InnerV1),
+      depositOf(swapV0Alt),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.lastSwap?.signature, swapV2Outer.signature);
+    assert.equal(result.scan.earlyExit, true);
+    assert.ok(rpc.txFetches.length < 4, "early exit reduces transaction fetches");
+  });
+
+  test("an UNRESOLVED candidate NEWER than the verified swap blocks the early exit", async () => {
+    const unresolved = CAND(swapV1Inner, { response: null, blockTime: 1_700_000_090 }); // transaction_data_missing
+    const rpc = new LastSwapFakeRpc([
+      unresolved,
+      CAND(swapV2Outer),
+      depositOf(swapV2InnerV1),
+      depositOf(swapV0Alt),
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.definitive, false);
+    assert.equal(result.lastSwap, null, "unresolved newer evidence blocks any definitive anchor");
+    assert.ok(!result.scan.earlyExit, "no early exit while a newer candidate is unresolved");
+    assert.equal(rpc.txFetches.length, 4, "full window examined exactly as the unoptimized scan");
+    const first = result.candidates[0]?.outcome;
+    assert.equal(first?.kind === "unresolved" ? first.reason : "", "transaction_data_missing");
+  });
+
+  test("a transaction-fetch FAILURE on an older candidate does not affect the decision", async () => {
+    const rpc = new LastSwapFakeRpc([
+      depositOf(swapV1Inner),
+      CAND(swapV2Outer),
+      CAND(swapV2InnerV1, { response: null }), // OLDER — fetch fails → unresolved
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.lastSwap?.signature, swapV2Outer.signature);
+    assert.equal(result.scan.earlyExit, true);
+    const fetched = new Set(rpc.txFetches.map((t) => t.signature));
+    assert.ok(!fetched.has(swapV2InnerV1.signature));
+  });
+
+  test("no verified swap in the window: behavior unchanged (no early exit, full scan)", async () => {
+    const rpc = new LastSwapFakeRpc([depositOf(swapV1Inner), depositOf(swapV2Outer)]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.ok(!result.scan.earlyExit);
+    assert.equal(rpc.txFetches.length, 2);
+    assert.equal(result.candidates.length, 2);
+    for (const c of result.candidates) {
+      assert.equal(c.outcome.kind, "not_economic_swap");
+    }
+  });
+
+  test("a MALFORMED newer candidate blocks the early exit (fail-closed parity)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      CAND(swapV1Inner, { response: withOobProgramIdIndex(swapV1Inner) }), // malformed → unresolved
+      CAND(swapV2Outer), // verified, but a newer candidate is unresolved
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "incomplete");
+    assert.ok(!result.scan.earlyExit);
+    assert.equal(result.candidates[0]?.outcome.kind, "unresolved");
+    assert.equal(result.candidates[1]?.outcome.kind, "verified_swap");
+  });
+
+  test("an older verified swap NEVER becomes the anchor when a newer one exists (ordering invariant)", async () => {
+    const rpc = new LastSwapFakeRpc([
+      depositOf(swapV1Inner), // newest — non-economic
+      CAND(swapV2Outer), // newest verified swap — the anchor
+      CAND(swapV2InnerV1), // older verified swap — must not be examined or selected
+    ]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "verified");
+    assert.equal(result.lastSwap?.signature, swapV2Outer.signature);
+    assert.equal(result.scan.earlyExit, true);
+    assert.equal(rpc.txFetches.length, 2, "the older verified swap is never examined");
+    const fetched = new Set(rpc.txFetches.map((t) => t.signature));
+    assert.ok(!fetched.has(swapV2InnerV1.signature));
+  });
+
+  test("a definitive no-swap scan never gains earlyExit (semantics untouched)", async () => {
+    const rpc = new LastSwapFakeRpc([CAND(failedSwap)]);
+    const result = await deriveLastSwapEvidenceV4(rpc.asConnection(), RAYDIUM_V4_PROGRAM_ID, POOL);
+    assert.equal(result.status, "no_swap_in_scan");
+    assert.equal(result.definitive, true);
+    assert.ok(!result.scan.earlyExit);
+    assert.equal(result.lastSwap, null);
   });
 });

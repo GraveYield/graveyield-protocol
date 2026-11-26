@@ -260,6 +260,19 @@ export interface LastSwapEvidenceResult {
     /** True when the RPC returned fewer signatures than requested — the
      *  pool's full available history was covered. */
     reachedHistoryEnd: boolean;
+    /** EARLY EXIT (Option 2): true when the scan stopped after the newest
+     *  verified economic swap was established AND every newer candidate
+     *  had already been resolved. Older candidates beyond that point are
+     *  deliberately NOT fetched and NOT recorded — they cannot influence
+     *  status, lastSwap or definitiveness (the newest-verified selection
+     *  and the newer-candidate blocking rule only look at candidates
+     *  up to and including the verified swap). Absent when the scan ran
+     *  to the full signature window. */
+    earlyExit?: boolean;
+    /** How many candidates were actually examined when early exit fired
+     *  (<= signaturesReturned). The unexamined remainder is older than
+     *  the verified swap and irrelevant to this derivation's outcome. */
+    signaturesExamined?: number;
   };
   /** True when the result is a sound basis for an inactivity claim. */
   definitive: boolean;
@@ -492,6 +505,7 @@ export async function deriveLastSwapEvidenceV4(
 
   const candidates: LastSwapCandidateRecord[] = [];
   const seen = new Set<string>();
+  let earlyExit = false;
   for (const info of sigInfos) {
     if (seen.has(info.signature)) continue; // defensive: dedupe RPC pages
     seen.add(info.signature);
@@ -571,6 +585,26 @@ export async function deriveLastSwapEvidenceV4(
       // it is never converted into a swap or a non-swap.
       finalize({ kind: "unresolved", reason: "malformed_transaction_metadata" });
     }
+
+    // EARLY EXIT (Option 2 — approved pipeline-hardening change): the
+    // signature window is newest-first, so when a verified economic swap
+    // is finalized here, every NEWER candidate has already been resolved
+    // (each became an explicit candidate record above). The derivation's
+    // outcome depends ONLY on the candidates up to and including the
+    // newest verified swap (newest-verified selection + newer-candidate
+    // blocking), so OLDER signatures can be left unexamined without
+    // changing status, lastSwap, definitiveness or reachedHistoryEnd.
+    // GUARD (spec): do NOT stop while a newer candidate remains
+    // unresolved — in that case the result is (or may become)
+    // incomplete, and the full examined window is preserved exactly as
+    // the unoptimized implementation produces it.
+    if (
+      record.outcome.kind === "verified_swap" &&
+      candidates.slice(0, candidates.length - 1).every((c) => c.outcome.kind !== "unresolved")
+    ) {
+      earlyExit = true;
+      break;
+    }
   }
 
   const newestVerifiedIdx = candidates.findIndex((c) => c.outcome.kind === "verified_swap");
@@ -587,7 +621,12 @@ export async function deriveLastSwapEvidenceV4(
         status: "incomplete",
         lastSwap: null,
         candidates,
-        scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+        scan: {
+          requestedLimit: scanLimit,
+          signaturesReturned: sigInfos.length,
+          reachedHistoryEnd,
+          ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
+        },
         definitive: false,
       };
     }
@@ -599,7 +638,12 @@ export async function deriveLastSwapEvidenceV4(
         signature: newestVerified.signature,
       },
       candidates,
-      scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+      scan: {
+        requestedLimit: scanLimit,
+        signaturesReturned: sigInfos.length,
+        reachedHistoryEnd,
+        ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
+      },
       definitive: true,
     };
   }
@@ -614,7 +658,12 @@ export async function deriveLastSwapEvidenceV4(
     status: definitive ? "no_swap_in_scan" : "incomplete",
     lastSwap: null,
     candidates,
-    scan: { requestedLimit: scanLimit, signaturesReturned: sigInfos.length, reachedHistoryEnd },
+    scan: {
+      requestedLimit: scanLimit,
+      signaturesReturned: sigInfos.length,
+      reachedHistoryEnd,
+      ...(earlyExit ? { earlyExit: true, signaturesExamined: candidates.length } : {}),
+    },
     definitive,
   };
 }
