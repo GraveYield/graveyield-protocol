@@ -30,6 +30,9 @@ struct Args {
     lp_mint: Pubkey,
     out: String,
     commitment: CommitmentConfig,
+    /// The `--commitment` name as supplied (log context only; never
+    /// logged alongside or as part of the RPC URL — D1-01).
+    commitment_name: String,
 }
 
 const USAGE: &str = "grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json> --commitment <confirmed|finalized>";
@@ -37,10 +40,35 @@ const USAGE: &str = "grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp
 /// Parse the `--commitment` value. Required (no default), and unsupported
 /// levels (`processed`, unknown names) are rejected — never silently mapped
 /// to a client default. Factored out for deterministic unit tests.
-fn commitment_from_flag(value: Option<&str>) -> Result<CommitmentConfig, String> {
+/// Returns the parsed commitment together with the CLI name as supplied
+/// (used for log context only — never for the RPC URL).
+fn commitment_from_flag(value: Option<&str>) -> Result<(CommitmentConfig, String), String> {
     let name =
         value.ok_or("--commitment is required; usage: --commitment <confirmed|finalized>")?;
-    parse_commitment(name).map_err(|e| e.to_string())
+    let commitment = parse_commitment(name).map_err(|e| e.to_string())?;
+    Ok((commitment, name.to_string()))
+}
+
+/// The startup context line, built EXCLUSIVELY from non-sensitive
+/// operational fields (D1-01): pool address, AMM program id, LP mint,
+/// commitment, and output path.
+///
+/// The RPC URL is deliberately NOT a parameter of this function: the
+/// signature makes it structurally impossible for provider credentials
+/// embedded in the endpoint (host, path, query parameters, API keys) to
+/// reach the log — there is no URL-redaction logic to get wrong, because
+/// no URL ever enters the logging path.
+fn startup_context_line(
+    pool: &Pubkey,
+    amm: &Pubkey,
+    lp_mint: &Pubkey,
+    commitment: &str,
+    out: &str,
+) -> String {
+    format!(
+        "grave-snapshotter-cli: pool={pool} amm={amm} lp_mint={lp_mint} \
+         commitment={commitment} out={out}"
+    )
 }
 
 fn parse_args() -> Args {
@@ -97,7 +125,7 @@ fn parse_args() -> Args {
         );
         std::process::exit(2);
     }
-    let commitment = match commitment_from_flag(commitment.as_deref()) {
+    let (commitment, commitment_name) = match commitment_from_flag(commitment.as_deref()) {
         Ok(c) => c,
         Err(msg) => {
             eprintln!("grave-snapshotter-cli: {msg}");
@@ -111,6 +139,7 @@ fn parse_args() -> Args {
         lp_mint: lp_mint.unwrap(),
         out: out.unwrap(),
         commitment,
+        commitment_name,
     }
 }
 
@@ -120,9 +149,18 @@ fn main() {
     // client is constructed with it and every source read carries it
     // explicitly — there is no implicit client default anywhere in the run.
     let client = RpcClient::new_with_commitment(args.url.clone(), args.commitment);
+    // Startup context (D1-01): non-sensitive operational fields only. The
+    // RPC URL — including any credentials embedded in it — is never logged;
+    // `startup_context_line` cannot even accept one.
     eprintln!(
-        "grave-snapshotter-cli: pool={} amm={} lp_mint={} commitment={} url={}",
-        args.pool, args.amm, args.lp_mint, args.commitment.commitment, args.url
+        "{}",
+        startup_context_line(
+            &args.pool,
+            &args.amm,
+            &args.lp_mint,
+            &args.commitment_name,
+            &args.out
+        )
     );
 
     let request = SnapshotRequest {
@@ -204,12 +242,68 @@ mod tests {
     fn commitment_flag_is_required_and_strict() {
         // Missing flag: rejected, no default.
         assert!(commitment_from_flag(None).is_err());
-        // Supported values parse.
-        assert!(commitment_from_flag(Some("confirmed")).is_ok());
-        assert!(commitment_from_flag(Some("finalized")).is_ok());
+        // Supported values parse (and the CLI name is preserved for log
+        // context).
+        let (_, name) = commitment_from_flag(Some("confirmed")).unwrap();
+        assert_eq!(name, "confirmed");
+        let (_, name) = commitment_from_flag(Some("finalized")).unwrap();
+        assert_eq!(name, "finalized");
         // Speculative or unknown values are rejected, not mapped to a default.
         assert!(commitment_from_flag(Some("processed")).is_err());
         assert!(commitment_from_flag(Some("")).is_err());
         assert!(commitment_from_flag(Some("Confirmed")).is_err());
+    }
+
+    fn key(n: u8) -> Pubkey {
+        Pubkey::new_from_array([n; 32])
+    }
+
+    /// D1-01 regression: the startup context line carries only
+    /// non-sensitive operational fields. It must never contain an RPC URL
+    /// (scheme, host separator, or a `url` field), because
+    /// `startup_context_line` cannot even receive one — provider
+    /// credentials embedded in the endpoint therefore cannot leak into the
+    /// log.
+    #[test]
+    fn startup_context_line_never_contains_the_rpc_url() {
+        let line = startup_context_line(
+            &key(0xAA),
+            &key(0xAB),
+            &key(0x01),
+            "confirmed",
+            "/tmp/artifact.json",
+        );
+        // No URL scheme, authority separator, or `url` field of any kind.
+        assert!(
+            !line.contains("http"),
+            "log line must not contain a URL: {line}"
+        );
+        assert!(
+            !line.contains("://"),
+            "log line must not contain a URL: {line}"
+        );
+        assert!(
+            !line.contains("url"),
+            "log line must not contain a URL field: {line}"
+        );
+        // Useful non-sensitive operational context is retained.
+        for field in ["pool=", "amm=", "lp_mint=", "commitment=", "out="] {
+            assert!(
+                line.contains(field),
+                "missing context field `{field}`: {line}"
+            );
+        }
+        // Even a credential-bearing input can only reach the line through
+        // the declared parameters — the commitment name and output path are
+        // echoed verbatim, but no endpoint ever is.
+        let line = startup_context_line(
+            &key(0xAA),
+            &key(0xAB),
+            &key(0x01),
+            "finalized",
+            "/tmp/artifact.json",
+        );
+        assert!(!line.contains("https"));
+        assert!(line.contains("commitment=finalized"));
     }
 }
