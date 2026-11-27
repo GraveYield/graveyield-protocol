@@ -1248,6 +1248,8 @@ await stage(9, "REAL snapshotter (Rust bin) + SDK snapshot root-equality", async
       LP_MINT.toBase58(),
       "--out",
       outPath,
+      "--commitment",
+      "confirmed",
     ],
     { encoding: "utf8" },
   );

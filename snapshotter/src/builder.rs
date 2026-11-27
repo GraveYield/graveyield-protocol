@@ -5,20 +5,30 @@
 // Pipeline (all steps deterministic; see the crate root for the normative
 // policies):
 //
-//   1. Read the LP mint supply (+ served slot) from the source.
-//   2. Enumerate every SPL token account holding the LP mint.
+//   1. Read the LP mint supply (+ served slot) from the source — this is
+//      the state anchor. A read without a usable context slot (slot 0)
+//      aborts (`MissingStateContext`); no slot is ever fabricated.
+//   2. Enumerate every SPL token account holding the LP mint, pinned to
+//      the anchor slot (`min_context_slot`) — the source must fail rather
+//      than serve state older than the anchor.
 //   3. HARD GATE: Σ enumerated balances == mint supply (`SupplyMismatch`).
 //      A complete SPL enumeration always satisfies this; failing it means
 //      inconsistent source state and an unusable snapshot.
-//   4. Aggregate balances per owner (`BTreeMap` — ascending pubkey bytes).
-//   5. Exclusion pass (ascending owner order): zero-balance owners and
+//   4. Post-enumeration supply re-read, pinned to the same anchor slot.
+//      The supply MUST equal the initial read (`SupplyDrift` otherwise) —
+//      supply drift between the reads means no single chain state was
+//      observed and the snapshot is refused. LIMITATION: equality proves
+//      the TOTAL did not drift; it cannot detect a same-total holder
+//      transfer between the anchor and the enumeration (D-06 P2 boundary).
+//   5. Aggregate balances per owner (`BTreeMap` — ascending pubkey bytes).
+//   6. Exclusion pass (ascending owner order): zero-balance owners and
 //      declared sink owners move to the exclusion ledger.
-//   6. Locked-LP resolution: validate + aggregate TokenLock records,
+//   7. Locked-LP resolution: validate + aggregate TokenLock records,
 //      identify the custody account by exact-balance reconciliation
 //      (fail-closed on ambiguity or absence), remove the custody balance,
 //      attribute the locked amounts to the beneficial `lock_owner`s.
-//   7. Merge attributions into the per-owner map (locked + unlocked).
-//   8. Emit the canonically ordered leaf set + ledgers, and enforce the
+//   8. Merge attributions into the per-owner map (locked + unlocked).
+//   9. Emit the canonically ordered leaf set + ledgers, and enforce the
 //      closing identity
 //      `entries_total + sink_exclusions_total == enumerated_total == supply`.
 
@@ -30,7 +40,7 @@ use crate::error::SnapshotError;
 use crate::locked::LockedLpEvidence;
 use crate::model::{
     CustodyMatchMethod, CustodyResolution, ExcludedBalance, ExclusionReason, HolderEntry,
-    LockedReport, LpSnapshot, MintSupply, Reconciliation, TokenAccountSnapshot,
+    LockedReport, LpSnapshot, Reconciliation, TokenAccountSnapshot,
 };
 use crate::source::LpAccountSource;
 
@@ -78,19 +88,31 @@ impl SnapshotBuilder {
     /// Produce the deterministic snapshot. See the module docs for the
     /// pipeline; every failure mode aborts (`SnapshotError`), nothing is
     /// guessed.
+    ///
+    /// CONSISTENT-STATE PROTOCOL (WD-02 fix): the initial supply read
+    /// anchors the run at its served context slot; the enumeration and the
+    /// post-enumeration supply re-read are both pinned to that slot and
+    /// must be served from a state at least as new. The re-read's supply
+    /// must equal the initial supply. Any failure — missing context slot,
+    /// stale state, supply drift — aborts the snapshot; nothing is
+    /// produced or sealed from inconsistent state.
     pub fn build(
         &self,
         source: &dyn LpAccountSource,
         locks: &dyn LockedLpEvidence,
     ) -> Result<LpSnapshot, SnapshotError> {
-        // ---- 1. Supply at the served slot --------------------------------
-        let MintSupply {
-            amount: supply,
-            slot: snapshot_slot,
-        } = source.lp_mint_supply(&self.request.lp_mint)?;
+        // ---- 1. Initial supply read = the state anchor --------------------
+        let initial = source.initial_supply(&self.request.lp_mint)?;
+        let supply = initial.amount;
+        if initial.slot == 0 {
+            // Context metadata missing/unusable: refuse rather than record
+            // a fabricated slot.
+            return Err(SnapshotError::MissingStateContext);
+        }
+        let anchor_slot = initial.slot;
 
-        // ---- 2. Full enumeration ------------------------------------------
-        let accounts = source.token_accounts(&self.request.lp_mint)?;
+        // ---- 2. Full enumeration, pinned to the anchor --------------------
+        let accounts = source.token_accounts(&self.request.lp_mint, anchor_slot)?;
 
         // ---- 3. Completeness gate: Σ balances == supply --------------------
         let mut enumerated_total: u128 = 0;
@@ -103,6 +125,31 @@ impl SnapshotBuilder {
             return Err(SnapshotError::SupplyMismatch {
                 mint_supply: supply,
                 enumerated_total: to_u64(enumerated_total)?,
+            });
+        }
+
+        // ---- 3b. Post-enumeration supply re-read, pinned to the anchor -----
+        // The re-read must observe the SAME total supply, otherwise the
+        // enumeration spans more than one chain state and nothing may be
+        // sealed. Note honestly what this does and does not prove: supply
+        // equality detects SUPPLY drift, but a same-total holder transfer
+        // between the anchor and the enumeration is invisible to it —
+        // holder-level revalidation is the separate D-06 P2 control.
+        let final_read = source.final_supply(&self.request.lp_mint, anchor_slot)?;
+        if final_read.slot == 0 {
+            return Err(SnapshotError::MissingStateContext);
+        }
+        if final_read.slot < anchor_slot {
+            return Err(SnapshotError::StaleState {
+                anchor_slot,
+                served_slot: final_read.slot,
+            });
+        }
+        if final_read.amount != supply {
+            return Err(SnapshotError::SupplyDrift {
+                anchor_slot,
+                initial_supply: supply,
+                final_supply: final_read.amount,
             });
         }
 
@@ -144,7 +191,11 @@ impl SnapshotBuilder {
         }
 
         // ---- 6. Locked-LP resolution ----------------------------------------
-        let records = locks.token_locks(&self.request.pool_address, &self.request.lp_mint)?;
+        let records = locks.token_locks(
+            &self.request.pool_address,
+            &self.request.lp_mint,
+            anchor_slot,
+        )?;
         // Deterministic aggregation order regardless of source ordering.
         let mut records = records;
         records.sort_by(|a, b| a.address.cmp(&b.address));
@@ -273,7 +324,10 @@ impl SnapshotBuilder {
             pool_address: self.request.pool_address,
             amm_program_id: self.request.amm_program_id,
             lp_mint: self.request.lp_mint,
-            snapshot_slot,
+            // The recorded slot is the anchored initial supply read's
+            // actual RPC context slot — never a post-hoc best-effort
+            // `getSlot()`, never zero, never fabricated.
+            snapshot_slot: anchor_slot,
             lp_total_supply_at_snapshot: supply,
             entries,
             exclusions,
@@ -567,5 +621,323 @@ mod tests {
                 },
             ]
         );
+    }
+}
+
+/// Consistent-state acceptance tests (WD-02 fix). A scripted source with
+/// full control over every read exercises the pinned protocol
+/// deterministically, without a network.
+#[cfg(test)]
+mod consistent_state_tests {
+    use super::*;
+    use crate::locked::InMemoryLocks;
+    use crate::model::{MintSupply, TokenAccountSnapshot};
+
+    fn key(n: u8) -> Pubkey {
+        Pubkey::new_from_array([n; 32])
+    }
+
+    fn acct(address: u8, owner: u8, amount: u64) -> TokenAccountSnapshot {
+        TokenAccountSnapshot {
+            address: key(address),
+            owner: key(owner),
+            amount,
+        }
+    }
+
+    fn request(lp_mint: Pubkey) -> SnapshotRequest {
+        SnapshotRequest {
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint,
+            sink_exclusions: vec![],
+            custody_owner_overrides: vec![],
+        }
+    }
+
+    /// A scripted source: every read is served from a configurable state
+    /// and every `min_context_slot` the builder pins is recorded for
+    /// assertions. Deterministic stand-in for the RPC source.
+    struct ScriptedSource {
+        lp_mint: Pubkey,
+        initial: MintSupply,
+        accounts: Result<Vec<TokenAccountSnapshot>, SnapshotError>,
+        final_read: Result<MintSupply, SnapshotError>,
+        observed_enumeration_pins: std::cell::RefCell<Vec<u64>>,
+        observed_final_pins: std::cell::RefCell<Vec<u64>>,
+    }
+
+    impl ScriptedSource {
+        /// One coherent state: all three reads serve the same slot/supply.
+        fn consistent(
+            lp_mint: Pubkey,
+            slot: u64,
+            supply: u64,
+            accounts: Vec<TokenAccountSnapshot>,
+        ) -> Self {
+            Self {
+                lp_mint,
+                initial: MintSupply {
+                    amount: supply,
+                    slot,
+                },
+                accounts: Ok(accounts),
+                final_read: Ok(MintSupply {
+                    amount: supply,
+                    slot,
+                }),
+                observed_enumeration_pins: std::cell::RefCell::new(Vec::new()),
+                observed_final_pins: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl LpAccountSource for ScriptedSource {
+        fn initial_supply(&self, lp_mint: &Pubkey) -> Result<MintSupply, SnapshotError> {
+            if lp_mint != &self.lp_mint {
+                return Err(SnapshotError::Source("mint mismatch".to_string()));
+            }
+            Ok(self.initial)
+        }
+
+        fn token_accounts(
+            &self,
+            lp_mint: &Pubkey,
+            min_context_slot: u64,
+        ) -> Result<Vec<TokenAccountSnapshot>, SnapshotError> {
+            if lp_mint != &self.lp_mint {
+                return Err(SnapshotError::Source("mint mismatch".to_string()));
+            }
+            self.observed_enumeration_pins
+                .borrow_mut()
+                .push(min_context_slot);
+            self.accounts.clone()
+        }
+
+        fn final_supply(
+            &self,
+            lp_mint: &Pubkey,
+            min_context_slot: u64,
+        ) -> Result<MintSupply, SnapshotError> {
+            if lp_mint != &self.lp_mint {
+                return Err(SnapshotError::Source("mint mismatch".to_string()));
+            }
+            self.observed_final_pins.borrow_mut().push(min_context_slot);
+            self.final_read.clone()
+        }
+    }
+
+    fn no_locks(lp_mint: &Pubkey) -> InMemoryLocks {
+        InMemoryLocks::from_records(&key(0xAA), lp_mint, vec![])
+    }
+
+    /// Acceptance 1+2: the enumeration and the final supply re-read are
+    /// both pinned to the initial supply read's context slot. (The RPC
+    /// wire shapes for commitment + minContextSlot are pinned in rpc.rs.)
+    #[test]
+    fn enumeration_and_final_read_are_pinned_to_the_anchor_slot() {
+        let lp_mint = key(0x01);
+        let source = ScriptedSource::consistent(
+            lp_mint,
+            123,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        let snapshot = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap();
+        assert_eq!(
+            *source.observed_enumeration_pins.borrow(),
+            vec![123],
+            "enumeration must receive the anchor slot as min_context_slot"
+        );
+        assert_eq!(
+            *source.observed_final_pins.borrow(),
+            vec![123],
+            "final supply re-read must receive the same anchor slot"
+        );
+        assert_eq!(snapshot.snapshot_slot, 123);
+    }
+
+    /// Acceptance 3: a holder transfer between the reads that changes the
+    /// total supply is rejected — the re-read no longer matches the anchor.
+    #[test]
+    fn supply_drift_between_reads_is_rejected() {
+        let lp_mint = key(0x02);
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            100,
+            10_000,
+            vec![acct(1, 0x10, 6_000), acct(2, 0x20, 4_000)],
+        );
+        // A mint burned/minted between the reads: supply moved, accounts
+        // still sum to the INITIAL supply.
+        source.final_read = Ok(MintSupply {
+            amount: 10_500,
+            slot: 105,
+        });
+        let err = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SupplyDrift {
+                anchor_slot: 100,
+                initial_supply: 10_000,
+                final_supply: 10_500,
+            }
+        );
+    }
+
+    /// Acceptance 4: a same-total holder transfer between the anchor and
+    /// the enumeration is NOT detected by the supply equality check — and
+    /// the implementation must not claim otherwise. The snapshot proceeds
+    /// with the enumeration's per-holder attribution (which is bounded
+    /// below by the anchor slot) and records the ANCHOR slot. Holder-level
+    /// revalidation is the separate D-06 P2 control, out of scope here.
+    #[test]
+    fn same_total_holder_transfer_is_not_detectable_by_supply_equality() {
+        let lp_mint = key(0x03);
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            100,
+            10_000,
+            // Enumeration served at a state NEWER than the anchor where a
+            // same-total transfer (A -> B) has already moved balances.
+            vec![acct(1, 0x10, 5_000), acct(2, 0x20, 5_000)],
+        );
+        // Same total at a later slot: equality holds, nothing is caught.
+        source.final_read = Ok(MintSupply {
+            amount: 10_000,
+            slot: 110,
+        });
+        let snapshot = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .expect("the builder cannot and must not reject a same-total transfer");
+        // The recorded state anchor is still the initial read's slot.
+        assert_eq!(snapshot.snapshot_slot, 100);
+        assert_eq!(snapshot.lp_total_supply_at_snapshot, 10_000);
+        // Attribution reflects the enumeration as served — the honest
+        // statement of what D1 guarantees (and what it does not).
+        assert_eq!(
+            snapshot.entries,
+            vec![
+                HolderEntry {
+                    owner: key(0x10),
+                    lp_balance: 5_000
+                },
+                HolderEntry {
+                    owner: key(0x20),
+                    lp_balance: 5_000
+                },
+            ]
+        );
+    }
+
+    /// Acceptance 5: a stale or insufficient RPC context is rejected —
+    /// both when the enumeration cannot reach the anchor and when the
+    /// final re-read serves an older slot.
+    #[test]
+    fn stale_contexts_are_rejected() {
+        let lp_mint = key(0x04);
+        // Enumeration that cannot establish the pinned state (the RPC
+        // source surfaces this as an error; the builder must abort).
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            100,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        source.accounts = Err(SnapshotError::StaleState {
+            anchor_slot: 100,
+            served_slot: 90,
+        });
+        let err = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::StaleState { .. }),
+            "a stale enumeration context must abort the snapshot"
+        );
+
+        // Final re-read served from a state OLDER than the anchor.
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            100,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        source.final_read = Ok(MintSupply {
+            amount: 1_000,
+            slot: 90,
+        });
+        let err = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::StaleState {
+                anchor_slot: 100,
+                served_slot: 90,
+            }
+        );
+    }
+
+    /// Acceptance 6: missing context metadata (slot 0) fails closed on
+    /// both the initial and the final read — no slot is fabricated.
+    #[test]
+    fn missing_context_metadata_fails_closed() {
+        let lp_mint = key(0x05);
+        // Initial read without a usable context slot.
+        let source = ScriptedSource::consistent(
+            lp_mint,
+            0,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        let err = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap_err();
+        assert_eq!(err, SnapshotError::MissingStateContext);
+
+        // Final read without a usable context slot.
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            100,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        source.final_read = Ok(MintSupply {
+            amount: 1_000,
+            slot: 0,
+        });
+        let err = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap_err();
+        assert_eq!(err, SnapshotError::MissingStateContext);
+    }
+
+    /// Acceptance 7: snapshot metadata records the ACTUAL anchored context
+    /// slot from the supply read — not a later slot served by the final
+    /// re-read, not a post-hoc `getSlot()`.
+    #[test]
+    fn metadata_records_the_anchored_context_slot() {
+        let lp_mint = key(0x06);
+        let mut source = ScriptedSource::consistent(
+            lp_mint,
+            123,
+            1_000,
+            vec![acct(1, 0x10, 600), acct(2, 0x20, 400)],
+        );
+        // The final re-read observes a LATER slot; the anchor must not move.
+        source.final_read = Ok(MintSupply {
+            amount: 1_000,
+            slot: 200,
+        });
+        let snapshot = SnapshotBuilder::new(request(lp_mint))
+            .build(&source, &no_locks(&lp_mint))
+            .unwrap();
+        assert_eq!(snapshot.snapshot_slot, 123);
+        assert_eq!(snapshot.lp_total_supply_at_snapshot, 1_000);
     }
 }
