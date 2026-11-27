@@ -82,9 +82,13 @@ pub struct SnapshotRequest {
     /// its owner set MUST equal `sink_exclusions` — any disagreement
     /// aborts the snapshot. The ledger — not the raw request field — is
     /// the authoritative source of the exclusions applied to the leaf
-    /// set. An absent ledger is only valid with EMPTY exclusions. A
-    /// parsed ledger is structurally valid; its approval authenticity is
-    /// a D-04-D process control outside this code.
+    /// set. An absent ledger is only valid with EMPTY exclusions. The
+    /// builder re-runs [`SinkLedger::validate`] on every supplied ledger
+    /// — including one constructed directly in memory (the fields are
+    /// public) — so a structurally invalid ledger cannot bypass `parse`
+    /// and reach the pipeline. A validated ledger is structurally valid;
+    /// its approval authenticity is a D-04-D process control outside this
+    /// code.
     pub sink_ledger: Option<SinkLedger>,
 }
 
@@ -196,6 +200,15 @@ impl SnapshotBuilder {
 
         // ---- 4b. Governed sink-ledger reconciliation (D-04-C/D, WD-07) -----
         if let Some(ledger) = &self.request.sink_ledger {
+            // AUTHORITATIVE STRUCTURAL VALIDATION: the ledger fields are
+            // public, so a caller can construct `SinkLedger` directly and
+            // skip `SinkLedger::parse`. The builder re-runs the exact
+            // validation `parse` performs (schema version, ledger
+            // identity, D-04-D entry fields, duplicate/ambiguity
+            // rejection) BEFORE using the ledger — parser and builder
+            // share one authoritative contract, and an invalid in-memory
+            // ledger is rejected here, not partially applied.
+            ledger.validate()?;
             // Pool/AMM/mint identity binding: a ledger for another pool is
             // never applied.
             ledger.validate_identity(
@@ -1241,7 +1254,10 @@ mod governed_input_tests {
     }
 
     /// Acceptance: a valid governed ledger is accepted and its exclusions
-    /// reconcile exactly with the enumerated balances and supply.
+    /// reconcile exactly with the enumerated balances and supply. The
+    /// ledger here is constructed DIRECTLY in memory (never passed
+    /// through `SinkLedger::parse`) — a structurally valid in-memory
+    /// ledger still builds.
     #[test]
     fn valid_governed_ledger_is_accepted_and_reconciles() {
         let lp_mint = key(0x01);
@@ -1276,6 +1292,112 @@ mod governed_input_tests {
                 },
             ]
         );
+    }
+
+    /// DIRECT-CONSTRUCTION BYPASS (correction): `SinkLedger`'s fields are
+    /// public, so a caller can construct the type in memory and skip
+    /// `SinkLedger::parse` entirely. The builder re-runs the same
+    /// authoritative validation BEFORE using the ledger — every shape
+    /// `parse` rejects is rejected here too, deterministically.
+    #[test]
+    fn directly_constructed_invalid_ledgers_are_rejected_at_build() {
+        let lp_mint = key(0x01);
+        // Unsupported schema version (fail-closed on unknown formats).
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.schema_version = 99;
+        assert_eq!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint))
+                .unwrap_err(),
+            SnapshotError::SinkLedgerUnsupportedVersion {
+                found: 99,
+                expected: crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION,
+            }
+        );
+        // Missing ledger identity.
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.ledger_id = "   ".to_string();
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Same owner declared twice (conflicting sink declarations).
+        let dup = ledger(vec![entry(0x20, 0x21, 1_000), entry(0x20, 0x22, 1_000)]);
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(dup), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerDuplicateEntry(_))
+        ));
+        // Same token account under two owners.
+        let dup_acct = ledger(vec![entry(0x20, 0x21, 1_000), entry(0x30, 0x21, 1_000)]);
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(dup_acct), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerDuplicateEntry(_))
+        ));
+        // Zero-balance sink declaration.
+        let zero = ledger(vec![entry(0x20, 0x21, 0)]);
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(zero), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Empty rationale (D-04-D).
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.entries[0].rationale = "  ".to_string();
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Missing evidence references (D-04-D).
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.entries[0].evidence_references = vec![];
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Missing approval identities (D-04-D).
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.entries[0].approval_identities = vec![];
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Token account equal to the owner (not a distinct account).
+        let self_account = ledger(vec![entry(0x20, 0x20, 1_000)]);
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(self_account), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        // Entry mint disagreeing with the ledger's mint.
+        let mut bad = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        bad.entries[0].lp_mint = key(0x02);
+        assert!(matches!(
+            SnapshotBuilder::new(request(lp_mint, Some(bad), vec![key(0x20)]))
+                .build(&source(), &locks_for(&lp_mint)),
+            Err(SnapshotError::SinkLedgerIdentityMismatch(_))
+        ));
+    }
+
+    /// DIRECT CONSTRUCTION, positive case: a structurally VALID in-memory
+    /// ledger (never passed through `parse`) still builds — the shared
+    /// validation accepts well-formed ledgers from either entry path.
+    #[test]
+    fn directly_constructed_valid_ledger_still_builds() {
+        let lp_mint = key(0x01);
+        let ledger = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        ledger
+            .validate()
+            .expect("the in-memory ledger satisfies the authoritative validation");
+        let snapshot = SnapshotBuilder::new(request(lp_mint, Some(ledger), vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .expect("a valid directly constructed ledger builds");
+        assert_eq!(snapshot.reconciliation.sink_exclusions_total, 1_000);
     }
 
     /// A governed ledger scoped to another pool / AMM / mint is rejected.

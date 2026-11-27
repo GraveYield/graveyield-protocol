@@ -118,27 +118,49 @@ impl SinkLedger {
     /// input bytes. Malformed, unsupported, ambiguous, or self-mismatched
     /// ledgers are rejected — never partially accepted, never silently
     /// reduced to an empty ledger.
+    ///
+    /// Parsing runs [`Self::validate`] — the same authoritative
+    /// validation [`crate::builder::SnapshotBuilder::build`] re-runs on
+    /// every supplied ledger, so there is exactly one structural
+    /// contract whether the ledger arrived as bytes or was constructed
+    /// in memory.
     pub fn parse(input: &[u8]) -> Result<Self, SnapshotError> {
         let ledger: SinkLedger = serde_json::from_slice(input)
             .map_err(|e| SnapshotError::SinkLedgerInvalid(format!("malformed sink ledger: {e}")))?;
-        if ledger.schema_version != SINK_LEDGER_SCHEMA_VERSION {
+        ledger.validate()?;
+        Ok(ledger)
+    }
+
+    /// The AUTHORITATIVE structural validation of a governed sink
+    /// ledger: schema version, ledger identity, per-entry D-04-D fields,
+    /// and duplicate/ambiguity rejection. Malformed, unsupported, or
+    /// self-mismatched ledgers are rejected — never partially accepted.
+    ///
+    /// `SinkLedger`'s fields are public, so a caller CAN construct the
+    /// type directly and skip [`Self::parse`]. [`crate::builder::
+    /// SnapshotBuilder::build`] therefore re-runs this validation on
+    /// every supplied ledger BEFORE using it — parser and builder share
+    /// one validation contract, and an invalid in-memory ledger cannot
+    /// reach the snapshot pipeline.
+    pub fn validate(&self) -> Result<(), SnapshotError> {
+        if self.schema_version != SINK_LEDGER_SCHEMA_VERSION {
             return Err(SnapshotError::SinkLedgerUnsupportedVersion {
-                found: ledger.schema_version,
+                found: self.schema_version,
                 expected: SINK_LEDGER_SCHEMA_VERSION,
             });
         }
-        if ledger.ledger_id.trim().is_empty() {
+        if self.ledger_id.trim().is_empty() {
             return Err(SnapshotError::SinkLedgerInvalid(
                 "ledger_id is required (the published per-pool ledger identity)".to_string(),
             ));
         }
         let mut owners = std::collections::BTreeSet::new();
         let mut token_accounts = std::collections::BTreeSet::new();
-        for entry in &ledger.entries {
-            if entry.lp_mint != ledger.lp_mint {
+        for entry in &self.entries {
+            if entry.lp_mint != self.lp_mint {
                 return Err(SnapshotError::SinkLedgerIdentityMismatch(format!(
                     "entry owner {}: declared lp_mint {} does not match the ledger's lp_mint {}",
-                    entry.owner, entry.lp_mint, ledger.lp_mint
+                    entry.owner, entry.lp_mint, self.lp_mint
                 )));
             }
             if entry.raw_balance == 0 {
@@ -209,7 +231,7 @@ impl SinkLedger {
                 )));
             }
         }
-        Ok(ledger)
+        Ok(())
     }
 
     /// SHA-256 (lowercase hex) of the exact ledger input bytes — sealed
@@ -311,6 +333,29 @@ mod tests {
         assert_eq!(ledger.entries.len(), 1);
         assert_eq!(ledger.entries[0].owner, key(0x20));
         assert_eq!(ledger.entries[0].raw_balance, 1_000);
+    }
+
+    /// `validate` is the authoritative structural check shared with the
+    /// builder: it accepts a parsed (valid) ledger as-is and rejects the
+    /// same in-memory mutation `parse` would reject.
+    #[test]
+    fn validate_accepts_the_parsed_ledger_and_rejects_invalid_mutations() {
+        let mut ledger = SinkLedger::parse(&valid_ledger()).unwrap();
+        ledger.validate().expect("the parsed ledger is valid");
+        ledger.entries[0].raw_balance = 0;
+        assert!(matches!(
+            ledger.validate(),
+            Err(SnapshotError::SinkLedgerInvalid(_))
+        ));
+        ledger.entries[0].raw_balance = 1_000;
+        ledger.schema_version = 2;
+        assert_eq!(
+            ledger.validate().unwrap_err(),
+            SnapshotError::SinkLedgerUnsupportedVersion {
+                found: 2,
+                expected: 1
+            }
+        );
     }
 
     #[test]
