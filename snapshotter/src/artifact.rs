@@ -24,11 +24,16 @@
 //     input digest and the lock-evidence source/context, sealing WHICH
 //     governed inputs produced the artifact.
 //
-// Version handling is explicit: `verify_integrity` refuses any other
-// format_version (a v1 artifact fails with an explicit mismatch, it is
-// never silently reinterpreted under v2 semantics). The root, leaves,
-// proofs, and reconciliation identity are byte-identical to v1 for the
-// same snapshot — only additive fields changed.
+// Version handling is explicit: the CURRENT format_version is the only
+// one that verifies. A genuine v1 document (which carries none of the v2
+// fields) is refused at deserialization — the v2 struct requires
+// `exclusions` and `locked`, so a legacy artifact can never reach
+// `verify_integrity` at all. A document that DOES carry the v2 fields but
+// labels itself v1 (or any other version) reaches `verify_integrity` and
+// fails the explicit format_version gate — it is never silently
+// reinterpreted under v2 semantics. The root, leaves, proofs, and
+// reconciliation identity are byte-identical to v1 for the same snapshot
+// — only additive fields changed.
 //
 // DETERMINISTIC SERIALIZATION (roadmap 5.2: "persist snapshot metadata" +
 // "verify root determinism")
@@ -59,6 +64,7 @@
 
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
 
 use crate::error::SnapshotError;
 use crate::model::{CustodyMatchMethod, ExclusionReason, HolderEntry, LpSnapshot, Reconciliation};
@@ -189,6 +195,98 @@ pub struct ArtifactProvenance {
     pub sink_ledger: Option<SinkLedgerProvenance>,
     /// The locked-LP evidence source and context.
     pub lock_evidence: LockEvidenceProvenance,
+}
+
+/// The only supported lock-evidence source: real RPC evidence via the
+/// wired UNCX adapter (`RpcLockedLpEvidence`). Any other value — file,
+/// in-memory, or a future name — is refused; there is no second
+/// interpretation of lock evidence in this implementation.
+pub const LOCK_EVIDENCE_SOURCE_RPC: &str = "rpc";
+
+/// Structural + supported-value validation of the lock-evidence
+/// provenance (D2-03). Checked at SEAL time (so a misdescribing
+/// provenance can never be sealed) and again at VERIFY time (so a
+/// tampered or malformed artifact is refused). Fails closed on: an
+/// unsupported source, a program identity this implementation does not
+/// support, an unsupported commitment level, or a zero anchor slot.
+fn validate_lock_evidence_provenance_values(
+    lock: &LockEvidenceProvenance,
+) -> Result<(), SnapshotError> {
+    if lock.source != LOCK_EVIDENCE_SOURCE_RPC {
+        return Err(SnapshotError::ArtifactMismatch(format!(
+            "unsupported lock_evidence.source `{}` (supported: `{}`)",
+            lock.source, LOCK_EVIDENCE_SOURCE_RPC
+        )));
+    }
+    let program = Pubkey::from_str(&lock.program_id).map_err(|e| {
+        SnapshotError::ArtifactMismatch(format!(
+            "lock_evidence.program_id `{}` is not a valid base58 pubkey: {e}",
+            lock.program_id
+        ))
+    })?;
+    if program != crate::locked::uncx::PROGRAM_ID {
+        return Err(SnapshotError::ArtifactMismatch(format!(
+            "unsupported lock_evidence.program_id {program} (this implementation \
+             supports exactly the UNCX locker program {})",
+            crate::locked::uncx::PROGRAM_ID
+        )));
+    }
+    // Commitment: only the levels explicitly supported for claims-grade
+    // snapshot construction. Single source of truth: `rpc::
+    // parse_commitment` (the same gate the CLI's --commitment flag uses).
+    if crate::rpc::parse_commitment(&lock.commitment).is_err() {
+        return Err(SnapshotError::ArtifactMismatch(format!(
+            "unsupported lock_evidence.commitment `{}` (supported for claims-grade \
+             construction: confirmed, finalized)",
+            lock.commitment
+        )));
+    }
+    if lock.anchor_slot == 0 {
+        return Err(SnapshotError::ArtifactMismatch(
+            "lock_evidence.anchor_slot is 0 — a snapshot is never anchored to a \
+             fabricated or missing state slot"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Structural validation of the sink-ledger provenance (D2-03): the
+/// supported schema version, a non-empty ledger identity, and a
+/// well-formed lowercase SHA-256 hex input digest. Note the trust
+/// boundary: this validates the provenance STRUCTURE — a syntactically
+/// valid field is NOT proof that the ledger was owner-approved or that
+/// its bytes were authenticated (D-04-D process control).
+fn validate_sink_ledger_provenance_values(
+    ledger: &SinkLedgerProvenance,
+) -> Result<(), SnapshotError> {
+    if ledger.schema_version != crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION {
+        return Err(SnapshotError::ArtifactMismatch(format!(
+            "unsupported sink_ledger provenance schema_version {} (expected {})",
+            ledger.schema_version,
+            crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION
+        )));
+    }
+    if ledger.ledger_id.trim().is_empty() {
+        return Err(SnapshotError::ArtifactMismatch(
+            "sink_ledger.ledger_id is empty — the governed ledger identity is required".to_string(),
+        ));
+    }
+    // Input digest: exactly a lowercase 64-hex-character SHA-256
+    // representation (the CLI seals `SinkLedger::input_digest_hex`).
+    let digest = ledger.input_sha256.as_bytes();
+    if digest.len() != 64
+        || !digest
+            .iter()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(SnapshotError::ArtifactMismatch(format!(
+            "sink_ledger.input_sha256 `{}` is not a lowercase 64-character \
+             SHA-256 hex digest",
+            ledger.input_sha256
+        )));
+    }
+    Ok(())
 }
 
 /// The sealed, publishable snapshot artifact. Deterministic end to end:
@@ -329,12 +427,40 @@ impl SnapshotArtifact {
     /// sealing — a provenance block that disagrees with the snapshot's
     /// locked report, anchored slot, or sink totals is refused
     /// (`ArtifactMismatch`), so the sealed provenance cannot misdescribe
-    /// the artifact it rides on.
+    /// the artifact it rides on. Structural validation (D2-03) also runs
+    /// at seal time: unsupported sources, program identities, commitment
+    /// levels, ledger versions, or malformed digests are refused, and an
+    /// explicitly-sunk snapshot may never be sealed without the
+    /// sink-ledger provenance naming the governed ledger that produced
+    /// the exclusions.
     pub fn seal_with_provenance(
         snapshot: &LpSnapshot,
         tree: &SnapshotMerkleTree,
         provenance: ArtifactProvenance,
     ) -> Result<Self, SnapshotError> {
+        // Structural + supported-value validation FIRST (D2-03): no
+        // unsupported provenance value is ever accepted, even if the
+        // cross-checks below would agree with it.
+        validate_lock_evidence_provenance_values(&provenance.lock_evidence)?;
+        if let Some(ledger) = &provenance.sink_ledger {
+            validate_sink_ledger_provenance_values(ledger)?;
+        }
+        // Governed-exclusion invariant (D2-02 at seal time): a snapshot
+        // with explicit sink exclusions must name the governed ledger
+        // that produced them — sealing with the sink-ledger provenance
+        // absent would publish exclusions with no governed origin.
+        if provenance.sink_ledger.is_none()
+            && snapshot
+                .exclusions
+                .iter()
+                .any(|e| e.reason == ExclusionReason::ExplicitSink)
+        {
+            return Err(SnapshotError::ArtifactMismatch(
+                "snapshot contains explicit sink exclusions but the provenance carries \
+                 no governed sink ledger; exclusions require sink-ledger provenance"
+                    .to_string(),
+            ));
+        }
         // Cross-check the lock-evidence provenance against the snapshot.
         if provenance.lock_evidence.total_locked != snapshot.locked.total_locked {
             return Err(SnapshotError::ArtifactMismatch(format!(
@@ -587,13 +713,53 @@ impl SnapshotArtifact {
         Ok(())
     }
 
-    /// Provenance cross-checks: the sealed provenance must agree with the
-    /// artifact's own locked report and sink totals.
+    /// Provenance validation (D2-03). Structural and supported-value
+    /// checks (source, program identity, commitment, anchor slot; ledger
+    /// schema version, identity, input digest) plus the cross-field
+    /// agreement between the sealed provenance and the artifact's own
+    /// locked report, sink totals, and exclusion ledger.
+    ///
+    /// TRUST BOUNDARY: this validates artifact STRUCTURE, supported
+    /// values, and internal consistency. It does NOT establish that an
+    /// RPC response was authentic, that an external locker statement was
+    /// truthful, or that an owner approved the sink ledger — those are
+    /// outside this verification's guarantees.
     fn verify_provenance(&self) -> Result<(), SnapshotError> {
+        // How many explicit sink exclusions does this artifact carry?
+        let explicit_sinks = self
+            .exclusions
+            .iter()
+            .filter(|e| e.reason == "explicit_sink")
+            .count();
         let provenance = match &self.provenance {
             Some(p) => p,
-            None => return Ok(()),
+            None => {
+                // Governed-exclusion invariant (D2-02 at verify time): a
+                // provenance-less (non-production compatibility) artifact
+                // cannot verify once it carries explicit sink exclusions —
+                // there is no governed ledger to attribute them to.
+                if explicit_sinks > 0 {
+                    return Err(SnapshotError::ArtifactMismatch(
+                        "artifact contains explicit sink exclusions but carries no \
+                         provenance; exclusions require governed sink-ledger provenance"
+                            .to_string(),
+                    ));
+                }
+                return Ok(());
+            }
         };
+        // Supported-value validation, deterministically fail-closed.
+        validate_lock_evidence_provenance_values(&provenance.lock_evidence)?;
+        if let Some(ledger) = &provenance.sink_ledger {
+            validate_sink_ledger_provenance_values(ledger)?;
+        } else if explicit_sinks > 0 {
+            return Err(SnapshotError::ArtifactMismatch(
+                "artifact contains explicit sink exclusions but the provenance carries \
+                 no governed sink ledger; exclusions require sink-ledger provenance"
+                    .to_string(),
+            ));
+        }
+        // Cross-field consistency with the artifact's own contents.
         if provenance.lock_evidence.total_locked != self.locked.total_locked {
             return Err(SnapshotError::ArtifactMismatch(
                 "provenance lock_evidence.total_locked != locked.total_locked".to_string(),
@@ -762,7 +928,7 @@ mod tests {
     use crate::artifact::SinkLedgerProvenance;
     use crate::locked::{InMemoryLocks, TokenLockRecord};
     use crate::model::TokenAccountSnapshot;
-    use crate::sink_ledger::SinkLedger;
+    use crate::sink_ledger::{SinkLedger, SinkLedgerEntry};
     use crate::source::InMemorySource;
     use crate::{SnapshotBuilder, SnapshotRequest};
 
@@ -787,10 +953,35 @@ mod tests {
         }
     }
 
-    /// A small but production-shaped snapshot: 3 claimants, one sink, one
-    /// custody account, one lock. Supply 8_000 = 4_000 + 2_500 + 500(sink)
-    /// + 1_000(custody, locked for 0x60).
-    fn sealed_artifact() -> (LpSnapshot, SnapshotArtifact) {
+    /// The governed sink ledger binding the standard test pool's sink
+    /// (owner 0x50, token account key(0x03), 500 LP). Exclusions are
+    /// governed (D2-02): the ledger — not a direct declaration — is the
+    /// authoritative source of the sink set.
+    fn governed_sink_ledger() -> SinkLedger {
+        SinkLedger {
+            schema_version: crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION,
+            ledger_id: "GY-SINK-TEST-001".to_string(),
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint: key(0x01),
+            entries: vec![SinkLedgerEntry {
+                owner: key(0x50),
+                token_account: key(0x03),
+                lp_mint: key(0x01),
+                raw_balance: 500,
+                rationale: "incinerator address, funds provably unrecoverable".to_string(),
+                evidence_references: vec!["gy-evidence-001".to_string()],
+                approval_identities: vec!["owner-identity-1".to_string()],
+                independent_reviewer: "reviewer-identity-1".to_string(),
+                approved_at: "2026-11-27T00:00:00Z".to_string(),
+            }],
+        }
+    }
+
+    /// The standard pool shape: 4 holders, one governed sink, one custody
+    /// account, one lock. Supply 8_000 = 4_000 + 2_500 + 500(sink) +
+    /// 1_000(custody, locked for 0x60).
+    fn standard_snapshot() -> LpSnapshot {
         let lp_mint = key(0x01);
         let source = InMemorySource::new(
             lp_mint,
@@ -799,7 +990,7 @@ mod tests {
             vec![
                 acct(1, 0x10, 4_000),
                 acct(2, 0x20, 2_500),
-                acct(3, 0x50, 500),   // sink
+                acct(3, 0x50, 500),   // governed sink
                 acct(4, 0x40, 1_000), // custody
             ],
         );
@@ -811,14 +1002,34 @@ mod tests {
             lp_mint,
             sink_exclusions: vec![key(0x50)],
             custody_owner_overrides: vec![],
-            sink_ledger: None,
+            sink_ledger: Some(governed_sink_ledger()),
         };
-        let snapshot = SnapshotBuilder::new(request)
+        SnapshotBuilder::new(request)
             .build(&source, &locks)
-            .unwrap();
-        let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-        let artifact = SnapshotArtifact::seal(&snapshot, &tree).unwrap();
-        (snapshot, artifact)
+            .unwrap()
+    }
+
+    fn standard_tree() -> SnapshotMerkleTree {
+        SnapshotMerkleTree::from_snapshot(&standard_snapshot()).unwrap()
+    }
+
+    /// The standard pool sealed WITHOUT provenance — the isolated
+    /// non-production compatibility path (`seal`). An artifact in this
+    /// shape carrying explicit sink exclusions cannot pass
+    /// `verify_integrity` (D2-02 at verify time).
+    fn sealed_artifact() -> SnapshotArtifact {
+        SnapshotArtifact::seal(&standard_snapshot(), &standard_tree()).unwrap()
+    }
+
+    /// The standard pool sealed WITH governed-input provenance — the CLI
+    /// production path.
+    fn sealed_provenance_artifact() -> SnapshotArtifact {
+        SnapshotArtifact::seal_with_provenance(
+            &standard_snapshot(),
+            &standard_tree(),
+            sample_provenance(),
+        )
+        .unwrap()
     }
 
     fn sample_provenance() -> ArtifactProvenance {
@@ -843,8 +1054,8 @@ mod tests {
 
     #[test]
     fn seal_is_byte_deterministic_across_rebuilds() {
-        let (_, a) = sealed_artifact();
-        let (_, b) = sealed_artifact();
+        let a = sealed_artifact();
+        let b = sealed_artifact();
         let json_a = a.to_json_pretty().unwrap();
         let json_b = b.to_json_pretty().unwrap();
         assert_eq!(json_a, json_b, "the same snapshot must seal byte-for-byte");
@@ -858,39 +1069,8 @@ mod tests {
 
     #[test]
     fn sealed_artifact_with_provenance_is_deterministic_and_round_trips() {
-        let (snapshot, tree) = {
-            let lp_mint = key(0x01);
-            let source = InMemorySource::new(
-                lp_mint,
-                123,
-                8_000,
-                vec![
-                    acct(1, 0x10, 4_000),
-                    acct(2, 0x20, 2_500),
-                    acct(3, 0x50, 500),   // sink
-                    acct(4, 0x40, 1_000), // custody
-                ],
-            );
-            let locks =
-                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
-            let request = SnapshotRequest {
-                pool_address: key(0xAA),
-                amm_program_id: key(0xAB),
-                lp_mint,
-                sink_exclusions: vec![key(0x50)],
-                custody_owner_overrides: vec![],
-                sink_ledger: None,
-            };
-            let snapshot = SnapshotBuilder::new(request)
-                .build(&source, &locks)
-                .unwrap();
-            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-            (snapshot, tree)
-        };
-        let a =
-            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
-        let b =
-            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let a = sealed_provenance_artifact();
+        let b = sealed_provenance_artifact();
         assert_eq!(a.to_json_pretty().unwrap(), b.to_json_pretty().unwrap());
         let loaded = SnapshotArtifact::from_json(&a.to_json_pretty().unwrap()).unwrap();
         assert_eq!(loaded, a);
@@ -899,47 +1079,54 @@ mod tests {
             .expect("provenance artifact is sound");
     }
 
+    /// The CLI production path: a provenance-sealed artifact passes the
+    /// full integrity check (valid artifacts still verify, D2-03).
     #[test]
-    fn sealed_artifact_passes_verify_integrity() {
-        let (_, artifact) = sealed_artifact();
-        artifact
+    fn provenance_sealed_artifact_passes_verify_integrity() {
+        sealed_provenance_artifact()
             .verify_integrity()
-            .expect("a sealed artifact is sound");
+            .expect("a provenance-sealed artifact is sound");
+    }
+
+    /// D2-02 at the artifact layer: the provenance-less compatibility
+    /// path (`seal`) is explicitly isolated — an artifact carrying
+    /// explicit sink exclusions WITHOUT governed sink-ledger provenance
+    /// cannot pass `verify_integrity`, so no compatibility artifact is
+    /// ever acceptable as a claims-grade snapshot with exclusions.
+    #[test]
+    fn seal_without_provenance_cannot_verify_an_artifact_with_explicit_sinks() {
+        let artifact = sealed_artifact();
+        // Sanity: the standard pool does carry a governed sink exclusion.
+        assert_eq!(artifact.exclusions.len(), 1);
+        assert_eq!(artifact.exclusions[0].reason, "explicit_sink");
+        assert!(artifact.provenance.is_none());
+        let err = artifact.verify_integrity().unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("no provenance")),
+            "the error must name the missing governed provenance: {err}"
+        );
+    }
+
+    /// D2-02 at the artifact layer, symmetric case: provenance present,
+    /// but the sink-ledger section stripped while explicit exclusions
+    /// remain — verification fails closed.
+    #[test]
+    fn provenance_without_the_sink_ledger_section_cannot_verify_explicit_sinks() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["sink_ledger"] = serde_json::Value::Null;
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
     }
 
     #[test]
     fn provenance_records_ledger_and_lock_evidence_context() {
-        let (snapshot, tree) = {
-            let lp_mint = key(0x01);
-            let source = InMemorySource::new(
-                lp_mint,
-                123,
-                8_000,
-                vec![
-                    acct(1, 0x10, 4_000),
-                    acct(2, 0x20, 2_500),
-                    acct(3, 0x50, 500),   // sink
-                    acct(4, 0x40, 1_000), // custody
-                ],
-            );
-            let locks =
-                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
-            let request = SnapshotRequest {
-                pool_address: key(0xAA),
-                amm_program_id: key(0xAB),
-                lp_mint,
-                sink_exclusions: vec![key(0x50)],
-                custody_owner_overrides: vec![],
-                sink_ledger: None,
-            };
-            let snapshot = SnapshotBuilder::new(request)
-                .build(&source, &locks)
-                .unwrap();
-            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-            (snapshot, tree)
-        };
-        let artifact =
-            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let artifact = sealed_provenance_artifact();
         let ledger = artifact
             .provenance
             .as_ref()
@@ -971,35 +1158,7 @@ mod tests {
 
     #[test]
     fn seal_rejects_provenance_that_disagrees_with_the_snapshot() {
-        let (snapshot, tree) = {
-            let lp_mint = key(0x01);
-            let source = InMemorySource::new(
-                lp_mint,
-                123,
-                8_000,
-                vec![
-                    acct(1, 0x10, 4_000),
-                    acct(2, 0x20, 2_500),
-                    acct(3, 0x50, 500),   // sink
-                    acct(4, 0x40, 1_000), // custody
-                ],
-            );
-            let locks =
-                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
-            let request = SnapshotRequest {
-                pool_address: key(0xAA),
-                amm_program_id: key(0xAB),
-                lp_mint,
-                sink_exclusions: vec![key(0x50)],
-                custody_owner_overrides: vec![],
-                sink_ledger: None,
-            };
-            let snapshot = SnapshotBuilder::new(request)
-                .build(&source, &locks)
-                .unwrap();
-            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-            (snapshot, tree)
-        };
+        let (snapshot, tree) = (standard_snapshot(), standard_tree());
         // Wrong locked total in the provenance.
         let mut bad = sample_provenance();
         bad.lock_evidence.total_locked = 999;
@@ -1025,37 +1184,7 @@ mod tests {
 
     #[test]
     fn verify_integrity_rejects_provenance_drift_on_a_loaded_artifact() {
-        let (snapshot, tree) = {
-            let lp_mint = key(0x01);
-            let source = InMemorySource::new(
-                lp_mint,
-                123,
-                8_000,
-                vec![
-                    acct(1, 0x10, 4_000),
-                    acct(2, 0x20, 2_500),
-                    acct(3, 0x50, 500),   // sink
-                    acct(4, 0x40, 1_000), // custody
-                ],
-            );
-            let locks =
-                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
-            let request = SnapshotRequest {
-                pool_address: key(0xAA),
-                amm_program_id: key(0xAB),
-                lp_mint,
-                sink_exclusions: vec![key(0x50)],
-                custody_owner_overrides: vec![],
-                sink_ledger: None,
-            };
-            let snapshot = SnapshotBuilder::new(request)
-                .build(&source, &locks)
-                .unwrap();
-            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-            (snapshot, tree)
-        };
-        let artifact =
-            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let artifact = sealed_provenance_artifact();
         let mut value: serde_json::Value =
             serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
         value["provenance"]["lock_evidence"]["total_locked"] = serde_json::Value::from(42);
@@ -1067,17 +1196,52 @@ mod tests {
         ));
     }
 
+    /// D2-04: a GENUINE v1 artifact — the v2-only fields (`exclusions`,
+    /// `locked`, `provenance`) actually stripped, not merely relabeled —
+    /// is refused at DESERIALIZATION: the v2 struct requires `exclusions`
+    /// and `locked` (non-Option), so a legacy document can never reach
+    /// `verify_integrity`'s version gate at all. The asserted failure
+    /// stage is therefore the JSON parser (`Serialization`), NOT an
+    /// explicit format_version mismatch — see
+    /// `a_v1_labeled_v2_document_fails_the_explicit_version_gate` for the
+    /// case that does reach the version gate.
     #[test]
-    fn verify_integrity_rejects_a_v1_artifact_explicitly() {
-        // A v1 artifact (the previous format) must fail with an explicit
-        // version mismatch — never silently reinterpreted under v2.
-        let (_, artifact) = sealed_artifact();
+    fn a_genuine_v1_artifact_is_rejected_at_deserialization() {
+        let artifact = sealed_provenance_artifact();
         let mut value: serde_json::Value =
             serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
-        // Strip the v2-only fields to reconstruct a v1-shaped document.
+        // REALLY strip the v2-only fields: a v1 document has none of them.
+        let obj = value.as_object_mut().unwrap();
+        obj.remove("exclusions");
+        obj.remove("locked");
+        obj.remove("provenance");
+        obj["format_version"] = serde_json::Value::from(1);
+        let v1_document = serde_json::to_string_pretty(&value).unwrap();
+        // Sanity: the document really is v1-shaped (no v2 fields remain).
+        assert!(value.get("exclusions").is_none());
+        assert!(value.get("locked").is_none());
+        assert!(value.get("provenance").is_none());
+        assert_eq!(value["format_version"], 1);
+        // The parser rejects it before version validation runs.
+        let err = SnapshotArtifact::from_json(&v1_document).unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::Serialization(ref m) if m.contains("missing field")),
+            "a genuine v1 artifact fails deserialization on the required v2 fields: {err}"
+        );
+    }
+
+    /// D2-04, the other half of version handling: a document that DOES
+    /// carry every v2 field but labels itself format_version 1 parses
+    /// fine and then fails `verify_integrity`'s EXPLICIT version gate —
+    /// never silently reinterpreted under v2 semantics. Version handling
+    /// stays fail-closed at both stages.
+    #[test]
+    fn a_v1_labeled_v2_document_fails_the_explicit_version_gate() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
         value["format_version"] = serde_json::Value::from(1);
-        let v1_shaped = serde_json::to_string_pretty(&value).unwrap();
-        let loaded = SnapshotArtifact::from_json(&v1_shaped).unwrap();
+        let loaded = SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
         let err = loaded.verify_integrity().unwrap_err();
         assert!(
             matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("format_version 1")),
@@ -1085,9 +1249,216 @@ mod tests {
         );
     }
 
+    /// D2-04: a v2 artifact whose version-specific provenance section is
+    /// MISSING (the field is optional, defaulting to None) is refused by
+    /// `verify_integrity` the moment explicit sink exclusions are present
+    /// — the governed provenance is required to attribute them. The
+    /// MALFORMED provenance cases (unsupported source/program/commitment,
+    /// bad ledger version, malformed digest) are covered by the
+    /// provenance-tampering tests below.
+    #[test]
+    fn a_v2_artifact_with_a_missing_provenance_section_cannot_verify_explicit_sinks() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("provenance");
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        let err = tampered.verify_integrity().unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("no provenance")),
+            "the error must name the missing governed provenance: {err}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // D2-03 provenance tampering: every provenance field category is
+    // checked for supported values and internal consistency. Changing a
+    // provenance field to an unsupported or inconsistent value must make
+    // `verify_integrity` fail, deterministically.
+    // -----------------------------------------------------------------
+
+    /// Locker evidence SOURCE: only `"rpc"` is supported.
+    #[test]
+    fn provenance_tampering_rejects_an_unsupported_lock_evidence_source() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["lock_evidence"]["source"] = serde_json::Value::from("memory");
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        let err = tampered.verify_integrity().unwrap_err();
+        assert!(matches!(
+            err,
+            SnapshotError::ArtifactMismatch(ref m) if m.contains("lock_evidence.source")
+        ));
+    }
+
+    /// Locker PROGRAM IDENTITY: only the UNCX locker program this
+    /// implementation actually recognizes is supported.
+    #[test]
+    fn provenance_tampering_rejects_an_unsupported_locker_program_id() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        // A syntactically valid but unsupported program id.
+        value["provenance"]["lock_evidence"]["program_id"] =
+            serde_json::Value::from(key(0xEE).to_string());
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        let err = tampered.verify_integrity().unwrap_err();
+        assert!(matches!(
+            err,
+            SnapshotError::ArtifactMismatch(ref m) if m.contains("lock_evidence.program_id")
+        ));
+    }
+
+    /// Locker PROGRAM IDENTITY, malformed variant: a non-base58 string is
+    /// rejected as well.
+    #[test]
+    fn provenance_tampering_rejects_a_malformed_locker_program_id() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["lock_evidence"]["program_id"] =
+            serde_json::Value::from("not-a-base58-pubkey!");
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
+    /// COMMITMENT: only the levels explicitly supported for claims-grade
+    /// construction are accepted.
+    #[test]
+    fn provenance_tampering_rejects_an_unsupported_commitment() {
+        let artifact = sealed_provenance_artifact();
+        for bad in ["processed", "latest", "", "Confirmed"] {
+            let mut value: serde_json::Value =
+                serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+            value["provenance"]["lock_evidence"]["commitment"] = serde_json::Value::from(bad);
+            let tampered =
+                SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+            let err = tampered.verify_integrity().unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    SnapshotError::ArtifactMismatch(ref m) if m.contains("lock_evidence.commitment")
+                ),
+                "commitment `{bad}` must be refused"
+            );
+        }
+    }
+
+    /// ANCHOR SLOT: a zero anchor slot is internally inconsistent — the
+    /// builder never anchors a snapshot to a fabricated/missing slot.
+    #[test]
+    fn provenance_tampering_rejects_a_zero_anchor_slot() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["lock_evidence"]["anchor_slot"] = serde_json::Value::from(0);
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
+    /// SINK-LEDGER provenance: the schema version must be the supported
+    /// one.
+    #[test]
+    fn provenance_tampering_rejects_an_unsupported_ledger_schema_version() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["sink_ledger"]["schema_version"] = serde_json::Value::from(2);
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        let err = tampered.verify_integrity().unwrap_err();
+        assert!(matches!(
+            err,
+            SnapshotError::ArtifactMismatch(ref m) if m.contains("schema_version")
+        ));
+    }
+
+    /// SINK-LEDGER provenance: the ledger identity must be present.
+    #[test]
+    fn provenance_tampering_rejects_an_empty_ledger_identity() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["sink_ledger"]["ledger_id"] = serde_json::Value::from("   ");
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        let err = tampered.verify_integrity().unwrap_err();
+        assert!(matches!(
+            err,
+            SnapshotError::ArtifactMismatch(ref m) if m.contains("ledger_id")
+        ));
+    }
+
+    /// INPUT DIGEST: the SHA-256 representation must be a lowercase
+    /// 64-hex-character string.
+    #[test]
+    fn provenance_tampering_rejects_malformed_input_digests() {
+        let artifact = sealed_provenance_artifact();
+        let valid_digest = artifact
+            .provenance
+            .as_ref()
+            .unwrap()
+            .sink_ledger
+            .as_ref()
+            .unwrap()
+            .input_sha256
+            .clone();
+        let cases = [
+            ("deadbeef".to_string(), "too short"),
+            ("0".repeat(63), "one character short"),
+            (format!("{}g", &valid_digest[..63]), "non-hex character"),
+            (valid_digest.to_uppercase(), "uppercase digest"),
+        ];
+        for (digest, why) in cases {
+            let mut value: serde_json::Value =
+                serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+            value["provenance"]["sink_ledger"]["input_sha256"] =
+                serde_json::Value::from(digest.clone());
+            let tampered =
+                SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+            let err = tampered.verify_integrity().unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    SnapshotError::ArtifactMismatch(ref m) if m.contains("input_sha256")
+                ),
+                "digest `{why}` must be refused"
+            );
+        }
+    }
+
+    /// CROSS-FIELD: an internally consistent but content-drifting anchor
+    /// slot disagrees with the artifact's own snapshot slot.
+    #[test]
+    fn provenance_tampering_rejects_an_anchor_slot_disagreeing_with_the_artifact() {
+        let artifact = sealed_provenance_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["lock_evidence"]["anchor_slot"] =
+            serde_json::Value::from(artifact.snapshot_slot + 1);
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
     #[test]
     fn verify_integrity_catches_a_tampered_exclusion_ledger() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_provenance_artifact();
         let mut value: serde_json::Value =
             serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
         // Bump the sink exclusion's balance: the exclusion ledger no
@@ -1103,7 +1474,7 @@ mod tests {
 
     #[test]
     fn verify_integrity_catches_a_tampered_locked_report() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_provenance_artifact();
         let mut value: serde_json::Value =
             serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
         // Drop the custody resolution while the locked total is nonzero.
@@ -1118,7 +1489,7 @@ mod tests {
 
     #[test]
     fn seal_rejects_a_foreign_tree() {
-        let (snapshot, _) = sealed_artifact();
+        let snapshot = standard_snapshot();
         // A tree over a DIFFERENT leaf set must not seal this snapshot.
         let other_entries = vec![
             HolderEntry {
@@ -1137,7 +1508,7 @@ mod tests {
 
     #[test]
     fn proof_lookup_finds_the_right_claimant() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_artifact();
         // 0x60 holds 1_000 locked LP re-attributed to it.
         let entry = artifact.proof_for(&key(0x60)).expect("claimant present");
         assert_eq!(entry.lp_balance, 1_000);
@@ -1158,7 +1529,7 @@ mod tests {
 
     #[test]
     fn verify_integrity_catches_a_tampered_balance() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_provenance_artifact();
         let mut json = artifact.to_json_pretty().unwrap();
         // Bump the first entry's balance through raw JSON surgery (the
         // attacker's edit), then reload.
@@ -1183,7 +1554,7 @@ mod tests {
 
     #[test]
     fn verify_integrity_catches_a_tampered_root() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_provenance_artifact();
         let json = artifact.to_json_pretty().unwrap();
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
         value["merkle_root"] = serde_json::Value::String(encode_hex(&[0u8; 32]));
@@ -1197,7 +1568,7 @@ mod tests {
 
     #[test]
     fn verify_integrity_catches_an_unsupported_format_version() {
-        let (_, artifact) = sealed_artifact();
+        let artifact = sealed_provenance_artifact();
         let json = artifact.to_json_pretty().unwrap();
         let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
         value["format_version"] = serde_json::Value::from(99);

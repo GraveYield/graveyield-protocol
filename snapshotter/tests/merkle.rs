@@ -12,8 +12,9 @@
 use solana_sdk::pubkey::Pubkey;
 
 use grave_snapshotter::{
-    InMemoryLocks, InMemorySource, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree,
-    SnapshotRequest, TokenAccountSnapshot, TokenLockRecord,
+    ArtifactProvenance, InMemoryLocks, InMemorySource, LockEvidenceProvenance, SinkLedger,
+    SinkLedgerEntry, SinkLedgerProvenance, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree,
+    SnapshotRequest, TokenAccountSnapshot, TokenLockRecord, SINK_LEDGER_SCHEMA_VERSION,
 };
 
 fn key(n: u8) -> Pubkey {
@@ -96,12 +97,56 @@ fn sealed_production_artifact() -> SnapshotArtifact {
         custody_owner_overrides: vec![],
         sink_ledger: None,
     };
+    // Exclusions are governed (D2-02): the ledger — not a direct
+    // declaration — is the authoritative source of the sink set.
     request.sink_exclusions = vec![key(0x50)];
+    request.sink_ledger = Some(SinkLedger {
+        schema_version: SINK_LEDGER_SCHEMA_VERSION,
+        ledger_id: "GY-SINK-TEST-001".to_string(),
+        pool_address: key(0xAA),
+        amm_program_id: key(0xAB),
+        lp_mint,
+        entries: vec![SinkLedgerEntry {
+            owner: key(0x50),
+            token_account: key(0x05),
+            lp_mint,
+            raw_balance: 1_000,
+            rationale: "incinerator address, funds provably unrecoverable".to_string(),
+            evidence_references: vec!["gy-evidence-001".to_string()],
+            approval_identities: vec!["owner-identity-1".to_string()],
+            independent_reviewer: "reviewer-identity-1".to_string(),
+            approved_at: "2026-11-27T00:00:00Z".to_string(),
+        }],
+    });
     let snapshot = SnapshotBuilder::new(request)
         .build(&source, &locks)
         .unwrap();
     let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-    SnapshotArtifact::seal(&snapshot, &tree).unwrap()
+    // Sealed through the CLI production path (seal_with_provenance): an
+    // artifact with explicit sink exclusions must carry the governed
+    // sink-ledger + lock-evidence provenance to verify (D2-02/D2-03).
+    SnapshotArtifact::seal_with_provenance(
+        &snapshot,
+        &tree,
+        ArtifactProvenance {
+            sink_ledger: Some(SinkLedgerProvenance {
+                schema_version: SINK_LEDGER_SCHEMA_VERSION,
+                ledger_id: "GY-SINK-TEST-001".to_string(),
+                input_sha256: SinkLedger::input_digest_hex(b"exact-ledger-input"),
+                entry_count: 1,
+                sink_exclusions_total: snapshot.reconciliation.sink_exclusions_total,
+            }),
+            lock_evidence: LockEvidenceProvenance {
+                source: "rpc".to_string(),
+                program_id: grave_snapshotter::locked::uncx::PROGRAM_ID.to_string(),
+                commitment: "confirmed".to_string(),
+                anchor_slot: snapshot.snapshot_slot,
+                records_seen: snapshot.locked.lock_records_seen,
+                total_locked: snapshot.locked.total_locked,
+            },
+        },
+    )
+    .unwrap()
 }
 
 // =====================================================================

@@ -105,6 +105,13 @@ pub enum SnapshotError {
     },
     /// The request's `sink_exclusions` and the governed ledger disagree.
     SinkLedgerConflict(String),
+    /// The request declares nonempty `sink_exclusions` directly, WITHOUT
+    /// the governed sink ledger. Sink exclusions may only come from a
+    /// validated governed ledger (D-04-D / WD-07); direct declaration is
+    /// a bypass of ledger validation and is rejected fail-closed — no
+    /// claims-grade snapshot may contain exclusions that were not derived
+    /// from the governed ledger.
+    SinkExclusionsRequireLedger { declared: usize },
 }
 
 impl fmt::Display for SnapshotError {
@@ -222,6 +229,12 @@ impl fmt::Display for SnapshotError {
                     "sink ledger conflicts with the request's sink exclusions: {msg}"
                 )
             }
+            Self::SinkExclusionsRequireLedger { declared } => write!(
+                f,
+                "{declared} sink exclusion(s) declared directly without a governed sink \
+                 ledger; sink exclusions require `sink_ledger` (D-04-D / WD-07) and are \
+                 never accepted as a direct, ungoverned input — refusing the bypass"
+            ),
         }
     }
 }

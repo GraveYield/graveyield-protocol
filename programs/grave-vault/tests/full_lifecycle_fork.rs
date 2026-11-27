@@ -58,8 +58,8 @@ use grave_scanner::state::{
 };
 use grave_snapshotter::source::InMemorySource;
 use grave_snapshotter::{
-    InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest,
-    TokenAccountSnapshot,
+    InMemoryLocks, SinkLedger, SinkLedgerEntry, SnapshotArtifact, SnapshotBuilder,
+    SnapshotMerkleTree, SnapshotRequest, TokenAccountSnapshot, SINK_LEDGER_SCHEMA_VERSION,
 };
 use grave_vault::constants::{
     JUPITER_V6_PROGRAM_ID, RAYDIUM_V4_AMM_AUTHORITY, RAYDIUM_V4_PROGRAM_ID, VAULT_AUTHORITY_SEED,
@@ -1402,13 +1402,36 @@ async fn candidate_pool_to_lp_claim_end_to_end() {
     );
     let source = read_ledger_source(client, &env.lp_mint, &addresses).await;
     let locks = InMemoryLocks::from_records(&env.pool, &env.lp_mint, vec![]);
+    // Exclusions are governed (D2-02): the AMM authority's pool-LP share
+    // is excluded through a validated governed ledger, not declared
+    // directly. The entry reconciles exactly against the enumeration:
+    // the seeded custody account is the authority's token account holding
+    // the full share.
+    let sink_ledger = SinkLedger {
+        schema_version: SINK_LEDGER_SCHEMA_VERSION,
+        ledger_id: "GY-SINK-FORK-FIXTURE-001".to_string(),
+        pool_address: env.pool,
+        amm_program_id: RAYDIUM_V4_PROGRAM_ID,
+        lp_mint: env.lp_mint,
+        entries: vec![SinkLedgerEntry {
+            owner: RAYDIUM_V4_AMM_AUTHORITY,
+            token_account: custody_account,
+            lp_mint: env.lp_mint,
+            raw_balance: custody_balance,
+            rationale: "Raydium AMM authority pool-LP share (D11 sink policy)".to_string(),
+            evidence_references: vec!["fork-fixture-evidence-001".to_string()],
+            approval_identities: vec!["fork-fixture-owner-1".to_string()],
+            independent_reviewer: "fork-fixture-reviewer-1".to_string(),
+            approved_at: "2026-11-27T00:00:00Z".to_string(),
+        }],
+    };
     let request = SnapshotRequest {
         pool_address: env.pool,
         amm_program_id: RAYDIUM_V4_PROGRAM_ID,
         lp_mint: env.lp_mint,
         sink_exclusions: vec![RAYDIUM_V4_AMM_AUTHORITY],
         custody_owner_overrides: vec![],
-        sink_ledger: None,
+        sink_ledger: Some(sink_ledger),
     };
     let snapshot = SnapshotBuilder::new(request)
         .build(&source, &locks)

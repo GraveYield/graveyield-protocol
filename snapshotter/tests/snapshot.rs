@@ -6,8 +6,9 @@
 use solana_sdk::pubkey::Pubkey;
 
 use grave_snapshotter::{
-    ExcludedBalance, ExclusionReason, HolderEntry, InMemoryLocks, InMemorySource, SnapshotBuilder,
-    SnapshotRequest, TokenAccountSnapshot, TokenLockRecord,
+    ExcludedBalance, ExclusionReason, HolderEntry, InMemoryLocks, InMemorySource, SinkLedger,
+    SinkLedgerEntry, SnapshotBuilder, SnapshotRequest, TokenAccountSnapshot, TokenLockRecord,
+    SINK_LEDGER_SCHEMA_VERSION,
 };
 
 fn key(n: u8) -> Pubkey {
@@ -80,8 +81,29 @@ impl Fixture {
     }
 
     fn request_with_sink(&self) -> SnapshotRequest {
+        // Exclusions are governed (D2-02): the validated ledger is the
+        // authoritative source of the sink set; a direct declaration
+        // without the ledger is rejected by the builder.
         let mut request = request(self.lp_mint);
         request.sink_exclusions = vec![key(0x50)];
+        request.sink_ledger = Some(SinkLedger {
+            schema_version: SINK_LEDGER_SCHEMA_VERSION,
+            ledger_id: "GY-SINK-TEST-001".to_string(),
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint: self.lp_mint,
+            entries: vec![SinkLedgerEntry {
+                owner: key(0x50),
+                token_account: key(0x05),
+                lp_mint: self.lp_mint,
+                raw_balance: 1_000,
+                rationale: "incinerator address, funds provably unrecoverable".to_string(),
+                evidence_references: vec!["gy-evidence-001".to_string()],
+                approval_identities: vec!["owner-identity-1".to_string()],
+                independent_reviewer: "reviewer-identity-1".to_string(),
+                approved_at: "2026-11-27T00:00:00Z".to_string(),
+            }],
+        });
         request
     }
 }

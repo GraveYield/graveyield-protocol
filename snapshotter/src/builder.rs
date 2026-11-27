@@ -62,20 +62,29 @@ pub struct SnapshotRequest {
     /// Their balances leave the leaf set and are recorded in the exclusion
     /// ledger. Burned LP needs no entry here — burned tokens never
     /// enumerate.
+    ///
+    /// GOVERNED-INPUT INVARIANT (D2-02 / D-04-D / WD-07): a nonempty
+    /// `sink_exclusions` REQUIRES a supplied governed `sink_ledger`, and
+    /// the validated ledger is the authoritative source of the exclusions
+    /// actually applied. A request that declares exclusions directly with
+    /// no ledger — or a ledger that disagrees with the declarations — is
+    /// rejected fail-closed; there is no legacy path that constructs a
+    /// claims-grade snapshot from ungoverned exclusions.
     pub sink_exclusions: Vec<Pubkey>,
     /// Escape hatch for custody disambiguation: if several enumerated
     /// accounts hold exactly the locked total, exactly one of them must
     /// have its owner listed here, or the snapshot aborts
     /// (`CustodyAmbiguous`).
     pub custody_owner_overrides: Vec<Pubkey>,
-    /// The governed sink-exclusion ledger (D-04-C/D, WD-07). When
-    /// present, its entries are validated against the enumerated holder
-    /// set (identity, balances, token accounts) and its owner set MUST
-    /// equal `sink_exclusions` — any disagreement aborts the snapshot.
-    /// When absent, `sink_exclusions` may still declare sinks directly
-    /// (lib-level API; the CLI always routes governed exclusions through
-    /// a ledger). A parsed ledger is structurally valid; its approval
-    /// authenticity is a D-04-D process control outside this code.
+    /// The governed sink-exclusion ledger (D-04-C/D, WD-07). REQUIRED for
+    /// any nonempty `sink_exclusions`: its entries are validated against
+    /// the enumerated holder set (identity, balances, token accounts) and
+    /// its owner set MUST equal `sink_exclusions` — any disagreement
+    /// aborts the snapshot. The ledger — not the raw request field — is
+    /// the authoritative source of the exclusions applied to the leaf
+    /// set. An absent ledger is only valid with EMPTY exclusions. A
+    /// parsed ledger is structurally valid; its approval authenticity is
+    /// a D-04-D process control outside this code.
     pub sink_ledger: Option<SinkLedger>,
 }
 
@@ -111,6 +120,19 @@ impl SnapshotBuilder {
         source: &dyn LpAccountSource,
         locks: &dyn LockedLpEvidence,
     ) -> Result<LpSnapshot, SnapshotError> {
+        // ---- 0. Governed-exclusion gate (D2-02 / D-04-D / WD-07) ----------
+        // Sink exclusions are never operator-declared directly. A nonempty
+        // `sink_exclusions` without the governed ledger is a bypass of
+        // ledger validation and is rejected BEFORE any state is read —
+        // deterministically, fail-closed. There is no legacy path through
+        // this builder that constructs a claims-grade snapshot from
+        // ungoverned exclusions.
+        if self.request.sink_ledger.is_none() && !self.request.sink_exclusions.is_empty() {
+            return Err(SnapshotError::SinkExclusionsRequireLedger {
+                declared: self.request.sink_exclusions.len(),
+            });
+        }
+
         // ---- 1. Initial supply read = the state anchor --------------------
         let initial = source.initial_supply(&self.request.lp_mint)?;
         let supply = initial.amount;
@@ -230,7 +252,15 @@ impl SnapshotBuilder {
         }
 
         // ---- 5. Exclusion pass (ascending owner bytes) ----------------------
-        let sinks: BTreeSet<Pubkey> = self.request.sink_exclusions.iter().copied().collect();
+        // The validated governed ledger — not the raw request field — is
+        // the authoritative source of the sink set: when a ledger is
+        // supplied it was already enforced to equal the declared
+        // exclusions, and without a ledger the gate above guarantees the
+        // declared set is empty.
+        let sinks: BTreeSet<Pubkey> = match &self.request.sink_ledger {
+            Some(ledger) => ledger.entries.iter().map(|e| e.owner).collect(),
+            None => BTreeSet::new(),
+        };
         let mut exclusions: Vec<ExcludedBalance> = Vec::new();
         let mut sink_total: u128 = 0;
         let mut claimable: BTreeMap<Pubkey, u64> = BTreeMap::new();
@@ -413,6 +443,7 @@ mod tests {
     use super::*;
     use crate::locked::{InMemoryLocks, TokenLockRecord};
     use crate::model::TokenAccountSnapshot;
+    use crate::sink_ledger::{SinkLedger, SinkLedgerEntry};
     use crate::source::InMemorySource;
 
     fn key(n: u8) -> Pubkey {
@@ -447,6 +478,40 @@ mod tests {
         }
     }
 
+    /// A structurally valid governed ledger bound to this test module's
+    /// pool identity (pool 0xAA, AMM 0xAB, LP mint as given), carrying the
+    /// supplied sink entries. Used wherever a test requires exclusions:
+    /// direct declaration without the ledger is rejected (D2-02).
+    fn governed_ledger(lp_mint: Pubkey, entries: Vec<SinkLedgerEntry>) -> SinkLedger {
+        SinkLedger {
+            schema_version: crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION,
+            ledger_id: "GY-SINK-TEST-001".to_string(),
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint,
+            entries,
+        }
+    }
+
+    fn ledger_entry(
+        lp_mint: Pubkey,
+        owner: u8,
+        token_account: u8,
+        balance: u64,
+    ) -> SinkLedgerEntry {
+        SinkLedgerEntry {
+            owner: key(owner),
+            token_account: key(token_account),
+            lp_mint,
+            raw_balance: balance,
+            rationale: "incinerator address, funds provably unrecoverable".to_string(),
+            evidence_references: vec!["gy-evidence-001".to_string()],
+            approval_identities: vec!["owner-identity-1".to_string()],
+            independent_reviewer: "reviewer-identity-1".to_string(),
+            approved_at: "2026-11-27T00:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn closing_identity_holds_with_sinks_and_locks() {
         // supply 10_000: holder A 6_000 (unlocked), sink 1_000, custody 3_000
@@ -468,7 +533,13 @@ mod tests {
             vec![lock(0x51, 1, 0x40, 2_000), lock(0x52, 2, 0x50, 1_000)],
         );
         let mut request = snapshot_request(lp_mint);
+        // Exclusions are routed through the governed ledger (D2-02): a
+        // direct declaration with no ledger is rejected before any read.
         request.sink_exclusions = vec![key(0x20)];
+        request.sink_ledger = Some(governed_ledger(
+            lp_mint,
+            vec![ledger_entry(lp_mint, 0x20, 0x02, 1_000)],
+        ));
         let snapshot = SnapshotBuilder::new(request)
             .build(&source, &locks)
             .unwrap();
@@ -617,7 +688,13 @@ mod tests {
         let locks =
             InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x51, 1, 0x40, 700)]);
         let mut request = snapshot_request(lp_mint);
-        request.sink_exclusions = vec![key(0x30)]; // custody declared sink
+        // The custody owner is declared a sink via the governed ledger
+        // (D2-02: no direct declaration without the ledger).
+        request.sink_exclusions = vec![key(0x30)];
+        request.sink_ledger = Some(governed_ledger(
+            lp_mint,
+            vec![ledger_entry(lp_mint, 0x30, 0x02, 700)],
+        ));
         let err = SnapshotBuilder::new(request)
             .build(&source, &locks)
             .unwrap_err();
@@ -689,6 +766,73 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// D2-02 negative: a request that declares sink exclusions directly
+    /// with NO governed ledger is rejected before any state is read — the
+    /// library-level bypass is closed, deterministically.
+    #[test]
+    fn direct_sink_exclusions_without_a_ledger_are_rejected() {
+        let lp_mint = key(0x0a);
+        let source = InMemorySource::new(
+            lp_mint,
+            7,
+            1_000,
+            vec![acct(1, 0x10, 500), acct(2, 0x20, 500)],
+        );
+        let locks = InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![]);
+        let mut request = snapshot_request(lp_mint);
+        request.sink_exclusions = vec![key(0x20)];
+        let err = SnapshotBuilder::new(request)
+            .build(&source, &locks)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkExclusionsRequireLedger { declared: 1 }
+        );
+    }
+
+    /// D2-02 negative: attempted exclusions with an absent ledger fail
+    /// closed identically regardless of the declared set's size — no
+    /// exclusion ever applies ungoverned.
+    #[test]
+    fn absent_ledger_with_attempted_exclusions_is_rejected() {
+        let lp_mint = key(0x0b);
+        let source = InMemorySource::new(
+            lp_mint,
+            7,
+            1_000,
+            vec![acct(1, 0x10, 500), acct(2, 0x20, 500)],
+        );
+        let locks = InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![]);
+        let mut request = snapshot_request(lp_mint);
+        request.sink_exclusions = vec![key(0x10), key(0x20)];
+        let err = SnapshotBuilder::new(request)
+            .build(&source, &locks)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkExclusionsRequireLedger { declared: 2 }
+        );
+    }
+
+    /// D2-02 negative: the gate fires BEFORE any source read and before
+    /// ledger reconciliation — even a sink owner that never enumerates is
+    /// rejected with the bypass error, not a reconciliation error.
+    #[test]
+    fn exclusion_gate_fires_before_any_state_read() {
+        let lp_mint = key(0x0c);
+        let source = InMemorySource::new(lp_mint, 7, 1_000, vec![acct(1, 0x10, 1_000)]);
+        let locks = InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![]);
+        let mut request = snapshot_request(lp_mint);
+        request.sink_exclusions = vec![key(0x99)]; // never enumerated
+        let err = SnapshotBuilder::new(request)
+            .build(&source, &locks)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SnapshotError::SinkExclusionsRequireLedger { .. }
+        ));
     }
 }
 
