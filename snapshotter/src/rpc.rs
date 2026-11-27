@@ -3,15 +3,49 @@
 // RPC-backed enumeration sources (blocking `solana-client`).
 //
 // Everything versionable lives in pure helpers (filter construction,
-// account-data parsing); the client calls themselves are thin wrappers.
-// The unit tests below pin the wire-level filter shapes and the SPL
-// account layouts without touching a network.
+// account-data parsing, request-parameter shaping); the client calls
+// themselves are thin wrappers. The unit tests below pin the wire-level
+// filter shapes, the SPL account layouts, and the consistent-state request
+// parameters without touching a network.
+//
+// CONSISTENT-STATE PINNING (WD-02 fix)
+//
+// Every read this source performs is pinned to one explicitly configured
+// commitment and one anchored context slot:
+//
+//   * `initial_supply` reads the mint at the configured commitment and
+//     returns the RPC context slot — the snapshot's state anchor. No
+//     implicit client default participates: the commitment is a
+//     constructor argument and speculative (processed) state is rejected
+//     outright, because rolled-back state must never anchor a claims
+//     snapshot.
+//   * `token_accounts` issues `getProgramAccounts` at the SAME commitment
+//     with `minContextSlot` set to the anchor slot, so a node that cannot
+//     serve at least the anchored state fails the request instead of
+//     silently enumerating older data.
+//   * `final_supply` re-reads the mint through a raw `getAccountInfo`
+//     carrying the same commitment AND `minContextSlot` (the stock
+//     `get_account_with_commitment` helper cannot express a minimum
+//     context slot), and refuses a served slot older than the anchor.
+//
+// KNOWN LIMITATION (documented trust boundary, D-06 P2)
+//
+// The initial/final supply equality check detects SUPPLY drift between the
+// two anchored reads. It cannot detect a same-total holder transfer that
+// happened between the anchor slot and the enumeration: the total is
+// unchanged, the gate passes, and the per-holder attribution is the
+// enumeration's state — which is bounded below by the anchor but not
+// provably equal to it. Holder-level revalidation is the separate P2
+// control and is NOT claimed here.
 
+use serde_json::json;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
-use solana_commitment_config::CommitmentConfig;
+use solana_client::rpc_request::RpcRequest;
+use solana_client::rpc_response::Response;
+use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_sdk::account::Account;
 use solana_sdk::pubkey::Pubkey;
 
@@ -36,22 +70,87 @@ mod spl_layout {
     pub const MINT_SUPPLY_OFFSET: usize = 36;
 }
 
+/// Commitment levels acceptable for a claims-grade snapshot.
+///
+/// `processed` is rejected because speculative state can be rolled back —
+/// a snapshot anchored to it could describe state that never happened.
+/// `confirmed` and `finalized` are accepted; the caller MUST choose
+/// explicitly (there is no default) and use the SAME level for every read
+/// of one snapshot run.
+fn ensure_claims_commitment(commitment: CommitmentConfig) -> Result<(), SnapshotError> {
+    if commitment.commitment == CommitmentLevel::Processed {
+        return Err(SnapshotError::Source(
+            "commitment `processed` is not acceptable for a claims snapshot: speculative \
+             state can be rolled back; use `confirmed` or `finalized` and pass the same \
+             level to every read of the run"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Parse a CLI commitment flag. Unknown names are rejected rather than
+/// silently falling back to a client default.
+pub fn parse_commitment(name: &str) -> Result<CommitmentConfig, SnapshotError> {
+    let level = match name {
+        "confirmed" => CommitmentLevel::Confirmed,
+        "finalized" => CommitmentLevel::Finalized,
+        other => {
+            return Err(SnapshotError::Source(format!(
+                "unsupported commitment `{other}`; supported values: confirmed, finalized"
+            )))
+        }
+    };
+    let commitment = CommitmentConfig { commitment: level };
+    ensure_claims_commitment(commitment)?;
+    Ok(commitment)
+}
+
 /// `getProgramAccounts` configs are served in unspecified order; the
 /// snapshot mechanics re-establish determinism downstream (BTreeMap
 /// aggregation), but a stable server-side sort is requested where the RPC
 /// supports it.
-fn gpa_config(filters: Vec<RpcFilterType>) -> RpcProgramAccountsConfig {
+///
+/// The config is pinned: the caller's commitment and `min_context_slot`
+/// (the anchored supply-read slot) ride on every enumeration request, so a
+/// node that cannot serve at least the anchored state fails the request
+/// instead of silently returning older accounts.
+fn gpa_config(
+    filters: Vec<RpcFilterType>,
+    commitment: CommitmentConfig,
+    min_context_slot: u64,
+) -> RpcProgramAccountsConfig {
     RpcProgramAccountsConfig {
         filters: Some(filters),
         account_config: RpcAccountInfoConfig {
             encoding: Some(UiAccountEncoding::Base64),
             data_slice: None,
-            commitment: None,
-            min_context_slot: None,
+            commitment: Some(commitment),
+            min_context_slot: Some(min_context_slot),
         },
         with_context: None,
         sort_results: Some(true),
     }
+}
+
+/// Raw `getAccountInfo` parameters carrying the configured commitment and
+/// the pinned `minContextSlot` — the post-enumeration supply re-read. The
+/// stock `get_account_with_commitment` helper cannot express a minimum
+/// context slot, so the request is issued through the client's raw `send`
+/// with exactly these parameters (shape pinned by test).
+fn account_info_params(
+    lp_mint: &Pubkey,
+    commitment: CommitmentConfig,
+    min_context_slot: u64,
+) -> serde_json::Value {
+    json!([
+        lp_mint.to_string(),
+        {
+            "encoding": "base64",
+            "commitment": commitment.commitment.to_string(),
+            "minContextSlot": min_context_slot,
+        }
+    ])
 }
 
 /// Filters selecting every classic SPL token account of `lp_mint`:
@@ -148,34 +247,48 @@ fn parse_spl_mint_supply(
 }
 
 /// RPC-backed [`LpAccountSource`] for the LP-holder enumeration.
+///
+/// The commitment is explicit and validated at construction: there is no
+/// path that silently defers to the `RpcClient`'s configured default.
 pub struct RpcLpAccountSource {
     client: RpcClient,
     token_program_id: Pubkey,
+    commitment: CommitmentConfig,
 }
 
 impl RpcLpAccountSource {
-    /// Source over the classic SPL Token Program.
-    pub fn new(client: RpcClient) -> Self {
-        Self {
+    /// Source over the classic SPL Token Program at an explicit
+    /// commitment (speculative `processed` is rejected).
+    pub fn new(client: RpcClient, commitment: CommitmentConfig) -> Result<Self, SnapshotError> {
+        ensure_claims_commitment(commitment)?;
+        Ok(Self {
             client,
             token_program_id: SPL_TOKEN_PROGRAM_ID,
-        }
+            commitment,
+        })
     }
 
-    /// Source over an explicit token program (Token-2022 future).
-    pub fn with_token_program(client: RpcClient, token_program_id: Pubkey) -> Self {
-        Self {
+    /// Source over an explicit token program (Token-2022 future) at an
+    /// explicit commitment (speculative `processed` is rejected).
+    pub fn with_token_program(
+        client: RpcClient,
+        token_program_id: Pubkey,
+        commitment: CommitmentConfig,
+    ) -> Result<Self, SnapshotError> {
+        ensure_claims_commitment(commitment)?;
+        Ok(Self {
             client,
             token_program_id,
-        }
+            commitment,
+        })
     }
 }
 
 impl LpAccountSource for RpcLpAccountSource {
-    fn lp_mint_supply(&self, lp_mint: &Pubkey) -> Result<MintSupply, SnapshotError> {
+    fn initial_supply(&self, lp_mint: &Pubkey) -> Result<MintSupply, SnapshotError> {
         let response = self
             .client
-            .get_account_with_commitment(lp_mint, CommitmentConfig::confirmed())
+            .get_account_with_commitment(lp_mint, self.commitment)
             .map_err(|e| SnapshotError::Source(e.to_string()))?;
         let account = response
             .value
@@ -187,7 +300,11 @@ impl LpAccountSource for RpcLpAccountSource {
         })
     }
 
-    fn token_accounts(&self, lp_mint: &Pubkey) -> Result<Vec<TokenAccountSnapshot>, SnapshotError> {
+    fn token_accounts(
+        &self,
+        lp_mint: &Pubkey,
+        min_context_slot: u64,
+    ) -> Result<Vec<TokenAccountSnapshot>, SnapshotError> {
         // getProgramAccounts returns raw account bytes (parsed below by
         // parse_spl_token_account); the suggested get_program_ui_accounts_
         // with_config migration returns UI-encoded accounts — a behavioral
@@ -197,7 +314,11 @@ impl LpAccountSource for RpcLpAccountSource {
             .client
             .get_program_accounts_with_config(
                 &self.token_program_id,
-                gpa_config(token_account_filters(lp_mint)),
+                gpa_config(
+                    token_account_filters(lp_mint),
+                    self.commitment,
+                    min_context_slot,
+                ),
             )
             .map_err(|e| SnapshotError::Source(e.to_string()))?;
         accounts
@@ -205,19 +326,55 @@ impl LpAccountSource for RpcLpAccountSource {
             .map(|(address, account)| parse_spl_token_account(*address, &account.data, lp_mint))
             .collect()
     }
+
+    fn final_supply(
+        &self,
+        lp_mint: &Pubkey,
+        min_context_slot: u64,
+    ) -> Result<MintSupply, SnapshotError> {
+        let response: Response<Option<Account>> = self
+            .client
+            .send(
+                RpcRequest::Custom {
+                    method: "getAccountInfo",
+                },
+                account_info_params(lp_mint, self.commitment, min_context_slot),
+            )
+            .map_err(|e| SnapshotError::Source(e.to_string()))?;
+        if response.context.slot < min_context_slot {
+            return Err(SnapshotError::StaleState {
+                anchor_slot: min_context_slot,
+                served_slot: response.context.slot,
+            });
+        }
+        let account = response
+            .value
+            .ok_or_else(|| SnapshotError::Source(format!("mint {lp_mint} not found")))?;
+        let amount = parse_spl_mint_supply(lp_mint, &account, &self.token_program_id)?;
+        Ok(MintSupply {
+            amount,
+            slot: response.context.slot,
+        })
+    }
 }
 
 /// RPC-backed [`LockedLpEvidence`] for the UNCX Raydium V4 locker:
 /// `getProgramAccounts` on the locker program with size + discriminator +
 /// binding filters, every record routed through the strict
-/// [`TokenLockRecord::parse`] validation.
+/// [`TokenLockRecord::parse`] validation. The query is pinned to the same
+/// commitment and anchored context slot as the holder enumeration, so
+/// lock evidence and token-account enumeration describe one state.
 pub struct RpcLockedLpEvidence {
     client: RpcClient,
+    commitment: CommitmentConfig,
 }
 
 impl RpcLockedLpEvidence {
-    pub fn new(client: RpcClient) -> Self {
-        Self { client }
+    /// Evidence source at an explicit commitment (speculative `processed`
+    /// is rejected).
+    pub fn new(client: RpcClient, commitment: CommitmentConfig) -> Result<Self, SnapshotError> {
+        ensure_claims_commitment(commitment)?;
+        Ok(Self { client, commitment })
     }
 }
 
@@ -226,6 +383,7 @@ impl LockedLpEvidence for RpcLockedLpEvidence {
         &self,
         amm_id: &Pubkey,
         lp_mint: &Pubkey,
+        min_context_slot: u64,
     ) -> Result<Vec<TokenLockRecord>, SnapshotError> {
         // See token_accounts: raw-bytes gPA kept deliberately (UI-account
         // migration deferred out of the dependency-bump PR).
@@ -234,7 +392,11 @@ impl LockedLpEvidence for RpcLockedLpEvidence {
             .client
             .get_program_accounts_with_config(
                 &uncx::PROGRAM_ID,
-                gpa_config(token_lock_filters(amm_id, lp_mint)),
+                gpa_config(
+                    token_lock_filters(amm_id, lp_mint),
+                    self.commitment,
+                    min_context_slot,
+                ),
             )
             .map_err(|e| SnapshotError::Source(e.to_string()))?;
         let mut records = accounts
@@ -297,6 +459,83 @@ mod tests {
             bytes_json(&mint().to_bytes())
         );
         assert_eq!(json, expected);
+    }
+
+    #[test]
+    fn gpa_config_pins_commitment_and_min_context_slot() {
+        // The enumeration request MUST carry the caller's commitment and
+        // the anchored supply-read slot as minContextSlot — this is the
+        // WD-02 fix at the wire level (previously both were `None`, so the
+        // client default commitment and unpinned state were used).
+        let config = gpa_config(
+            token_account_filters(&mint()),
+            parse_commitment("confirmed").unwrap(),
+            123_456,
+        );
+        let json = serde_json::to_value(&config).unwrap();
+        // RpcProgramAccountsConfig flattens the account config into the
+        // top-level config object (camelCase keys) — exactly the wire
+        // shape the node receives.
+        assert_eq!(json["commitment"], json!("confirmed"));
+        assert_eq!(json["minContextSlot"], json!(123_456));
+        assert_eq!(json["encoding"], json!("base64"));
+        // sort_results is requested (server-side stability where supported).
+        assert_eq!(json["sortResults"], json!(true));
+
+        // The same pin applies to the lock-evidence query — both reads of
+        // one run describe one state.
+        let locks = gpa_config(
+            token_lock_filters(&amm(), &mint()),
+            parse_commitment("finalized").unwrap(),
+            77,
+        );
+        let json = serde_json::to_value(&locks).unwrap();
+        assert_eq!(json["commitment"], json!("finalized"));
+        assert_eq!(json["minContextSlot"], json!(77));
+    }
+
+    #[test]
+    fn account_info_params_pin_commitment_and_min_context_slot() {
+        // The post-enumeration re-read rides a raw getAccountInfo with the
+        // same commitment and minContextSlot the enumeration used.
+        let params = account_info_params(&mint(), parse_commitment("confirmed").unwrap(), 123_456);
+        assert_eq!(params[0], json!(mint().to_string()));
+        assert_eq!(params[1]["commitment"], json!("confirmed"));
+        assert_eq!(params[1]["minContextSlot"], json!(123_456));
+        assert_eq!(params[1]["encoding"], json!("base64"));
+
+        let params = account_info_params(&mint(), parse_commitment("finalized").unwrap(), 9);
+        assert_eq!(params[1]["commitment"], json!("finalized"));
+        assert_eq!(params[1]["minContextSlot"], json!(9));
+    }
+
+    #[test]
+    fn commitment_parsing_accepts_only_claims_grade_levels() {
+        assert_eq!(
+            parse_commitment("confirmed").unwrap().commitment,
+            CommitmentLevel::Confirmed
+        );
+        assert_eq!(
+            parse_commitment("finalized").unwrap().commitment,
+            CommitmentLevel::Finalized
+        );
+        // Speculative state is refused, not silently downgraded.
+        assert!(parse_commitment("processed").is_err());
+        // Unknown names are refused, not mapped to a default.
+        assert!(parse_commitment("recent").is_err());
+        assert!(parse_commitment("").is_err());
+        assert!(parse_commitment("CONFIRMED").is_err());
+        // The constructor-level guard matches.
+        assert!(RpcLpAccountSource::new(
+            RpcClient::new("http://localhost:8899".to_string()),
+            CommitmentConfig::processed(),
+        )
+        .is_err());
+        assert!(RpcLockedLpEvidence::new(
+            RpcClient::new("http://localhost:8899".to_string()),
+            CommitmentConfig::processed(),
+        )
+        .is_err());
     }
 
     #[test]

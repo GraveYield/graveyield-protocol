@@ -164,15 +164,24 @@ impl TokenLockRecord {
 }
 
 /// Source of validated lock records for the snapshot's `(amm_id, lp_mint)`.
+///
+/// The `min_context_slot` parameter is part of the consistent-state
+/// contract (WD-02): the evidence query is pinned to the same anchored
+/// slot as the holder enumeration, so lock records and token accounts
+/// describe one chain state. Implementations must fail rather than serve
+/// state older than the requested slot.
 pub trait LockedLpEvidence {
-    /// Every locked-LP record binding this pool and LP mint. Implementations
-    /// MUST validate each record (the RPC implementation routes through
-    /// `TokenLockRecord::parse`) and SHOULD return them in a deterministic
-    /// order; the builder additionally sorts by address before aggregating.
+    /// Every locked-LP record binding this pool and LP mint, served from a
+    /// state no older than `min_context_slot` (the anchored supply-read
+    /// slot). Implementations MUST validate each record (the RPC
+    /// implementation routes through `TokenLockRecord::parse`) and SHOULD
+    /// return them in a deterministic order; the builder additionally
+    /// sorts by address before aggregating.
     fn token_locks(
         &self,
         amm_id: &Pubkey,
         lp_mint: &Pubkey,
+        min_context_slot: u64,
     ) -> Result<Vec<TokenLockRecord>, SnapshotError>;
 }
 
@@ -227,7 +236,12 @@ impl LockedLpEvidence for InMemoryLocks {
         &self,
         amm_id: &Pubkey,
         lp_mint: &Pubkey,
+        _min_context_slot: u64,
     ) -> Result<Vec<TokenLockRecord>, SnapshotError> {
+        // Offline replay serves the recorded evidence as-is: the in-memory
+        // fixture holds one coherent state, so the pin is satisfied by
+        // construction. The RPC implementation is where the anchor is
+        // enforced on the wire.
         if amm_id != &self.amm_id || lp_mint != &self.lp_mint {
             return Err(SnapshotError::Source(format!(
                 "in-memory lock evidence serves ({}, {}), not ({amm_id}, {lp_mint})",

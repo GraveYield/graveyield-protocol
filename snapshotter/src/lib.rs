@@ -65,6 +65,29 @@
 // (spec §6.3), so the snapshotter is built to be re-runnable and auditable
 // instead of trusted.
 //
+// CONSISTENT-STATE CONTRACT (WD-02)
+//
+// The builder runs a pinned three-read protocol against the
+// [`source::LpAccountSource`]: (1) the initial supply read serves the
+// snapshot's state anchor (its real RPC context slot — slot 0 / missing
+// context metadata aborts, no slot is ever fabricated); (2) the
+// enumeration is pinned to that anchor slot (`minContextSlot`) and the
+// same explicitly configured commitment, so a node that cannot serve at
+// least the anchored state fails the request; (3) a post-enumeration
+// supply re-read, pinned identically, must observe the SAME supply
+// (`SupplyDrift` otherwise) — nothing is produced or sealed from
+// inconsistent state. Commitments are explicit at every layer: the RPC
+// source and the CLI reject speculative `processed` state and unknown
+// commitment names instead of falling back to a client default.
+//
+// KNOWN LIMITATION (stated, not hidden): supply equality between the two
+// anchored reads detects SUPPLY drift only. A same-total holder transfer
+// between the anchor and the enumeration is invisible to it — the total
+// is unchanged and the per-holder attribution is the enumeration's state,
+// which is bounded below by the anchor but not provably equal to it.
+// Holder-level revalidation is the separate D-06 P2 control and is NOT
+// claimed by this crate.
+//
 // PHASE 5.2 — FROM SNAPSHOT TO SEALED ARTIFACT
 //
 // [`tree::SnapshotMerkleTree`] seals the canonical leaf set into the

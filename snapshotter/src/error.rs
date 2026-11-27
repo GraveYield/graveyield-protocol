@@ -56,6 +56,24 @@ pub enum SnapshotError {
     /// closing reconciliation identity failed to re-derive. The artifact
     /// is refused instead of published.
     ArtifactMismatch(String),
+    /// The initial (or final) supply read carried no usable RPC context
+    /// slot (slot 0 / missing context metadata). A snapshot without a real
+    /// state anchor cannot be audited and is refused — no slot is ever
+    /// fabricated.
+    MissingStateContext,
+    /// A pinned read was served from a state older than the anchor slot
+    /// the snapshot was pinned to. The read is stale and the snapshot is
+    /// aborted.
+    StaleState { anchor_slot: u64, served_slot: u64 },
+    /// The LP mint supply changed between the anchored initial read and
+    /// the post-enumeration re-read. The two reads cannot describe one
+    /// chain state; the snapshot is refused (fail-closed — no partial or
+    /// "best-effort" snapshot is sealed).
+    SupplyDrift {
+        anchor_slot: u64,
+        initial_supply: u64,
+        final_supply: u64,
+    },
 }
 
 impl fmt::Display for SnapshotError {
@@ -106,6 +124,30 @@ impl fmt::Display for SnapshotError {
             Self::ArtifactMismatch(msg) => write!(
                 f,
                 "sealed artifact does not derive from its own entries: {msg}"
+            ),
+            Self::MissingStateContext => write!(
+                f,
+                "supply read served no usable context slot (slot 0); refusing to \
+                 record a fabricated snapshot slot"
+            ),
+            Self::StaleState {
+                anchor_slot,
+                served_slot,
+            } => write!(
+                f,
+                "pinned read served state at slot {served_slot}, older than the \
+                 anchored slot {anchor_slot}; the RPC cannot establish the \
+                 required consistency"
+            ),
+            Self::SupplyDrift {
+                anchor_slot,
+                initial_supply,
+                final_supply,
+            } => write!(
+                f,
+                "LP supply changed between the anchored reads at slot {anchor_slot}: \
+                 initial {initial_supply}, post-enumeration {final_supply}; \
+                 the enumeration does not represent one chain state"
             ),
         }
     }

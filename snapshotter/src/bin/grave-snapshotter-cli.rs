@@ -6,11 +6,20 @@
 // against the local validator RPC and writes the deterministic artifact JSON.
 // The driver asserts root/supply/holder equality between this artifact and
 // the SDK snapshot fleet-core feeds into the salvage.
-use grave_snapshotter::rpc::RpcLpAccountSource;
+//
+// CONSISTENT-STATE PLUMBING (WD-02 fix)
+//
+// The commitment is an explicit, required CLI argument: the CLI and the
+// library source use the SAME effective commitment (the client is
+// constructed with it AND every source read carries it), and unsupported
+// configurations (`processed`, unknown names) are rejected instead of
+// silently falling back to a client default.
+use grave_snapshotter::rpc::{parse_commitment, RpcLpAccountSource};
 use grave_snapshotter::{
     InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest,
 };
 use solana_client::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
@@ -20,6 +29,18 @@ struct Args {
     amm: Pubkey,
     lp_mint: Pubkey,
     out: String,
+    commitment: CommitmentConfig,
+}
+
+const USAGE: &str = "grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json> --commitment <confirmed|finalized>";
+
+/// Parse the `--commitment` value. Required (no default), and unsupported
+/// levels (`processed`, unknown names) are rejected — never silently mapped
+/// to a client default. Factored out for deterministic unit tests.
+fn commitment_from_flag(value: Option<&str>) -> Result<CommitmentConfig, String> {
+    let name =
+        value.ok_or("--commitment is required; usage: --commitment <confirmed|finalized>")?;
+    parse_commitment(name).map_err(|e| e.to_string())
 }
 
 fn parse_args() -> Args {
@@ -28,6 +49,7 @@ fn parse_args() -> Args {
     let mut amm: Option<Pubkey> = None;
     let mut lp_mint: Option<Pubkey> = None;
     let mut out: Option<String> = None;
+    let mut commitment: Option<String> = None;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut take = |slot: &mut Option<String>| {
@@ -48,8 +70,9 @@ fn parse_args() -> Args {
                 )
             }
             "--out" => take(&mut out),
+            "--commitment" => take(&mut commitment),
             other => {
-                eprintln!("unknown arg {other}; usage: grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json>");
+                eprintln!("unknown arg {other}; usage: {USAGE}");
                 std::process::exit(2);
             }
         }
@@ -60,29 +83,46 @@ fn parse_args() -> Args {
         ("--amm", amm.is_none()),
         ("--lp-mint", lp_mint.is_none()),
         ("--out", out.is_none()),
+        ("--commitment", commitment.is_none()),
     ];
     if missing.iter().any(|(_, m)| *m) {
         eprintln!(
-            "missing {:?}; usage: grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json>",
-            missing.iter().filter(|(_, m)| *m).map(|(n, _)| *n).collect::<Vec<_>>()
+            "missing {:?}; usage: {}",
+            missing
+                .iter()
+                .filter(|(_, m)| *m)
+                .map(|(n, _)| *n)
+                .collect::<Vec<_>>(),
+            USAGE
         );
         std::process::exit(2);
     }
+    let commitment = match commitment_from_flag(commitment.as_deref()) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("grave-snapshotter-cli: {msg}");
+            std::process::exit(2);
+        }
+    };
     Args {
         url: url.unwrap(),
         pool: pool.unwrap(),
         amm: amm.unwrap(),
         lp_mint: lp_mint.unwrap(),
         out: out.unwrap(),
+        commitment,
     }
 }
 
 fn main() {
     let args = parse_args();
-    let client = RpcClient::new(args.url.clone());
+    // The CLI and the library source share this exact commitment: the
+    // client is constructed with it and every source read carries it
+    // explicitly — there is no implicit client default anywhere in the run.
+    let client = RpcClient::new_with_commitment(args.url.clone(), args.commitment);
     eprintln!(
-        "grave-snapshotter-cli: pool={} amm={} lp_mint={} url={}",
-        args.pool, args.amm, args.lp_mint, args.url
+        "grave-snapshotter-cli: pool={} amm={} lp_mint={} commitment={} url={}",
+        args.pool, args.amm, args.lp_mint, args.commitment.commitment, args.url
     );
 
     let request = SnapshotRequest {
@@ -99,7 +139,13 @@ fn main() {
     // so the locked-LP evidence set is empty — the honest local mirror.
     let locks = InMemoryLocks::from_records(&args.pool, &args.lp_mint, Vec::new());
 
-    let source = RpcLpAccountSource::new(client);
+    let source = match RpcLpAccountSource::new(client, args.commitment) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("grave-snapshotter-cli: source configuration rejected: {e:?}");
+            std::process::exit(1);
+        }
+    };
     let snapshot = match builder.build(&source, &locks) {
         Ok(s) => s,
         Err(e) => {
@@ -137,14 +183,33 @@ fn main() {
         std::process::exit(1);
     }
     eprintln!(
-        "grave-snapshotter-cli: root={} leaves={} depth={} -> {}",
+        "grave-snapshotter-cli: root={} leaves={} depth={} slot={} -> {}",
         hex(&artifact.root()),
         tree.leaf_count(),
         tree.tree_depth(),
+        artifact.snapshot_slot,
         args.out
     );
 }
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commitment_flag_is_required_and_strict() {
+        // Missing flag: rejected, no default.
+        assert!(commitment_from_flag(None).is_err());
+        // Supported values parse.
+        assert!(commitment_from_flag(Some("confirmed")).is_ok());
+        assert!(commitment_from_flag(Some("finalized")).is_ok());
+        // Speculative or unknown values are rejected, not mapped to a default.
+        assert!(commitment_from_flag(Some("processed")).is_err());
+        assert!(commitment_from_flag(Some("")).is_err());
+        assert!(commitment_from_flag(Some("Confirmed")).is_err());
+    }
 }
