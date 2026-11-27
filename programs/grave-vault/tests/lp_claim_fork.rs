@@ -86,8 +86,9 @@ use anchor_lang::AccountSerialize;
 use anchor_lang::Space;
 use grave_snapshotter::source::InMemorySource;
 use grave_snapshotter::{
-    HolderEntry, InMemoryLocks, SinkLedger, SinkLedgerEntry, SnapshotArtifact, SnapshotBuilder,
-    SnapshotMerkleTree, SnapshotRequest, TokenAccountSnapshot, SINK_LEDGER_SCHEMA_VERSION,
+    ArtifactProvenance, HolderEntry, InMemoryLocks, LockEvidenceProvenance, SinkLedger,
+    SinkLedgerEntry, SinkLedgerProvenance, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree,
+    SnapshotRequest, TokenAccountSnapshot, SINK_LEDGER_SCHEMA_VERSION,
 };
 use grave_vault::constants::{
     JUPITER_V6_PROGRAM_ID, RAYDIUM_V4_AMM_AUTHORITY, RAYDIUM_V4_PROGRAM_ID, VAULT_AUTHORITY_SEED,
@@ -1033,7 +1034,7 @@ async fn boot_claim_lifecycle() -> Option<ClaimFork> {
         lp_mint: env.lp_mint,
         sink_exclusions: vec![RAYDIUM_V4_AMM_AUTHORITY],
         custody_owner_overrides: vec![],
-        sink_ledger: Some(sink_ledger),
+        sink_ledger: Some(sink_ledger.clone()),
     };
     let snapshot = SnapshotBuilder::new(request)
         .build(&source, &locks)
@@ -1069,14 +1070,39 @@ async fn boot_claim_lifecycle() -> Option<ClaimFork> {
 
     // ---- TREE + ARTIFACT + publication (the JSON boundary) ----
     let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
-    let artifact = SnapshotArtifact::seal(&snapshot, &tree).unwrap();
+    // Sealed through the production path with governed-input provenance
+    // (D2-02/D2-03): explicit sink exclusions must carry sink-ledger
+    // provenance; lock-evidence provenance identifies the honestly-empty
+    // UNCX evidence source of this VM (no locker state exists here).
+    let provenance = ArtifactProvenance {
+        sink_ledger: Some(SinkLedgerProvenance {
+            schema_version: SINK_LEDGER_SCHEMA_VERSION,
+            ledger_id: sink_ledger.ledger_id.clone(),
+            input_sha256: SinkLedger::input_digest_hex(&serde_json::to_vec(&sink_ledger).unwrap()),
+            entry_count: sink_ledger.entries.len(),
+            sink_exclusions_total: snapshot.reconciliation.sink_exclusions_total,
+        }),
+        lock_evidence: LockEvidenceProvenance {
+            source: "rpc".to_string(),
+            program_id: grave_snapshotter::locked::uncx::PROGRAM_ID.to_string(),
+            commitment: "confirmed".to_string(),
+            anchor_slot: snapshot.snapshot_slot,
+            records_seen: snapshot.locked.lock_records_seen,
+            total_locked: snapshot.locked.total_locked,
+        },
+    };
+    let artifact =
+        SnapshotArtifact::seal_with_provenance(&snapshot, &tree, provenance.clone()).unwrap();
     artifact
         .verify_integrity()
         .expect("the sealed artifact must verify");
     let json = serde_json::to_string(&artifact).unwrap();
     // determinism: the same snapshot always seals to byte-identical JSON
     assert_eq!(
-        serde_json::to_string(&SnapshotArtifact::seal(&snapshot, &tree).unwrap()).unwrap(),
+        serde_json::to_string(
+            &SnapshotArtifact::seal_with_provenance(&snapshot, &tree, provenance).unwrap()
+        )
+        .unwrap(),
         json
     );
     // holders consume the PUBLISHED document only
