@@ -220,7 +220,7 @@ jobs:
       # which can't parse edition2024 manifests (blake3 0.12 et al.).
       # Replace the cached platform-tools with v1.54 contents exactly as
       # ci.yml's anchor-build does — see the rationale block there.
-      - name: Pin platform-tools v1.54 (edition2024 fix)
+      - name: Pin platform-tools v1.54 (edition2024 fix + offline tools-version resolution)
         run: |
           set -euo pipefail
           curl -sSL -o /tmp/platform-tools.tar.bz2 \
@@ -228,12 +228,40 @@ jobs:
           # P5-07: the tarball is hash-pinned so the platform-tools toolchain
           # (which produces the deployed ELFs) cannot be swapped silently.
           echo "fcc41631c7f77561bf5412218bf297501dccf0305ea280f338f0ace2aab9f31e  /tmp/platform-tools.tar.bz2" | sha256sum -c -
-          CACHE_DEST="$HOME/.cache/solana/v1.51/platform-tools"
-          rm -rf "$CACHE_DEST"
-          mkdir -p "$CACHE_DEST"
-          tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
-          "$CACHE_DEST/rust/bin/cargo" --version
-          "$CACHE_DEST/rust/bin/rustc" --version
+          # Pre-seed BOTH per-version cache directories cargo-build-sbf may
+          # resolve for the fork-harness builds (same mechanism as ci.yml's
+          # pin step):
+          #   - v1.51: cargo-build-sbf 3.0.10's built-in default;
+          #   - v1.54: the version resolved from
+          #     [workspace.metadata.solana] tools-version in Cargo.toml —
+          #     what the direct `cargo build-sbf` calls in
+          #     scripts/build_fork_harness.sh actually request.
+          # Seeding v1.54 is required for determinism, not just an
+          # optimization: cargo-build-sbf 3.0.10 resolves a requested
+          # version that differs from its built-in one by (a) scanning
+          # ~/.cache/solana/* for an installed version >= the request and,
+          # failing that, (b) querying
+          # https://github.com/anza-xyz/platform-tools/releases/latest and
+          # parsing the redirect target as a semver. When that request is
+          # answered without a redirect (rate limiting, transient GitHub
+          # errors), it parses the literal string "latest" and panics —
+          # "unexpected character 'l' while parsing major version number"
+          # at platform-tools-sdk/cargo-build-sbf/src/toolchain.rs:117
+          # (observed in runs 46028715766 and 46047685945 of this PR,
+          # 2026-11-27). With v1.54 present in the cache the version check
+          # short-circuits locally: the GitHub latest lookup is never
+          # reached, install_if_missing skips its per-run v1.54 download,
+          # and every build compiles with the same hash-verified v1.54
+          # bytes on every invocation path.
+          for CACHE_DEST in \
+            "$HOME/.cache/solana/v1.51/platform-tools" \
+            "$HOME/.cache/solana/v1.54/platform-tools"; do
+            rm -rf "$CACHE_DEST"
+            mkdir -p "$CACHE_DEST"
+            tar xjf /tmp/platform-tools.tar.bz2 -C "$CACHE_DEST"
+          done
+          "$HOME/.cache/solana/v1.51/platform-tools/rust/bin/cargo" --version
+          "$HOME/.cache/solana/v1.51/platform-tools/rust/bin/rustc" --version
       # Cheap regression gate before the expensive harness work: the
       # fork_support skip-integrity contract (host-built, no fixtures or
       # network needed — absence handling uses isolated temp dirs) and the

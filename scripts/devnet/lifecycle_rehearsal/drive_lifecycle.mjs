@@ -1250,6 +1250,8 @@ await stage(9, "REAL snapshotter (Rust bin) + SDK snapshot root-equality", async
       outPath,
       "--commitment",
       "confirmed",
+      "--lock-evidence",
+      "rpc",
     ],
     { encoding: "utf8" },
   );

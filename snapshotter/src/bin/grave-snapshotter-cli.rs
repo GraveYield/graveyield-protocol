@@ -14,10 +14,37 @@
 // constructed with it AND every source read carries it), and unsupported
 // configurations (`processed`, unknown names) are rejected instead of
 // silently falling back to a client default.
-use grave_snapshotter::rpc::{parse_commitment, RpcLpAccountSource};
-use grave_snapshotter::{
-    InMemoryLocks, SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest,
+//
+// GOVERNED INPUTS (WD-07 fix)
+//
+// `--lock-evidence rpc` is REQUIRED: the real `RpcLockedLpEvidence` (UNCX
+// Raydium AMM V4 `getProgramAccounts`, pinned to the same commitment and
+// anchor slot as the holder enumeration) is always consulted, so locked LP
+// can never silently become an ordinary custody-PDA holder leaf because the
+// CLI supplied an empty lock list. Unavailable, malformed, ambiguous, or
+// unsupported evidence fails closed — it is never replaced with an empty
+// lock list. In-repository adapter support is UNCX-specific (LOCKER-001);
+// other locker protocols require separate validation before reliance.
+//
+// `--sink-ledger <file>` is optional: when supplied, the governed
+// sink-exclusion ledger (`gy.sink-ledger.v1`, D-04-C/D) is validated and
+// applied exactly; a malformed, unsupported, duplicate, ambiguous, or
+// mismatched ledger aborts the run and is never silently reduced to an
+// empty ledger. A schema-valid ledger is NOT proof of owner approval —
+// that is a D-04-D process control outside this binary. When omitted, no
+// exclusions are applied and the sealed artifact records the absence
+// explicitly (no sink-ledger provenance).
+//
+// The sealed artifact carries provenance for both inputs (ledger id /
+// version / exact-input SHA-256; lock-evidence source / program /
+// commitment / anchor slot), so an independent reviewer can establish
+// which governed inputs produced it.
+use grave_snapshotter::artifact::{
+    ArtifactProvenance, LockEvidenceProvenance, SinkLedgerProvenance,
 };
+use grave_snapshotter::rpc::{parse_commitment, RpcLockedLpEvidence, RpcLpAccountSource};
+use grave_snapshotter::sink_ledger::SinkLedger;
+use grave_snapshotter::{SnapshotArtifact, SnapshotBuilder, SnapshotMerkleTree, SnapshotRequest};
 use solana_client::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
@@ -33,9 +60,18 @@ struct Args {
     /// The `--commitment` name as supplied (log context only; never
     /// logged alongside or as part of the RPC URL — D1-01).
     commitment_name: String,
+    sink_ledger: Option<String>,
+    lock_evidence: LockEvidenceMode,
 }
 
-const USAGE: &str = "grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json> --commitment <confirmed|finalized>";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LockEvidenceMode {
+    /// Real UNCX locker evidence from the configured RPC (the only
+    /// supported production mode).
+    Rpc,
+}
+
+const USAGE: &str = "grave-snapshotter-cli --url <rpc> --pool <P> --amm <A> --lp-mint <M> --out <file.json> --commitment <confirmed|finalized> --lock-evidence rpc [--sink-ledger <file>]";
 
 /// Parse the `--commitment` value. Required (no default), and unsupported
 /// levels (`processed`, unknown names) are rejected — never silently mapped
@@ -50,8 +86,9 @@ fn commitment_from_flag(value: Option<&str>) -> Result<(CommitmentConfig, String
 }
 
 /// The startup context line, built EXCLUSIVELY from non-sensitive
-/// operational fields (D1-01): pool address, AMM program id, LP mint,
-/// commitment, and output path.
+/// operational fields (D1-01 / D2-01): pool address, AMM program id, LP
+/// mint, commitment, lock-evidence mode, sink-ledger path, and output
+/// path.
 ///
 /// The RPC URL is deliberately NOT a parameter of this function: the
 /// signature makes it structurally impossible for provider credentials
@@ -63,12 +100,34 @@ fn startup_context_line(
     amm: &Pubkey,
     lp_mint: &Pubkey,
     commitment: &str,
+    lock_evidence: &str,
+    sink_ledger: &str,
     out: &str,
 ) -> String {
     format!(
         "grave-snapshotter-cli: pool={pool} amm={amm} lp_mint={lp_mint} \
-         commitment={commitment} out={out}"
+         commitment={commitment} lock_evidence={lock_evidence} \
+         sink_ledger={sink_ledger} out={out}"
     )
+}
+
+/// Parse the `--lock-evidence` value. Required; only `rpc` is supported —
+/// the CLI must never substitute an empty lock list for real locker
+/// evidence (WD-07). Factored out for deterministic unit tests.
+fn lock_evidence_from_flag(value: Option<&str>) -> Result<LockEvidenceMode, String> {
+    match value {
+        Some("rpc") => Ok(LockEvidenceMode::Rpc),
+        Some(other) => Err(format!(
+            "unsupported lock evidence mode `{other}`; supported values: rpc \
+             (real UNCX locker evidence from the configured RPC)"
+        )),
+        None => Err(
+            "--lock-evidence is required; usage: --lock-evidence rpc. Locked LP must never \
+             silently become an ordinary custody-PDA holder leaf because the CLI supplied \
+             an empty lock list"
+                .to_string(),
+        ),
+    }
 }
 
 fn parse_args() -> Args {
@@ -78,6 +137,8 @@ fn parse_args() -> Args {
     let mut lp_mint: Option<Pubkey> = None;
     let mut out: Option<String> = None;
     let mut commitment: Option<String> = None;
+    let mut sink_ledger: Option<String> = None;
+    let mut lock_evidence: Option<String> = None;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut take = |slot: &mut Option<String>| {
@@ -99,6 +160,8 @@ fn parse_args() -> Args {
             }
             "--out" => take(&mut out),
             "--commitment" => take(&mut commitment),
+            "--sink-ledger" => take(&mut sink_ledger),
+            "--lock-evidence" => take(&mut lock_evidence),
             other => {
                 eprintln!("unknown arg {other}; usage: {USAGE}");
                 std::process::exit(2);
@@ -112,6 +175,7 @@ fn parse_args() -> Args {
         ("--lp-mint", lp_mint.is_none()),
         ("--out", out.is_none()),
         ("--commitment", commitment.is_none()),
+        ("--lock-evidence", lock_evidence.is_none()),
     ];
     if missing.iter().any(|(_, m)| *m) {
         eprintln!(
@@ -132,6 +196,13 @@ fn parse_args() -> Args {
             std::process::exit(2);
         }
     };
+    let lock_evidence = match lock_evidence_from_flag(lock_evidence.as_deref()) {
+        Ok(m) => m,
+        Err(msg) => {
+            eprintln!("grave-snapshotter-cli: {msg}");
+            std::process::exit(2);
+        }
+    };
     Args {
         url: url.unwrap(),
         pool: pool.unwrap(),
@@ -140,18 +211,20 @@ fn parse_args() -> Args {
         out: out.unwrap(),
         commitment,
         commitment_name,
+        sink_ledger,
+        lock_evidence,
     }
 }
 
 fn main() {
     let args = parse_args();
     // The CLI and the library source share this exact commitment: the
-    // client is constructed with it and every source read carries it
+    // clients are constructed with it and every source read carries it
     // explicitly — there is no implicit client default anywhere in the run.
     let client = RpcClient::new_with_commitment(args.url.clone(), args.commitment);
-    // Startup context (D1-01): non-sensitive operational fields only. The
-    // RPC URL — including any credentials embedded in it — is never logged;
-    // `startup_context_line` cannot even accept one.
+    // Startup context (D1-01 / D2-01): non-sensitive operational fields
+    // only. The RPC URL — including any credentials embedded in it — is
+    // never logged; `startup_context_line` cannot even accept one.
     eprintln!(
         "{}",
         startup_context_line(
@@ -159,29 +232,76 @@ fn main() {
             &args.amm,
             &args.lp_mint,
             &args.commitment_name,
-            &args.out
+            "rpc",
+            args.sink_ledger.as_deref().unwrap_or("<none>"),
+            &args.out,
         )
     );
+
+    // Governed sink ledger (optional): parse + structural validation of the
+    // EXACT input bytes before anything else. A supplied-but-invalid ledger
+    // aborts the run — it is never silently reduced to an empty ledger.
+    let (ledger, ledger_digest) = match &args.sink_ledger {
+        Some(path) => {
+            let bytes = match std::fs::read(path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!(
+                        "grave-snapshotter-cli: sink ledger {} unreadable: {e}; \
+                         refusing to continue without it",
+                        path
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let digest = SinkLedger::input_digest_hex(&bytes);
+            match SinkLedger::parse(&bytes) {
+                Ok(l) => (Some(l), digest),
+                Err(e) => {
+                    eprintln!("grave-snapshotter-cli: sink ledger rejected: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => (None, String::new()),
+    };
 
     let request = SnapshotRequest {
         pool_address: args.pool,
         amm_program_id: args.amm,
         lp_mint: args.lp_mint,
-        sink_exclusions: Vec::new(),
+        // Governed exclusions: exactly the ledger's owners when a ledger is
+        // supplied (the builder enforces equality), otherwise none.
+        sink_exclusions: ledger
+            .as_ref()
+            .map(|l| l.entries.iter().map(|e| e.owner).collect())
+            .unwrap_or_default(),
         custody_owner_overrides: Vec::new(),
+        sink_ledger: ledger.clone(),
     };
     let builder = SnapshotBuilder::new(request);
-
-    // Local rehearsal: the UNCX per-pool lock marker is absent from the local
-    // validator (proven-unlocked path, PoolEnv::scanner_remaining precedent),
-    // so the locked-LP evidence set is empty — the honest local mirror.
-    let locks = InMemoryLocks::from_records(&args.pool, &args.lp_mint, Vec::new());
 
     let source = match RpcLpAccountSource::new(client, args.commitment) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("grave-snapshotter-cli: source configuration rejected: {e:?}");
             std::process::exit(1);
+        }
+    };
+    // Real UNCX locker evidence from the configured RPC — pinned to the
+    // same commitment; the builder pins the query to the same anchor slot
+    // as the enumeration. Never an empty lock list (WD-07). `rpc` is the
+    // only supported mode (enforced in parse_args).
+    let locks = match args.lock_evidence {
+        LockEvidenceMode::Rpc => {
+            let lock_client = RpcClient::new_with_commitment(args.url.clone(), args.commitment);
+            match RpcLockedLpEvidence::new(lock_client, args.commitment) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("grave-snapshotter-cli: lock evidence configuration rejected: {e:?}");
+                    std::process::exit(1);
+                }
+            }
         }
     };
     let snapshot = match builder.build(&source, &locks) {
@@ -198,7 +318,27 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let artifact = match SnapshotArtifact::seal(&snapshot, &tree) {
+    // Sealed provenance: the sink ledger's identity/version/exact-input
+    // digest and the lock-evidence source/context, cross-checked against
+    // the snapshot before sealing.
+    let provenance = ArtifactProvenance {
+        sink_ledger: ledger.map(|l| SinkLedgerProvenance {
+            schema_version: l.schema_version,
+            ledger_id: l.ledger_id.clone(),
+            input_sha256: ledger_digest.clone(),
+            entry_count: l.entries.len(),
+            sink_exclusions_total: snapshot.reconciliation.sink_exclusions_total,
+        }),
+        lock_evidence: LockEvidenceProvenance {
+            source: "rpc".to_string(),
+            program_id: grave_snapshotter::locked::uncx::PROGRAM_ID.to_string(),
+            commitment: args.commitment_name.clone(),
+            anchor_slot: snapshot.snapshot_slot,
+            records_seen: snapshot.locked.lock_records_seen,
+            total_locked: snapshot.locked.total_locked,
+        },
+    };
+    let artifact = match SnapshotArtifact::seal_with_provenance(&snapshot, &tree, provenance) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("grave-snapshotter-cli: artifact seal failed: {e:?}");
@@ -221,11 +361,12 @@ fn main() {
         std::process::exit(1);
     }
     eprintln!(
-        "grave-snapshotter-cli: root={} leaves={} depth={} slot={} -> {}",
+        "grave-snapshotter-cli: root={} leaves={} depth={} slot={} locks={} -> {}",
         hex(&artifact.root()),
         tree.leaf_count(),
         tree.tree_depth(),
         artifact.snapshot_slot,
+        artifact.locked.total_locked,
         args.out
     );
 }
@@ -243,7 +384,7 @@ mod tests {
         // Missing flag: rejected, no default.
         assert!(commitment_from_flag(None).is_err());
         // Supported values parse (and the CLI name is preserved for log
-        // context).
+        // context and provenance).
         let (_, name) = commitment_from_flag(Some("confirmed")).unwrap();
         assert_eq!(name, "confirmed");
         let (_, name) = commitment_from_flag(Some("finalized")).unwrap();
@@ -258,7 +399,7 @@ mod tests {
         Pubkey::new_from_array([n; 32])
     }
 
-    /// D1-01 regression: the startup context line carries only
+    /// D1-01 / D2-01 regression: the startup context line carries only
     /// non-sensitive operational fields. It must never contain an RPC URL
     /// (scheme, host separator, or a `url` field), because
     /// `startup_context_line` cannot even receive one — provider
@@ -271,6 +412,8 @@ mod tests {
             &key(0xAB),
             &key(0x01),
             "confirmed",
+            "rpc",
+            "<none>",
             "/tmp/artifact.json",
         );
         // No URL scheme, authority separator, or `url` field of any kind.
@@ -287,7 +430,15 @@ mod tests {
             "log line must not contain a URL field: {line}"
         );
         // Useful non-sensitive operational context is retained.
-        for field in ["pool=", "amm=", "lp_mint=", "commitment=", "out="] {
+        for field in [
+            "pool=",
+            "amm=",
+            "lp_mint=",
+            "commitment=",
+            "lock_evidence=",
+            "sink_ledger=",
+            "out=",
+        ] {
             assert!(
                 line.contains(field),
                 "missing context field `{field}`: {line}"
@@ -301,9 +452,28 @@ mod tests {
             &key(0xAB),
             &key(0x01),
             "finalized",
+            "rpc",
+            "<none>",
             "/tmp/artifact.json",
         );
         assert!(!line.contains("https"));
         assert!(line.contains("commitment=finalized"));
+    }
+
+    #[test]
+    fn lock_evidence_flag_is_required_and_rpc_only() {
+        // Missing flag: rejected — an empty lock list is never an acceptable
+        // substitute for real locker evidence (WD-07 regression).
+        assert!(lock_evidence_from_flag(None).is_err());
+        // The only supported mode is the real RPC evidence source.
+        assert_eq!(
+            lock_evidence_from_flag(Some("rpc")).unwrap(),
+            LockEvidenceMode::Rpc
+        );
+        // Anything else (file, none, empty, future names) is rejected.
+        assert!(lock_evidence_from_flag(Some("none")).is_err());
+        assert!(lock_evidence_from_flag(Some("file")).is_err());
+        assert!(lock_evidence_from_flag(Some("")).is_err());
+        assert!(lock_evidence_from_flag(Some("RPC")).is_err());
     }
 }
