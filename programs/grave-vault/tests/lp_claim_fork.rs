@@ -1010,6 +1010,7 @@ async fn boot_claim_lifecycle() -> Option<ClaimFork> {
         lp_mint: env.lp_mint,
         sink_exclusions: vec![RAYDIUM_V4_AMM_AUTHORITY],
         custody_owner_overrides: vec![],
+        sink_ledger: None,
     };
     let snapshot = SnapshotBuilder::new(request)
         .build(&source, &locks)

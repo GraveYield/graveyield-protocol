@@ -94,6 +94,7 @@ fn sealed_production_artifact() -> SnapshotArtifact {
         lp_mint,
         sink_exclusions: vec![],
         custody_owner_overrides: vec![],
+        sink_ledger: None,
     };
     request.sink_exclusions = vec![key(0x50)];
     let snapshot = SnapshotBuilder::new(request)

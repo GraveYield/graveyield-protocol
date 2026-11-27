@@ -1408,6 +1408,7 @@ async fn candidate_pool_to_lp_claim_end_to_end() {
         lp_mint: env.lp_mint,
         sink_exclusions: vec![RAYDIUM_V4_AMM_AUTHORITY],
         custody_owner_overrides: vec![],
+        sink_ledger: None,
     };
     let snapshot = SnapshotBuilder::new(request)
         .build(&source, &locks)

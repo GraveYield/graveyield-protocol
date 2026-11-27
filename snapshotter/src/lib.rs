@@ -88,6 +88,22 @@
 // Holder-level revalidation is the separate D-06 P2 control and is NOT
 // claimed by this crate.
 //
+// GOVERNED INPUTS (WD-07 / D-04-C+D)
+//
+// [`sink_ledger::SinkLedger`] is the versioned governed sink-exclusion
+// ledger (`gy.sink-ledger.v1`) the CLI accepts via `--sink-ledger`: exact
+// D-04-D fields, strict structural validation, pool/mint identity
+// binding, and full balance reconciliation against the enumeration (all
+// fail-closed). The CLI's `--lock-evidence rpc` (required) wires the real
+// `RpcLockedLpEvidence` UNCX adapter into the run — locked LP can never
+// silently become an ordinary custody-PDA leaf because an empty lock list
+// was supplied, and unavailable/malformed evidence aborts rather than
+// degrading. The sealed artifact carries provenance for both inputs
+// (ledger id/version/exact-input SHA-256; evidence source/program/
+// commitment/anchor slot). What the code does NOT do: verify owner-approval
+// authenticity (a valid schema is not an approval — D-04-D process
+// control) and support non-UNCX lockers (separate validation required).
+//
 // PHASE 5.2 — FROM SNAPSHOT TO SEALED ARTIFACT
 //
 // [`tree::SnapshotMerkleTree`] seals the canonical leaf set into the
@@ -107,16 +123,24 @@ pub mod error;
 pub mod locked;
 pub mod model;
 pub mod rpc;
+pub mod sink_ledger;
 pub mod source;
 pub mod tree;
 
-pub use artifact::{ArtifactEntry, SnapshotArtifact, ARTIFACT_FORMAT_VERSION};
+pub use artifact::{
+    ArtifactAttribution, ArtifactCustody, ArtifactEntry, ArtifactExclusion, ArtifactLockedReport,
+    ArtifactProvenance, LockEvidenceProvenance, SinkLedgerProvenance, SnapshotArtifact,
+    ARTIFACT_FORMAT_VERSION,
+};
 pub use builder::{SnapshotBuilder, SnapshotRequest};
 pub use error::SnapshotError;
 pub use locked::{InMemoryLocks, LockedLpEvidence, TokenLockRecord};
 pub use model::{
     CustodyMatchMethod, CustodyResolution, ExcludedBalance, ExclusionReason, HolderEntry,
     LockedReport, LpSnapshot, MintSupply, Reconciliation, TokenAccountSnapshot,
+};
+pub use sink_ledger::{
+    SinkLedger, SinkLedgerEntry, SINK_LEDGER_SCHEMA_ID, SINK_LEDGER_SCHEMA_VERSION,
 };
 pub use source::{InMemorySource, LpAccountSource};
 pub use tree::SnapshotMerkleTree;

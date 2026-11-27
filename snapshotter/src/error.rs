@@ -74,6 +74,37 @@ pub enum SnapshotError {
         initial_supply: u64,
         final_supply: u64,
     },
+    /// A governed sink ledger failed structural validation (malformed
+    /// JSON, missing/empty required D-04-D fields, duplicate or ambiguous
+    /// entries). The ledger is rejected in full — never partially applied.
+    SinkLedgerInvalid(String),
+    /// The sink ledger's schema version is not supported by this build.
+    SinkLedgerUnsupportedVersion { found: u32, expected: u32 },
+    /// The sink ledger (or one of its entries) does not match the snapshot
+    /// request's pool / AMM program / LP mint identity.
+    SinkLedgerIdentityMismatch(String),
+    /// The sink ledger declares the same owner or token account more than
+    /// once, or conflicts with the request's declared sink exclusions.
+    SinkLedgerDuplicateEntry(String),
+    /// The sink ledger's declared balance for an owner does not equal the
+    /// owner's total enumerated balance.
+    SinkLedgerBalanceMismatch {
+        owner: String,
+        ledger_balance: u64,
+        enumerated_balance: u64,
+    },
+    /// The sink ledger declares an owner that is not present in the
+    /// enumerated holder set.
+    SinkLedgerEntryNotEnumerated { owner: String },
+    /// The sink ledger's declared token account is not an enumerated
+    /// account owned by the entry's owner carrying the full declared
+    /// balance (a spread balance is ambiguous and rejected).
+    SinkLedgerTokenAccountMismatch {
+        owner: String,
+        token_account: String,
+    },
+    /// The request's `sink_exclusions` and the governed ledger disagree.
+    SinkLedgerConflict(String),
 }
 
 impl fmt::Display for SnapshotError {
@@ -149,6 +180,48 @@ impl fmt::Display for SnapshotError {
                  initial {initial_supply}, post-enumeration {final_supply}; \
                  the enumeration does not represent one chain state"
             ),
+            Self::SinkLedgerInvalid(msg) => {
+                write!(f, "governed sink ledger rejected: {msg}")
+            }
+            Self::SinkLedgerUnsupportedVersion { found, expected } => write!(
+                f,
+                "unsupported sink ledger schema_version {found} (expected {expected}); \
+                 refusing to interpret an unknown format"
+            ),
+            Self::SinkLedgerIdentityMismatch(msg) => {
+                write!(f, "sink ledger identity mismatch: {msg}")
+            }
+            Self::SinkLedgerDuplicateEntry(msg) => {
+                write!(f, "sink ledger duplicate/conflicting entry: {msg}")
+            }
+            Self::SinkLedgerBalanceMismatch {
+                owner,
+                ledger_balance,
+                enumerated_balance,
+            } => write!(
+                f,
+                "sink ledger balance for owner {owner} is {ledger_balance} but the \
+                 enumerated total is {enumerated_balance}; reconciliation fails closed"
+            ),
+            Self::SinkLedgerEntryNotEnumerated { owner } => write!(
+                f,
+                "sink ledger declares owner {owner} but no token account for that owner \
+                 was enumerated"
+            ),
+            Self::SinkLedgerTokenAccountMismatch {
+                owner,
+                token_account,
+            } => write!(
+                f,
+                "sink ledger token account {token_account} for owner {owner} is not an \
+                 enumerated account owned by that owner carrying the full declared balance"
+            ),
+            Self::SinkLedgerConflict(msg) => {
+                write!(
+                    f,
+                    "sink ledger conflicts with the request's sink exclusions: {msg}"
+                )
+            }
         }
     }
 }

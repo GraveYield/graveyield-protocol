@@ -38,6 +38,7 @@ fn request(lp_mint: Pubkey) -> SnapshotRequest {
         lp_mint,
         sink_exclusions: vec![],
         custody_owner_overrides: vec![],
+        sink_ledger: None,
     }
 }
 

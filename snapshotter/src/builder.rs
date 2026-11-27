@@ -42,6 +42,7 @@ use crate::model::{
     CustodyMatchMethod, CustodyResolution, ExcludedBalance, ExclusionReason, HolderEntry,
     LockedReport, LpSnapshot, Reconciliation, TokenAccountSnapshot,
 };
+use crate::sink_ledger::SinkLedger;
 use crate::source::LpAccountSource;
 
 /// The snapshot request: which pool/mint to snapshot, and the two
@@ -67,6 +68,15 @@ pub struct SnapshotRequest {
     /// have its owner listed here, or the snapshot aborts
     /// (`CustodyAmbiguous`).
     pub custody_owner_overrides: Vec<Pubkey>,
+    /// The governed sink-exclusion ledger (D-04-C/D, WD-07). When
+    /// present, its entries are validated against the enumerated holder
+    /// set (identity, balances, token accounts) and its owner set MUST
+    /// equal `sink_exclusions` — any disagreement aborts the snapshot.
+    /// When absent, `sink_exclusions` may still declare sinks directly
+    /// (lib-level API; the CLI always routes governed exclusions through
+    /// a ledger). A parsed ledger is structurally valid; its approval
+    /// authenticity is a D-04-D process control outside this code.
+    pub sink_ledger: Option<SinkLedger>,
 }
 
 /// Builds [`LpSnapshot`]s from a [`LpAccountSource`] + [`LockedLpEvidence`].
@@ -160,6 +170,63 @@ impl SnapshotBuilder {
             *entry = entry
                 .checked_add(account.amount)
                 .ok_or(SnapshotError::Overflow)?;
+        }
+
+        // ---- 4b. Governed sink-ledger reconciliation (D-04-C/D, WD-07) -----
+        if let Some(ledger) = &self.request.sink_ledger {
+            // Pool/AMM/mint identity binding: a ledger for another pool is
+            // never applied.
+            ledger.validate_identity(
+                &self.request.pool_address,
+                &self.request.amm_program_id,
+                &self.request.lp_mint,
+            )?;
+            // The request's declared exclusions must mirror the ledger
+            // exactly — a ledger plus extra operator sinks (or a ledger
+            // whose owners are not actually declared) is an ambiguous
+            // configuration and aborts.
+            let ledger_owners: BTreeSet<Pubkey> = ledger.entries.iter().map(|e| e.owner).collect();
+            let declared: BTreeSet<Pubkey> = self.request.sink_exclusions.iter().copied().collect();
+            if declared != ledger_owners {
+                return Err(SnapshotError::SinkLedgerConflict(format!(
+                    "sink_exclusions ({}) and governed ledger owners ({}) disagree; \
+                     apply the ledger exactly or drop it",
+                    declared.len(),
+                    ledger_owners.len()
+                )));
+            }
+            // Every declaration must reconcile against the enumeration:
+            // the owner is enumerated, the declared balance equals the
+            // owner's total enumerated balance, and the declared token
+            // account exists under that owner carrying the full balance
+            // (a spread balance is ambiguous — fail closed).
+            for entry in &ledger.entries {
+                let enumerated = match per_owner.get(&entry.owner) {
+                    Some(total) => *total,
+                    None => {
+                        return Err(SnapshotError::SinkLedgerEntryNotEnumerated {
+                            owner: entry.owner.to_string(),
+                        })
+                    }
+                };
+                if enumerated != entry.raw_balance {
+                    return Err(SnapshotError::SinkLedgerBalanceMismatch {
+                        owner: entry.owner.to_string(),
+                        ledger_balance: entry.raw_balance,
+                        enumerated_balance: enumerated,
+                    });
+                }
+                match accounts.iter().find(|a| a.address == entry.token_account) {
+                    Some(acct) if acct.owner == entry.owner && acct.amount == entry.raw_balance => {
+                    }
+                    _ => {
+                        return Err(SnapshotError::SinkLedgerTokenAccountMismatch {
+                            owner: entry.owner.to_string(),
+                            token_account: entry.token_account.to_string(),
+                        })
+                    }
+                }
+            }
         }
 
         // ---- 5. Exclusion pass (ascending owner bytes) ----------------------
@@ -376,6 +443,7 @@ mod tests {
             lp_mint,
             sink_exclusions: vec![],
             custody_owner_overrides: vec![],
+            sink_ledger: None,
         }
     }
 
@@ -652,6 +720,7 @@ mod consistent_state_tests {
             lp_mint,
             sink_exclusions: vec![],
             custody_owner_overrides: vec![],
+            sink_ledger: None,
         }
     }
 
@@ -939,5 +1008,324 @@ mod consistent_state_tests {
             .unwrap();
         assert_eq!(snapshot.snapshot_slot, 123);
         assert_eq!(snapshot.lp_total_supply_at_snapshot, 1_000);
+    }
+}
+
+/// Governed sink-ledger + lock-evidence acceptance tests (WD-07 / D-04-C+D).
+#[cfg(test)]
+mod governed_input_tests {
+    use super::*;
+    use crate::locked::{InMemoryLocks, LockedLpEvidence, TokenLockRecord};
+    use crate::model::TokenAccountSnapshot;
+    use crate::sink_ledger::{SinkLedger, SinkLedgerEntry};
+    use crate::source::InMemorySource;
+
+    fn key(n: u8) -> Pubkey {
+        Pubkey::new_from_array([n; 32])
+    }
+
+    fn acct(address: u8, owner: u8, amount: u64) -> TokenAccountSnapshot {
+        TokenAccountSnapshot {
+            address: key(address),
+            owner: key(owner),
+            amount,
+        }
+    }
+
+    fn lock(address_seed: u8, global_id: u64, owner: u8, amount: u64) -> TokenLockRecord {
+        TokenLockRecord {
+            address: key(address_seed),
+            lock_global_id: global_id,
+            current_locked_amount: amount,
+            lock_owner: key(owner),
+        }
+    }
+
+    fn entry(owner_seed: u8, token_seed: u8, balance: u64) -> SinkLedgerEntry {
+        SinkLedgerEntry {
+            owner: key(owner_seed),
+            token_account: key(token_seed),
+            lp_mint: key(0x01),
+            raw_balance: balance,
+            rationale: "incinerator address, funds provably unrecoverable".to_string(),
+            evidence_references: vec!["gy-evidence-001".to_string()],
+            approval_identities: vec!["owner-identity-1".to_string()],
+            independent_reviewer: "reviewer-identity-1".to_string(),
+            approved_at: "2026-11-27T00:00:00Z".to_string(),
+        }
+    }
+
+    fn ledger(entries: Vec<SinkLedgerEntry>) -> SinkLedger {
+        SinkLedger {
+            schema_version: crate::sink_ledger::SINK_LEDGER_SCHEMA_VERSION,
+            ledger_id: "GY-SINK-TEST-001".to_string(),
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint: key(0x01),
+            entries,
+        }
+    }
+
+    fn request(lp_mint: Pubkey, ledger: Option<SinkLedger>, sinks: Vec<Pubkey>) -> SnapshotRequest {
+        SnapshotRequest {
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint,
+            sink_exclusions: sinks,
+            custody_owner_overrides: vec![],
+            sink_ledger: ledger,
+        }
+    }
+
+    /// Pool shape: holder 0x10 (4_000), sink 0x20 via token account 0x21
+    /// (1_000), custody 0x30 (2_000) locked for 0x40. Supply 7_000.
+    fn source() -> InMemorySource {
+        InMemorySource::new(
+            key(0x01),
+            123,
+            7_000,
+            vec![
+                acct(0x10, 0x10, 4_000),
+                acct(0x21, 0x20, 1_000),
+                acct(0x30, 0x30, 2_000),
+            ],
+        )
+    }
+
+    fn locks_for(lp_mint: &Pubkey) -> InMemoryLocks {
+        InMemoryLocks::from_records(&key(0xAA), lp_mint, vec![lock(0x71, 1, 0x40, 2_000)])
+    }
+
+    /// Acceptance: a valid governed ledger is accepted and its exclusions
+    /// reconcile exactly with the enumerated balances and supply.
+    #[test]
+    fn valid_governed_ledger_is_accepted_and_reconciles() {
+        let lp_mint = key(0x01);
+        let sink_ledger = Some(ledger(vec![entry(0x20, 0x21, 1_000)]));
+        let snapshot = SnapshotBuilder::new(request(lp_mint, sink_ledger, vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap();
+        assert_eq!(snapshot.reconciliation.enumerated_total, 7_000);
+        assert_eq!(snapshot.reconciliation.sink_exclusions_total, 1_000);
+        assert_eq!(snapshot.reconciliation.entries_total, 6_000);
+        assert_eq!(
+            snapshot.exclusions,
+            vec![ExcludedBalance {
+                owner: key(0x20),
+                lp_balance: 1_000,
+                reason: ExclusionReason::ExplicitSink,
+            }]
+        );
+        // The sink never reaches the leaf set; the locked LP is attributed.
+        assert!(!snapshot.entries.iter().any(|e| e.owner == key(0x20)));
+        assert_eq!(snapshot.locked.total_locked, 2_000);
+        assert_eq!(
+            snapshot.entries,
+            vec![
+                HolderEntry {
+                    owner: key(0x10),
+                    lp_balance: 4_000
+                },
+                HolderEntry {
+                    owner: key(0x40),
+                    lp_balance: 2_000
+                },
+            ]
+        );
+    }
+
+    /// A governed ledger scoped to another pool / AMM / mint is rejected.
+    #[test]
+    fn foreign_pool_amm_or_mint_ledger_is_rejected_at_build() {
+        let lp_mint = key(0x01);
+        let mut foreign = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        foreign.pool_address = key(0xBB);
+        let err = SnapshotBuilder::new(request(lp_mint, Some(foreign), vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap_err();
+        assert!(matches!(err, SnapshotError::SinkLedgerIdentityMismatch(_)));
+
+        let mut foreign_mint = ledger(vec![entry(0x20, 0x21, 1_000)]);
+        foreign_mint.lp_mint = key(0x02);
+        let err = SnapshotBuilder::new(request(lp_mint, Some(foreign_mint), vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap_err();
+        assert!(matches!(err, SnapshotError::SinkLedgerIdentityMismatch(_)));
+    }
+
+    /// Acceptance: ledger balances that disagree with the enumeration are
+    /// rejected (reconciliation is enforced, not assumed).
+    #[test]
+    fn ledger_balance_mismatch_is_rejected() {
+        let lp_mint = key(0x01);
+        let mismatched = Some(ledger(vec![entry(0x20, 0x21, 900)])); // enumerated: 1_000
+        let err = SnapshotBuilder::new(request(lp_mint, mismatched, vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkLedgerBalanceMismatch {
+                owner: key(0x20).to_string(),
+                ledger_balance: 900,
+                enumerated_balance: 1_000,
+            }
+        );
+    }
+
+    /// An owner not present in the enumeration is rejected.
+    #[test]
+    fn ledger_owner_not_enumerated_is_rejected() {
+        let lp_mint = key(0x01);
+        let ghost = Some(ledger(vec![entry(0x90, 0x91, 1_000)]));
+        let err = SnapshotBuilder::new(request(lp_mint, ghost, vec![key(0x90)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkLedgerEntryNotEnumerated {
+                owner: key(0x90).to_string(),
+            }
+        );
+    }
+
+    /// The declared token account must exist under the entry's owner
+    /// carrying the full declared balance — a spread balance is ambiguous
+    /// and rejected.
+    #[test]
+    fn ledger_token_account_mismatch_is_rejected() {
+        let lp_mint = key(0x01);
+        // Ledger claims the balance sits in token account 0x22 — which is
+        // not the enumerated account of the sink owner.
+        let wrong_account = Some(ledger(vec![entry(0x20, 0x22, 1_000)]));
+        let err = SnapshotBuilder::new(request(lp_mint, wrong_account, vec![key(0x20)]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkLedgerTokenAccountMismatch {
+                owner: key(0x20).to_string(),
+                token_account: key(0x22).to_string(),
+            }
+        );
+
+        // A sink owner whose balance is spread across two accounts is
+        // ambiguous under the exact-account contract and rejected.
+        let spread = InMemorySource::new(
+            lp_mint,
+            123,
+            7_000,
+            vec![
+                acct(0x10, 0x10, 4_000),
+                acct(0x21, 0x20, 500),
+                acct(0x22, 0x20, 500),
+                acct(0x30, 0x30, 2_000),
+            ],
+        );
+        let half_and_half = Some(ledger(vec![entry(0x20, 0x21, 1_000)]));
+        let err = SnapshotBuilder::new(request(lp_mint, half_and_half, vec![key(0x20)]))
+            .build(&spread, &locks_for(&lp_mint))
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SnapshotError::SinkLedgerTokenAccountMismatch {
+                owner: key(0x20).to_string(),
+                token_account: key(0x21).to_string(),
+            }
+        );
+    }
+
+    /// The request's sink_exclusions must mirror the governed ledger
+    /// exactly — a ledger plus extra operator sinks is an ambiguous
+    /// configuration.
+    #[test]
+    fn ledger_and_declared_sinks_must_agree() {
+        let lp_mint = key(0x01);
+        // Ledger says one sink; request declares two.
+        let err = SnapshotBuilder::new(request(
+            lp_mint,
+            Some(ledger(vec![entry(0x20, 0x21, 1_000)])),
+            vec![key(0x20), key(0x10)],
+        ))
+        .build(&source(), &locks_for(&lp_mint))
+        .unwrap_err();
+        assert!(matches!(err, SnapshotError::SinkLedgerConflict(_)));
+    }
+
+    /// An explicit empty governed ledger is valid and applies no
+    /// exclusions (this is an APPROVED empty ledger, distinct from a
+    /// missing ledger).
+    #[test]
+    fn explicit_empty_ledger_is_valid_and_applies_nothing() {
+        let lp_mint = key(0x01);
+        let snapshot = SnapshotBuilder::new(request(lp_mint, Some(ledger(vec![])), vec![]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap();
+        assert_eq!(snapshot.reconciliation.sink_exclusions_total, 0);
+        assert!(snapshot
+            .exclusions
+            .iter()
+            .all(|e| e.reason == ExclusionReason::ZeroBalance));
+    }
+
+    /// WD-07 REGRESSION, lib level: with an EMPTY lock list supplied where
+    /// real locks exist, the custody-PDA owner silently becomes an
+    /// ordinary claimable leaf. This is exactly the failure the CLI now
+    /// prevents by requiring `--lock-evidence rpc` — the test documents
+    /// the failure mode so the CLI requirement cannot be silently relaxed.
+    #[test]
+    fn empty_lock_list_reduces_the_custody_owner_to_an_ordinary_leaf() {
+        let lp_mint = key(0x01);
+        let empty_locks = InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![]);
+        let snapshot = SnapshotBuilder::new(request(lp_mint, None, vec![]))
+            .build(&source(), &empty_locks)
+            .unwrap();
+        // The custody owner 0x30 — which can never sign a claim — now
+        // holds an ordinary 2_000 leaf. No error, no attribution.
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|e| e.owner == key(0x30) && e.lp_balance == 2_000));
+        assert_eq!(snapshot.locked.total_locked, 0);
+        assert!(snapshot.locked.custody.is_none());
+    }
+
+    /// With real evidence the same pool attributes correctly (contrast to
+    /// the empty-list regression above).
+    #[test]
+    fn real_lock_evidence_attributes_the_custody_balance() {
+        let lp_mint = key(0x01);
+        let snapshot = SnapshotBuilder::new(request(lp_mint, None, vec![]))
+            .build(&source(), &locks_for(&lp_mint))
+            .unwrap();
+        assert!(!snapshot.entries.iter().any(|e| e.owner == key(0x30)));
+        assert_eq!(snapshot.locked.total_locked, 2_000);
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|e| e.owner == key(0x40) && e.lp_balance == 2_000));
+    }
+
+    /// Acceptance: missing/failed locker evidence fails closed — a source
+    /// error aborts the snapshot instead of degrading to an empty list.
+    #[test]
+    fn unavailable_lock_evidence_fails_closed() {
+        struct UnavailableLocks;
+        impl LockedLpEvidence for UnavailableLocks {
+            fn token_locks(
+                &self,
+                _amm_id: &Pubkey,
+                _lp_mint: &Pubkey,
+                _min_context_slot: u64,
+            ) -> Result<Vec<TokenLockRecord>, SnapshotError> {
+                Err(SnapshotError::Source(
+                    "UNCX getProgramAccounts failed: node unreachable".to_string(),
+                ))
+            }
+        }
+        let lp_mint = key(0x01);
+        let err = SnapshotBuilder::new(request(lp_mint, None, vec![]))
+            .build(&source(), &UnavailableLocks)
+            .unwrap_err();
+        assert!(matches!(err, SnapshotError::Source(_)));
     }
 }

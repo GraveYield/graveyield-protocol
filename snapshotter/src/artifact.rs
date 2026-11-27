@@ -9,6 +9,27 @@
 // and sorted-pair proof ready for `claim_lp_proceeds`'s
 // `merkle_proof: Vec<[u8; 32]>` parameter.
 //
+// FORMAT v2 (WD-07)
+//
+// v1 carried only the reconciliation totals. A reviewer of a v1 artifact
+// could verify the conservation identity but could not see WHICH balances
+// were excluded or how locked LP was attributed, and nothing bound the
+// exclusions to a governed ledger or the locked-LP treatment to real
+// locker evidence. v2 adds, without changing Merkle semantics:
+//
+//   * `exclusions` — the per-owner exclusion ledger (reason + balance);
+//   * `locked` — the locked-LP report (records seen, total, per-owner
+//     attributions, the resolved custody account);
+//   * `provenance` — the governed sink ledger's identity/version/exact
+//     input digest and the lock-evidence source/context, sealing WHICH
+//     governed inputs produced the artifact.
+//
+// Version handling is explicit: `verify_integrity` refuses any other
+// format_version (a v1 artifact fails with an explicit mismatch, it is
+// never silently reinterpreted under v2 semantics). The root, leaves,
+// proofs, and reconciliation identity are byte-identical to v1 for the
+// same snapshot — only additive fields changed.
+//
 // DETERMINISTIC SERIALIZATION (roadmap 5.2: "persist snapshot metadata" +
 // "verify root determinism")
 //
@@ -21,7 +42,9 @@
 // bit-for-bit from the same snapshot (spec D12). Readers get the mirror
 // check: `verify_integrity` rebuilds the tree from the persisted entries
 // and fails closed unless every leaf, every proof, the root, the depth,
-// and the closing reconciliation identity all re-derive exactly.
+// the count, the closing reconciliation identity, the exclusion ledger,
+// the locked-LP report, and the provenance cross-checks all re-derive
+// exactly.
 //
 // TRUST BOUNDARY (spec §6.3)
 //
@@ -29,19 +52,23 @@
 // verifier remains the final gate (`verify_proof` + the supply pin at
 // salvage). What this module adds is auditability: any published artifact
 // can be checked against its own entries without re-running an RPC
-// enumeration, and any Drift between the two is loud.
+// enumeration, and any Drift between the two is loud. The sealed
+// provenance identifies the governed inputs; it does NOT prove owner
+// approval of a sink ledger — a valid schema is not an approval
+// (`sink_ledger.rs`).
 
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
 use crate::error::SnapshotError;
-use crate::model::{HolderEntry, LpSnapshot, Reconciliation};
+use crate::model::{CustodyMatchMethod, ExclusionReason, HolderEntry, LpSnapshot, Reconciliation};
 use crate::tree::SnapshotMerkleTree;
 
 /// Current artifact format version. Bumped on any breaking layout change;
 /// `verify_integrity` refuses other versions (fail-closed on a format it
-/// cannot fully re-derive).
-pub const ARTIFACT_FORMAT_VERSION: u32 = 1;
+/// cannot fully re-derive). v2 = v1 + exclusions + locked report +
+/// provenance (additive; Merkle semantics unchanged).
+pub const ARTIFACT_FORMAT_VERSION: u32 = 2;
 
 /// One claimant in the published artifact: the holder, its balance, its
 /// leaf hash, and its ready-to-submit Merkle proof.
@@ -61,6 +88,109 @@ pub struct ArtifactEntry {
     pub proof: Vec<[u8; 32]>,
 }
 
+/// One excluded balance in the published exclusion ledger.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactExclusion {
+    #[serde(with = "base58_pubkey")]
+    pub owner: Pubkey,
+    pub lp_balance: u64,
+    /// `"zero_balance"` or `"explicit_sink"`.
+    pub reason: String,
+}
+
+/// The custody account the locked LP was attributed away from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactCustody {
+    #[serde(with = "base58_pubkey")]
+    pub token_account: Pubkey,
+    #[serde(with = "base58_pubkey")]
+    pub owner: Pubkey,
+    /// Always equal to the report's `total_locked` (reconciliation gate).
+    pub balance: u64,
+    /// `"exact_balance_match"` or `"explicit_override"`.
+    pub method: String,
+}
+
+/// One beneficial-owner locked-LP attribution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactAttribution {
+    #[serde(with = "base58_pubkey")]
+    pub owner: Pubkey,
+    pub lp_balance: u64,
+}
+
+/// The published locked-LP report: how locker-held LP was re-attributed
+/// into the leaf set (WD-07 — a reviewer can see the custody attribution
+/// without re-running the enumeration).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactLockedReport {
+    /// Number of validated TokenLock records behind the attributions.
+    pub lock_records_seen: usize,
+    /// `Σ current_locked_amount` across all validated locks.
+    pub total_locked: u64,
+    /// Per-beneficial-owner locked totals, canonical ascending-owner
+    /// order (may share owners with the leaf set — locked and unlocked
+    /// balances are merged).
+    pub attributions: Vec<ArtifactAttribution>,
+    /// The custody account the locked tokens were attributed away from,
+    /// or `None` when nothing is locked.
+    pub custody: Option<ArtifactCustody>,
+}
+
+/// Provenance of the governed sink ledger sealed into this artifact: an
+/// independent reviewer can establish exactly which ledger (version,
+/// identity, exact input bytes) was used. This records the ledger's
+/// declared identity — it is NOT proof of owner approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SinkLedgerProvenance {
+    /// The ledger schema version (this build: 1, `gy.sink-ledger.v1`).
+    pub schema_version: u32,
+    /// The published per-pool ledger's identity, as declared in the input.
+    pub ledger_id: String,
+    /// SHA-256 (lowercase hex) of the EXACT ledger input bytes consumed
+    /// by the CLI.
+    pub input_sha256: String,
+    /// Number of governed sink declarations applied.
+    pub entry_count: usize,
+    /// Total LP excluded under the ledger (reconciles with the artifact's
+    /// `reconciliation.sink_exclusions_total`).
+    pub sink_exclusions_total: u64,
+}
+
+/// Provenance of the locked-LP evidence: which source produced the lock
+/// records and the pinned state they were queried at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockEvidenceProvenance {
+    /// Evidence source: `"rpc"` (the wired `RpcLockedLpEvidence` — real
+    /// UNCX `getProgramAccounts` evidence from the configured RPC).
+    pub source: String,
+    /// The locker program the evidence was queried against (UNCX
+    /// Raydium AMM V4 locker, base58).
+    pub program_id: String,
+    /// The commitment every read of the run used (from the CLI flag).
+    pub commitment: String,
+    /// The anchored state slot the evidence query was pinned to (same
+    /// anchor as the holder enumeration).
+    pub anchor_slot: u64,
+    /// Validated TokenLock records seen (equals `locked.lock_records_seen`).
+    pub records_seen: usize,
+    /// `Σ current_locked_amount` (equals `locked.total_locked`).
+    pub total_locked: u64,
+}
+
+/// The governed-input provenance sealed into the artifact (WD-07): which
+/// sink ledger and which locker evidence produced this snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactProvenance {
+    /// The governed sink ledger, or `None` when the CLI ran without
+    /// `--sink-ledger` (no governed exclusions were supplied — an absent
+    /// ledger is never equivalent to an approved empty ledger; the
+    /// absence is explicit and reviewer-visible).
+    pub sink_ledger: Option<SinkLedgerProvenance>,
+    /// The locked-LP evidence source and context.
+    pub lock_evidence: LockEvidenceProvenance,
+}
+
 /// The sealed, publishable snapshot artifact. Deterministic end to end:
 /// the same snapshot always seals to a byte-identical JSON document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,8 +202,9 @@ pub struct SnapshotArtifact {
     pub amm_program_id: Pubkey,
     #[serde(with = "base58_pubkey")]
     pub lp_mint: Pubkey,
-    /// Slot the source served the enumeration at (carried from the
-    /// snapshot; the on-chain supply pin at salvage is the final anchor).
+    /// Slot the source served the anchored supply read at (carried from
+    /// the snapshot; the on-chain supply pin at salvage is the final
+    /// anchor).
     pub snapshot_slot: u64,
     /// The pre-salvage LP supply — the value `salvage_pool` pins against
     /// the live mint and the claims denominator.
@@ -93,10 +224,36 @@ pub struct SnapshotArtifact {
     /// lp_total_supply_at_snapshot`), carried so a reader can audit the
     /// conservation without re-enumerating.
     pub reconciliation: Reconciliation,
+    /// The per-owner exclusion ledger (zero-balance + governed sink
+    /// exclusions), canonical ascending-owner order (v2).
+    pub exclusions: Vec<ArtifactExclusion>,
+    /// The locked-LP attribution report (v2).
+    pub locked: ArtifactLockedReport,
+    /// Governed-input provenance (v2): sink ledger + lock evidence.
+    /// `None` only for artifacts sealed without provenance input (the
+    /// CLI always supplies it via `seal_with_provenance`).
+    pub provenance: Option<ArtifactProvenance>,
+}
+
+fn exclusion_reason_str(reason: &ExclusionReason) -> &'static str {
+    match reason {
+        ExclusionReason::ZeroBalance => "zero_balance",
+        ExclusionReason::ExplicitSink => "explicit_sink",
+    }
+}
+
+fn custody_method_str(method: &CustodyMatchMethod) -> &'static str {
+    match method {
+        CustodyMatchMethod::ExactBalanceMatch => "exact_balance_match",
+        CustodyMatchMethod::ExplicitOverride => "explicit_override",
+    }
 }
 
 impl SnapshotArtifact {
-    /// Seal a snapshot + tree into the publishable artifact.
+    /// Seal a snapshot + tree into the publishable artifact (without
+    /// governed-input provenance). The CLI path uses
+    /// [`Self::seal_with_provenance`] so the sealed artifact identifies
+    /// the sink ledger and lock evidence it was produced from.
     ///
     /// Fail-closed against mixed-up handles: the tree is re-derived from
     /// the snapshot's leaf set and must equal the supplied tree
@@ -120,6 +277,34 @@ impl SnapshotArtifact {
                 proof: tree.proof(i).expect("tree indexes mirror the snapshot"),
             })
             .collect();
+        let exclusions = snapshot
+            .exclusions
+            .iter()
+            .map(|e| ArtifactExclusion {
+                owner: e.owner,
+                lp_balance: e.lp_balance,
+                reason: exclusion_reason_str(&e.reason).to_string(),
+            })
+            .collect();
+        let locked = ArtifactLockedReport {
+            lock_records_seen: snapshot.locked.lock_records_seen,
+            total_locked: snapshot.locked.total_locked,
+            attributions: snapshot
+                .locked
+                .attributions
+                .iter()
+                .map(|a| ArtifactAttribution {
+                    owner: a.owner,
+                    lp_balance: a.lp_balance,
+                })
+                .collect(),
+            custody: snapshot.locked.custody.as_ref().map(|c| ArtifactCustody {
+                token_account: c.token_account,
+                owner: c.owner,
+                balance: c.balance,
+                method: custody_method_str(&c.method).to_string(),
+            }),
+        };
         Ok(Self {
             format_version: ARTIFACT_FORMAT_VERSION,
             pool_address: snapshot.pool_address,
@@ -132,7 +317,67 @@ impl SnapshotArtifact {
             tree_depth: tree.tree_depth(),
             entries,
             reconciliation: snapshot.reconciliation,
+            exclusions,
+            locked,
+            provenance: None,
         })
+    }
+
+    /// Seal with governed-input provenance (the CLI production path).
+    ///
+    /// The provenance is cross-checked against the snapshot BEFORE
+    /// sealing — a provenance block that disagrees with the snapshot's
+    /// locked report, anchored slot, or sink totals is refused
+    /// (`ArtifactMismatch`), so the sealed provenance cannot misdescribe
+    /// the artifact it rides on.
+    pub fn seal_with_provenance(
+        snapshot: &LpSnapshot,
+        tree: &SnapshotMerkleTree,
+        provenance: ArtifactProvenance,
+    ) -> Result<Self, SnapshotError> {
+        // Cross-check the lock-evidence provenance against the snapshot.
+        if provenance.lock_evidence.total_locked != snapshot.locked.total_locked {
+            return Err(SnapshotError::ArtifactMismatch(format!(
+                "provenance lock_evidence.total_locked ({}) != snapshot total_locked ({})",
+                provenance.lock_evidence.total_locked, snapshot.locked.total_locked
+            )));
+        }
+        if provenance.lock_evidence.records_seen != snapshot.locked.lock_records_seen {
+            return Err(SnapshotError::ArtifactMismatch(format!(
+                "provenance lock_evidence.records_seen ({}) != snapshot lock_records_seen ({})",
+                provenance.lock_evidence.records_seen, snapshot.locked.lock_records_seen
+            )));
+        }
+        if provenance.lock_evidence.anchor_slot != snapshot.snapshot_slot {
+            return Err(SnapshotError::ArtifactMismatch(format!(
+                "provenance lock_evidence.anchor_slot ({}) != snapshot_slot ({})",
+                provenance.lock_evidence.anchor_slot, snapshot.snapshot_slot
+            )));
+        }
+        // Cross-check the sink-ledger provenance against the snapshot.
+        if let Some(ledger) = &provenance.sink_ledger {
+            if ledger.sink_exclusions_total != snapshot.reconciliation.sink_exclusions_total {
+                return Err(SnapshotError::ArtifactMismatch(format!(
+                    "provenance sink_ledger.sink_exclusions_total ({}) != reconciliation \
+                     sink_exclusions_total ({})",
+                    ledger.sink_exclusions_total, snapshot.reconciliation.sink_exclusions_total
+                )));
+            }
+            let explicit_sinks = snapshot
+                .exclusions
+                .iter()
+                .filter(|e| e.reason == ExclusionReason::ExplicitSink)
+                .count();
+            if ledger.entry_count != explicit_sinks {
+                return Err(SnapshotError::ArtifactMismatch(format!(
+                    "provenance sink_ledger.entry_count ({}) != explicit sink exclusions ({})",
+                    ledger.entry_count, explicit_sinks
+                )));
+            }
+        }
+        let mut artifact = Self::seal(snapshot, tree)?;
+        artifact.provenance = Some(provenance);
+        Ok(artifact)
     }
 
     /// The sealed Merkle root.
@@ -148,10 +393,12 @@ impl SnapshotArtifact {
 
     /// Full self-check of a (loaded or sealed) artifact: the tree rebuilt
     /// from the persisted entries must re-derive every leaf, every proof,
-    /// the root, the depth, the count, and the reconciliation identity
-    /// exactly. Any drift is `ArtifactMismatch`; structurally impossible
-    /// entry sets (non-canonical, empty, zero balances) are the tree
-    /// builder's fail-closed errors.
+    /// the root, the depth, the count, the closing reconciliation
+    /// identity, the exclusion ledger, the locked-LP report, and — when
+    /// present — the provenance cross-checks. Any drift is
+    /// `ArtifactMismatch`; structurally impossible entry sets
+    /// (non-canonical, empty, zero balances) are the tree builder's
+    /// fail-closed errors.
     pub fn verify_integrity(&self) -> Result<(), SnapshotError> {
         if self.format_version != ARTIFACT_FORMAT_VERSION {
             return Err(SnapshotError::ArtifactMismatch(format!(
@@ -222,6 +469,164 @@ impl SnapshotArtifact {
             return Err(SnapshotError::ArtifactMismatch(
                 "reconciliation.enumerated_total != lp_total_supply_at_snapshot".to_string(),
             ));
+        }
+        self.verify_exclusion_ledger()?;
+        self.verify_locked_report()?;
+        self.verify_provenance()?;
+        Ok(())
+    }
+
+    /// Exclusion ledger: canonical order, sane balances, sink total
+    /// reconciles with the closing identity, and no overlap with the
+    /// claimable leaf set.
+    fn verify_exclusion_ledger(&self) -> Result<(), SnapshotError> {
+        let mut sink_total: u128 = 0;
+        let mut previous: Option<Pubkey> = None;
+        for exclusion in &self.exclusions {
+            if let Some(prev) = previous {
+                if exclusion.owner <= prev {
+                    return Err(SnapshotError::ArtifactMismatch(
+                        "exclusions are not in canonical ascending-owner order".to_string(),
+                    ));
+                }
+            }
+            previous = Some(exclusion.owner);
+            match exclusion.reason.as_str() {
+                "zero_balance" => {
+                    if exclusion.lp_balance != 0 {
+                        return Err(SnapshotError::ArtifactMismatch(format!(
+                            "zero_balance exclusion for owner {} carries a nonzero balance",
+                            exclusion.owner
+                        )));
+                    }
+                }
+                "explicit_sink" => {
+                    sink_total = sink_total
+                        .checked_add(exclusion.lp_balance as u128)
+                        .ok_or(SnapshotError::Overflow)?;
+                }
+                other => {
+                    return Err(SnapshotError::ArtifactMismatch(format!(
+                        "unknown exclusion reason `{other}` for owner {}",
+                        exclusion.owner
+                    )));
+                }
+            }
+            // NOTE: an owner MAY legitimately appear here AND in the leaf
+            // set — a holder whose only unlocked token account is at zero
+            // balance is ledgered as zero_balance and re-enters the leaf
+            // set through the locked-LP attribution. Total-level
+            // reconciliation (checked below) is the integrity gate; an
+            // owner-set overlap is not an invariant.
+        }
+        if sink_total != self.reconciliation.sink_exclusions_total as u128 {
+            return Err(SnapshotError::ArtifactMismatch(format!(
+                "Σ explicit sink exclusions ({sink_total}) != \
+                 reconciliation.sink_exclusions_total ({})",
+                self.reconciliation.sink_exclusions_total
+            )));
+        }
+        Ok(())
+    }
+
+    /// Locked-LP report: attributions sum to the locked total, custody
+    /// presence matches the locked total, and the custody owner never
+    /// keeps a claimable leaf (a PDA cannot sign a claim).
+    fn verify_locked_report(&self) -> Result<(), SnapshotError> {
+        let locked = &self.locked;
+        let mut attributed: u128 = 0;
+        let mut previous: Option<Pubkey> = None;
+        for attribution in &locked.attributions {
+            if let Some(prev) = previous {
+                if attribution.owner <= prev {
+                    return Err(SnapshotError::ArtifactMismatch(
+                        "locked attributions are not in canonical ascending-owner order"
+                            .to_string(),
+                    ));
+                }
+            }
+            previous = Some(attribution.owner);
+            attributed = attributed
+                .checked_add(attribution.lp_balance as u128)
+                .ok_or(SnapshotError::Overflow)?;
+        }
+        if attributed != locked.total_locked as u128 {
+            return Err(SnapshotError::ArtifactMismatch(format!(
+                "Σ locked attributions ({attributed}) != locked.total_locked ({})",
+                locked.total_locked
+            )));
+        }
+        match &locked.custody {
+            Some(custody) => {
+                if locked.total_locked == 0 {
+                    return Err(SnapshotError::ArtifactMismatch(
+                        "custody resolution present with zero locked total".to_string(),
+                    ));
+                }
+                if custody.balance != locked.total_locked {
+                    return Err(SnapshotError::ArtifactMismatch(format!(
+                        "custody balance ({}) != locked.total_locked ({})",
+                        custody.balance, locked.total_locked
+                    )));
+                }
+                if self.entries.iter().any(|e| e.owner == custody.owner) {
+                    return Err(SnapshotError::ArtifactMismatch(format!(
+                        "custody owner {} also holds a claimable leaf; attributing to a PDA \
+                         would strand the claim",
+                        custody.owner
+                    )));
+                }
+            }
+            None if locked.total_locked != 0 => {
+                return Err(SnapshotError::ArtifactMismatch(
+                    "locked total > 0 but no custody resolution".to_string(),
+                ));
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// Provenance cross-checks: the sealed provenance must agree with the
+    /// artifact's own locked report and sink totals.
+    fn verify_provenance(&self) -> Result<(), SnapshotError> {
+        let provenance = match &self.provenance {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+        if provenance.lock_evidence.total_locked != self.locked.total_locked {
+            return Err(SnapshotError::ArtifactMismatch(
+                "provenance lock_evidence.total_locked != locked.total_locked".to_string(),
+            ));
+        }
+        if provenance.lock_evidence.records_seen != self.locked.lock_records_seen {
+            return Err(SnapshotError::ArtifactMismatch(
+                "provenance lock_evidence.records_seen != locked.lock_records_seen".to_string(),
+            ));
+        }
+        if provenance.lock_evidence.anchor_slot != self.snapshot_slot {
+            return Err(SnapshotError::ArtifactMismatch(
+                "provenance lock_evidence.anchor_slot != snapshot_slot".to_string(),
+            ));
+        }
+        if let Some(ledger) = &provenance.sink_ledger {
+            if ledger.sink_exclusions_total != self.reconciliation.sink_exclusions_total {
+                return Err(SnapshotError::ArtifactMismatch(
+                    "provenance sink_ledger.sink_exclusions_total != reconciliation \
+                     sink_exclusions_total"
+                        .to_string(),
+                ));
+            }
+            let explicit_sinks = self
+                .exclusions
+                .iter()
+                .filter(|e| e.reason == "explicit_sink")
+                .count();
+            if ledger.entry_count != explicit_sinks {
+                return Err(SnapshotError::ArtifactMismatch(
+                    "provenance sink_ledger.entry_count != explicit sink exclusions".to_string(),
+                ));
+            }
         }
         Ok(())
     }
@@ -354,8 +759,10 @@ fn hex_val(c: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::artifact::SinkLedgerProvenance;
     use crate::locked::{InMemoryLocks, TokenLockRecord};
     use crate::model::TokenAccountSnapshot;
+    use crate::sink_ledger::SinkLedger;
     use crate::source::InMemorySource;
     use crate::{SnapshotBuilder, SnapshotRequest};
 
@@ -398,20 +805,40 @@ mod tests {
         );
         let locks =
             InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
-        let mut request = SnapshotRequest {
+        let request = SnapshotRequest {
             pool_address: key(0xAA),
             amm_program_id: key(0xAB),
             lp_mint,
             sink_exclusions: vec![key(0x50)],
             custody_owner_overrides: vec![],
+            sink_ledger: None,
         };
-        request.sink_exclusions = vec![key(0x50)];
         let snapshot = SnapshotBuilder::new(request)
             .build(&source, &locks)
             .unwrap();
         let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
         let artifact = SnapshotArtifact::seal(&snapshot, &tree).unwrap();
         (snapshot, artifact)
+    }
+
+    fn sample_provenance() -> ArtifactProvenance {
+        ArtifactProvenance {
+            sink_ledger: Some(SinkLedgerProvenance {
+                schema_version: 1,
+                ledger_id: "GY-SINK-TEST-001".to_string(),
+                input_sha256: SinkLedger::input_digest_hex(b"exact-ledger-input"),
+                entry_count: 1,
+                sink_exclusions_total: 500,
+            }),
+            lock_evidence: crate::artifact::LockEvidenceProvenance {
+                source: "rpc".to_string(),
+                program_id: crate::locked::uncx::PROGRAM_ID.to_string(),
+                commitment: "confirmed".to_string(),
+                anchor_slot: 123,
+                records_seen: 1,
+                total_locked: 1_000,
+            },
+        }
     }
 
     #[test]
@@ -430,11 +857,263 @@ mod tests {
     }
 
     #[test]
+    fn sealed_artifact_with_provenance_is_deterministic_and_round_trips() {
+        let (snapshot, tree) = {
+            let lp_mint = key(0x01);
+            let source = InMemorySource::new(
+                lp_mint,
+                123,
+                8_000,
+                vec![
+                    acct(1, 0x10, 4_000),
+                    acct(2, 0x20, 2_500),
+                    acct(3, 0x50, 500),   // sink
+                    acct(4, 0x40, 1_000), // custody
+                ],
+            );
+            let locks =
+                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
+            let request = SnapshotRequest {
+                pool_address: key(0xAA),
+                amm_program_id: key(0xAB),
+                lp_mint,
+                sink_exclusions: vec![key(0x50)],
+                custody_owner_overrides: vec![],
+                sink_ledger: None,
+            };
+            let snapshot = SnapshotBuilder::new(request)
+                .build(&source, &locks)
+                .unwrap();
+            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
+            (snapshot, tree)
+        };
+        let a =
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let b =
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        assert_eq!(a.to_json_pretty().unwrap(), b.to_json_pretty().unwrap());
+        let loaded = SnapshotArtifact::from_json(&a.to_json_pretty().unwrap()).unwrap();
+        assert_eq!(loaded, a);
+        loaded
+            .verify_integrity()
+            .expect("provenance artifact is sound");
+    }
+
+    #[test]
     fn sealed_artifact_passes_verify_integrity() {
         let (_, artifact) = sealed_artifact();
         artifact
             .verify_integrity()
             .expect("a sealed artifact is sound");
+    }
+
+    #[test]
+    fn provenance_records_ledger_and_lock_evidence_context() {
+        let (snapshot, tree) = {
+            let lp_mint = key(0x01);
+            let source = InMemorySource::new(
+                lp_mint,
+                123,
+                8_000,
+                vec![
+                    acct(1, 0x10, 4_000),
+                    acct(2, 0x20, 2_500),
+                    acct(3, 0x50, 500),   // sink
+                    acct(4, 0x40, 1_000), // custody
+                ],
+            );
+            let locks =
+                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
+            let request = SnapshotRequest {
+                pool_address: key(0xAA),
+                amm_program_id: key(0xAB),
+                lp_mint,
+                sink_exclusions: vec![key(0x50)],
+                custody_owner_overrides: vec![],
+                sink_ledger: None,
+            };
+            let snapshot = SnapshotBuilder::new(request)
+                .build(&source, &locks)
+                .unwrap();
+            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
+            (snapshot, tree)
+        };
+        let artifact =
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let ledger = artifact
+            .provenance
+            .as_ref()
+            .unwrap()
+            .sink_ledger
+            .as_ref()
+            .unwrap();
+        assert_eq!(ledger.schema_version, 1);
+        assert_eq!(ledger.ledger_id, "GY-SINK-TEST-001");
+        assert_eq!(
+            ledger.input_sha256,
+            SinkLedger::input_digest_hex(b"exact-ledger-input")
+        );
+        assert_eq!(ledger.entry_count, 1);
+        assert_eq!(ledger.sink_exclusions_total, 500);
+        let lock = &artifact.provenance.as_ref().unwrap().lock_evidence;
+        assert_eq!(lock.source, "rpc");
+        assert_eq!(lock.program_id, crate::locked::uncx::PROGRAM_ID.to_string());
+        assert_eq!(lock.commitment, "confirmed");
+        assert_eq!(lock.anchor_slot, artifact.snapshot_slot);
+        assert_eq!(lock.records_seen, artifact.locked.lock_records_seen);
+        assert_eq!(lock.total_locked, artifact.locked.total_locked);
+        // The exclusion ledger and locked report are reviewer-visible.
+        assert_eq!(artifact.exclusions.len(), 1);
+        assert_eq!(artifact.exclusions[0].reason, "explicit_sink");
+        assert_eq!(artifact.locked.total_locked, 1_000);
+        assert!(artifact.locked.custody.is_some());
+    }
+
+    #[test]
+    fn seal_rejects_provenance_that_disagrees_with_the_snapshot() {
+        let (snapshot, tree) = {
+            let lp_mint = key(0x01);
+            let source = InMemorySource::new(
+                lp_mint,
+                123,
+                8_000,
+                vec![
+                    acct(1, 0x10, 4_000),
+                    acct(2, 0x20, 2_500),
+                    acct(3, 0x50, 500),   // sink
+                    acct(4, 0x40, 1_000), // custody
+                ],
+            );
+            let locks =
+                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
+            let request = SnapshotRequest {
+                pool_address: key(0xAA),
+                amm_program_id: key(0xAB),
+                lp_mint,
+                sink_exclusions: vec![key(0x50)],
+                custody_owner_overrides: vec![],
+                sink_ledger: None,
+            };
+            let snapshot = SnapshotBuilder::new(request)
+                .build(&source, &locks)
+                .unwrap();
+            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
+            (snapshot, tree)
+        };
+        // Wrong locked total in the provenance.
+        let mut bad = sample_provenance();
+        bad.lock_evidence.total_locked = 999;
+        let err = SnapshotArtifact::seal_with_provenance(&snapshot, &tree, bad).unwrap_err();
+        assert!(matches!(err, SnapshotError::ArtifactMismatch(_)));
+
+        // Wrong anchor slot.
+        let mut bad = sample_provenance();
+        bad.lock_evidence.anchor_slot = 200;
+        assert!(matches!(
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, bad),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+
+        // Wrong sink total in the ledger provenance.
+        let mut bad = sample_provenance();
+        bad.sink_ledger.as_mut().unwrap().sink_exclusions_total = 600;
+        assert!(matches!(
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, bad),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn verify_integrity_rejects_provenance_drift_on_a_loaded_artifact() {
+        let (snapshot, tree) = {
+            let lp_mint = key(0x01);
+            let source = InMemorySource::new(
+                lp_mint,
+                123,
+                8_000,
+                vec![
+                    acct(1, 0x10, 4_000),
+                    acct(2, 0x20, 2_500),
+                    acct(3, 0x50, 500),   // sink
+                    acct(4, 0x40, 1_000), // custody
+                ],
+            );
+            let locks =
+                InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![lock(0x71, 1, 0x60, 1_000)]);
+            let request = SnapshotRequest {
+                pool_address: key(0xAA),
+                amm_program_id: key(0xAB),
+                lp_mint,
+                sink_exclusions: vec![key(0x50)],
+                custody_owner_overrides: vec![],
+                sink_ledger: None,
+            };
+            let snapshot = SnapshotBuilder::new(request)
+                .build(&source, &locks)
+                .unwrap();
+            let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
+            (snapshot, tree)
+        };
+        let artifact =
+            SnapshotArtifact::seal_with_provenance(&snapshot, &tree, sample_provenance()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        value["provenance"]["lock_evidence"]["total_locked"] = serde_json::Value::from(42);
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn verify_integrity_rejects_a_v1_artifact_explicitly() {
+        // A v1 artifact (the previous format) must fail with an explicit
+        // version mismatch — never silently reinterpreted under v2.
+        let (_, artifact) = sealed_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        // Strip the v2-only fields to reconstruct a v1-shaped document.
+        value["format_version"] = serde_json::Value::from(1);
+        let v1_shaped = serde_json::to_string_pretty(&value).unwrap();
+        let loaded = SnapshotArtifact::from_json(&v1_shaped).unwrap();
+        let err = loaded.verify_integrity().unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("format_version 1")),
+            "the error must name the rejected version: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_integrity_catches_a_tampered_exclusion_ledger() {
+        let (_, artifact) = sealed_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        // Bump the sink exclusion's balance: the exclusion ledger no
+        // longer reconciles with the closing identity.
+        value["exclusions"][0]["lp_balance"] = serde_json::Value::from(501);
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn verify_integrity_catches_a_tampered_locked_report() {
+        let (_, artifact) = sealed_artifact();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&artifact.to_json_pretty().unwrap()).unwrap();
+        // Drop the custody resolution while the locked total is nonzero.
+        value["locked"]["custody"] = serde_json::Value::Null;
+        let tampered =
+            SnapshotArtifact::from_json(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert!(matches!(
+            tampered.verify_integrity(),
+            Err(SnapshotError::ArtifactMismatch(_))
+        ));
     }
 
     #[test]
