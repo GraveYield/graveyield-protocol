@@ -112,10 +112,13 @@
 // end-to-end by `settlement_economics_fork.rs` through
 // `claim_lp_proceeds`), and [`artifact::SnapshotArtifact`] persists the
 // publishable claims metadata (root + per-holder proofs) as deterministic
-// JSON that re-derives its own integrity (`verify_integrity`). The
+// JSON that re-derives its own integrity (`verify_integrity` — the
+// claims-grade contract, which always requires complete governed-input
+// provenance; the provenance-less `seal` path verifies only through
+// `verify_integrity_compatibility` and is never claims-grade). The
 // end-to-end path is: `SnapshotBuilder::build` → `SnapshotMerkleTree::
-// from_snapshot` → `SnapshotArtifact::seal` → publish JSON → LP holder
-// looks up their proof → `claim_lp_proceeds`.
+// from_snapshot` → `SnapshotArtifact::seal_with_provenance` → publish
+// JSON → LP holder looks up their proof → `claim_lp_proceeds`.
 
 pub mod artifact;
 pub mod builder;

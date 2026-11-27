@@ -45,11 +45,15 @@
 // appears anywhere. Sealing the same snapshot twice therefore yields
 // byte-identical JSON, and a third party can recompute the artifact
 // bit-for-bit from the same snapshot (spec D12). Readers get the mirror
-// check: `verify_integrity` rebuilds the tree from the persisted entries
-// and fails closed unless every leaf, every proof, the root, the depth,
-// the count, the closing reconciliation identity, the exclusion ledger,
-// the locked-LP report, and the provenance cross-checks all re-derive
-// exactly.
+// check: `verify_integrity` — the CLAIMS-GRADE contract — rebuilds the
+// tree from the persisted entries and fails closed unless every leaf,
+// every proof, the root, the depth, the count, the closing reconciliation
+// identity, the exclusion ledger, the locked-LP report, and the
+// provenance cross-checks all re-derive exactly, AND complete governed-
+// input provenance is present. A provenance-less artifact sealed through
+// the non-claims compatibility path (`seal`) is verifiable only through
+// `verify_integrity_compatibility`, which is explicitly NOT claims-grade
+// and still refuses explicit sink exclusions without governed provenance.
 //
 // TRUST BOUNDARY (spec §6.3)
 //
@@ -348,15 +352,25 @@ fn custody_method_str(method: &CustodyMatchMethod) -> &'static str {
 }
 
 impl SnapshotArtifact {
-    /// Seal a snapshot + tree into the publishable artifact (without
-    /// governed-input provenance). The CLI path uses
-    /// [`Self::seal_with_provenance`] so the sealed artifact identifies
-    /// the sink ledger and lock evidence it was produced from.
+    /// Seal a snapshot + tree into the publishable artifact WITHOUT
+    /// governed-input provenance — the non-claims compatibility path.
+    /// The CLI production path uses [`Self::seal_with_provenance`] so the
+    /// sealed artifact identifies the sink ledger and lock evidence it
+    /// was produced from.
     ///
     /// Fail-closed against mixed-up handles: the tree is re-derived from
     /// the snapshot's leaf set and must equal the supplied tree
     /// (`ArtifactMismatch` otherwise). There is no path to publish an
     /// artifact whose root does not derive from its own entries.
+    ///
+    /// The resulting artifact carries NO governed-input provenance, so it
+    /// can never pass the claims-grade [`Self::verify_integrity`]
+    /// contract — regardless of whether it carries sink exclusions. It is
+    /// verifiable only through [`Self::verify_integrity_compatibility`]
+    /// (which additionally refuses explicit sink exclusions without
+    /// governed provenance) and must never be accepted as a claims-grade
+    /// production snapshot. Production seals go through
+    /// [`Self::seal_with_provenance`].
     pub fn seal(snapshot: &LpSnapshot, tree: &SnapshotMerkleTree) -> Result<Self, SnapshotError> {
         let rebuilt = SnapshotMerkleTree::from_snapshot(snapshot)?;
         if rebuilt != *tree {
@@ -517,15 +531,66 @@ impl SnapshotArtifact {
         self.entries.iter().find(|e| &e.owner == owner)
     }
 
-    /// Full self-check of a (loaded or sealed) artifact: the tree rebuilt
-    /// from the persisted entries must re-derive every leaf, every proof,
-    /// the root, the depth, the count, the closing reconciliation
-    /// identity, the exclusion ledger, the locked-LP report, and — when
-    /// present — the provenance cross-checks. Any drift is
+    /// Full CLAIMS-GRADE self-check of a (loaded or sealed) artifact: the
+    /// tree rebuilt from the persisted entries must re-derive every leaf,
+    /// every proof, the root, the depth, the count, the closing
+    /// reconciliation identity, the exclusion ledger, the locked-LP
+    /// report, and the provenance cross-checks. Any drift is
     /// `ArtifactMismatch`; structurally impossible entry sets
     /// (non-canonical, empty, zero balances) are the tree builder's
     /// fail-closed errors.
+    ///
+    /// CLAIMS-GRADE PROVENANCE REQUIREMENT: complete, valid governed-input
+    /// provenance (lock evidence, plus the governed sink-ledger section
+    /// when explicit sink exclusions are present) is REQUIRED —
+    /// regardless of whether the artifact carries sink exclusions. An
+    /// artifact with no provenance section can never pass this contract
+    /// and can never be accepted as a claims-grade production snapshot;
+    /// provenance-less compatibility artifacts are verifiable only
+    /// through [`Self::verify_integrity_compatibility`], which is
+    /// explicitly NOT claims-grade. The CLI and the fork harnesses — the
+    /// production-facing claims consumers — use this contract.
     pub fn verify_integrity(&self) -> Result<(), SnapshotError> {
+        self.verify_structure()?;
+        if self.provenance.is_none() {
+            return Err(SnapshotError::ArtifactMismatch(
+                "claims-grade verification requires complete governed-input provenance: \
+                 the artifact carries no provenance section and cannot be accepted as a \
+                 claims-grade snapshot; provenance-less compatibility artifacts verify \
+                 only through `verify_integrity_compatibility` and are never claims-grade"
+                    .to_string(),
+            ));
+        }
+        self.verify_provenance()?;
+        Ok(())
+    }
+
+    /// NON-CLAIMS compatibility verification — explicitly NOT claims-grade.
+    ///
+    /// Runs the same structural re-derivation as [`Self::verify_integrity`]
+    /// (root, leaves, proofs, depth, count, reconciliation identity,
+    /// exclusion ledger, locked report) and retains the governed-exclusion
+    /// invariant: an artifact carrying explicit sink exclusions still
+    /// requires governed sink-ledger provenance here. What it tolerates —
+    /// and what [`Self::verify_integrity`] refuses — is a provenance-less
+    /// artifact with NO explicit sink exclusions.
+    ///
+    /// This contract exists for non-claims compatibility consumers of
+    /// artifacts sealed through the provenance-less `seal()` path. An
+    /// artifact accepted by this function is NOT a claims-grade
+    /// production snapshot and must never be treated as one; claims-grade
+    /// acceptance goes through [`Self::verify_integrity`] only.
+    pub fn verify_integrity_compatibility(&self) -> Result<(), SnapshotError> {
+        self.verify_structure()?;
+        self.verify_provenance()?;
+        Ok(())
+    }
+
+    /// Structural re-derivation shared by both verification contracts:
+    /// format version gate, tree/leaf/proof/root/depth/count, the closing
+    /// reconciliation identity, the exclusion ledger, and the locked-LP
+    /// report.
+    fn verify_structure(&self) -> Result<(), SnapshotError> {
         if self.format_version != ARTIFACT_FORMAT_VERSION {
             return Err(SnapshotError::ArtifactMismatch(format!(
                 "unsupported artifact format_version {} (expected {})",
@@ -598,7 +663,6 @@ impl SnapshotArtifact {
         }
         self.verify_exclusion_ledger()?;
         self.verify_locked_report()?;
-        self.verify_provenance()?;
         Ok(())
     }
 
@@ -719,6 +783,13 @@ impl SnapshotArtifact {
     /// agreement between the sealed provenance and the artifact's own
     /// locked report, sink totals, and exclusion ledger.
     ///
+    /// Reached by BOTH verification contracts. Under the claims-grade
+    /// contract ([`Self::verify_integrity`]) a None provenance is
+    /// refused before this runs, so the None branch below only serves
+    /// the compatibility contract — where a provenance-less artifact
+    /// with explicit sink exclusions is still refused fail-closed
+    /// (D2-02 at verify time).
+    ///
     /// TRUST BOUNDARY: this validates artifact STRUCTURE, supported
     /// values, and internal consistency. It does NOT establish that an
     /// RPC response was authentic, that an external locker statement was
@@ -734,10 +805,12 @@ impl SnapshotArtifact {
         let provenance = match &self.provenance {
             Some(p) => p,
             None => {
-                // Governed-exclusion invariant (D2-02 at verify time): a
-                // provenance-less (non-production compatibility) artifact
-                // cannot verify once it carries explicit sink exclusions —
-                // there is no governed ledger to attribute them to.
+                // Governed-exclusion invariant (D2-02 at verify time,
+                // compatibility contract): a provenance-less (non-
+                // production compatibility) artifact cannot verify once
+                // it carries explicit sink exclusions — there is no
+                // governed ledger to attribute them to. It is also never
+                // claims-grade (see `verify_integrity`).
                 if explicit_sinks > 0 {
                     return Err(SnapshotError::ArtifactMismatch(
                         "artifact contains explicit sink exclusions but carries no \
@@ -1015,10 +1088,39 @@ mod tests {
 
     /// The standard pool sealed WITHOUT provenance — the isolated
     /// non-production compatibility path (`seal`). An artifact in this
-    /// shape carrying explicit sink exclusions cannot pass
-    /// `verify_integrity` (D2-02 at verify time).
+    /// shape carrying explicit sink exclusions cannot pass either
+    /// verification contract, and the artifact can never pass the
+    /// claims-grade contract at all (provenance is required).
     fn sealed_artifact() -> SnapshotArtifact {
         SnapshotArtifact::seal(&standard_snapshot(), &standard_tree()).unwrap()
+    }
+
+    /// A pool WITHOUT any sink exclusion (two holders, no locks), sealed
+    /// WITHOUT provenance: the shape that previously slipped through
+    /// `verify_integrity` as if it were claims-grade merely because it
+    /// carried no explicit sink exclusions.
+    fn sealed_provenance_less_sinkless_artifact() -> SnapshotArtifact {
+        let lp_mint = key(0x01);
+        let source = InMemorySource::new(
+            lp_mint,
+            77,
+            5_000,
+            vec![acct(1, 0x10, 3_000), acct(2, 0x20, 2_000)],
+        );
+        let locks = InMemoryLocks::from_records(&key(0xAA), &lp_mint, vec![]);
+        let request = SnapshotRequest {
+            pool_address: key(0xAA),
+            amm_program_id: key(0xAB),
+            lp_mint,
+            sink_exclusions: vec![],
+            custody_owner_overrides: vec![],
+            sink_ledger: None,
+        };
+        let snapshot = SnapshotBuilder::new(request)
+            .build(&source, &locks)
+            .unwrap();
+        let tree = SnapshotMerkleTree::from_snapshot(&snapshot).unwrap();
+        SnapshotArtifact::seal(&snapshot, &tree).unwrap()
     }
 
     /// The standard pool sealed WITH governed-input provenance — the CLI
@@ -1105,6 +1207,72 @@ mod tests {
             matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("no provenance")),
             "the error must name the missing governed provenance: {err}"
         );
+    }
+
+    /// CLAIMS-GRADE PROVENANCE REQUIREMENT (correction): an artifact with
+    /// NO provenance can no longer pass `verify_integrity` merely because
+    /// it carries no explicit sink exclusions. Claims-grade verification
+    /// ALWAYS requires complete, valid governed-input provenance — locker
+    /// evidence included — regardless of exclusions; a provenance-less
+    /// compatibility artifact cannot be accepted as claims-grade.
+    #[test]
+    fn provenance_less_artifact_without_exclusions_cannot_verify_as_claims_grade() {
+        let artifact = sealed_provenance_less_sinkless_artifact();
+        assert!(artifact.provenance.is_none());
+        assert!(
+            artifact
+                .exclusions
+                .iter()
+                .all(|e| e.reason != "explicit_sink"),
+            "the fixture carries no explicit sink exclusions"
+        );
+        let err = artifact.verify_integrity().unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("no provenance")),
+            "the claims-grade contract must refuse a provenance-less artifact: {err}"
+        );
+    }
+
+    /// The legitimate non-claims compatibility use is preserved and
+    /// clearly separate: the same provenance-less, exclusion-free
+    /// artifact still verifies through `verify_integrity_compatibility` —
+    /// a contract whose documentation explicitly states it is NOT
+    /// claims-grade.
+    #[test]
+    fn compatibility_contract_still_verifies_the_provenance_less_sinkless_artifact() {
+        let artifact = sealed_provenance_less_sinkless_artifact();
+        artifact
+            .verify_integrity_compatibility()
+            .expect("the non-claims compatibility contract verifies this artifact");
+    }
+
+    /// With explicit sink exclusions, the provenance-less artifact is
+    /// refused by BOTH contracts — the compatibility path can never
+    /// launder ungoverned exclusions either (D2-02 at verify time).
+    #[test]
+    fn provenance_less_artifact_with_exclusions_is_rejected_by_both_contracts() {
+        let artifact = sealed_artifact();
+        assert!(artifact.provenance.is_none());
+        assert!(artifact.verify_integrity().is_err());
+        let err = artifact.verify_integrity_compatibility().unwrap_err();
+        assert!(
+            matches!(err, SnapshotError::ArtifactMismatch(ref m) if m.contains("no provenance")),
+            "the compatibility contract must refuse exclusions without governed provenance: {err}"
+        );
+    }
+
+    /// The production path is unchanged: a complete, valid provenance
+    /// artifact passes BOTH contracts (the claims-grade gate is satisfied
+    /// by governed provenance).
+    #[test]
+    fn provenance_artifact_passes_both_contracts() {
+        let artifact = sealed_provenance_artifact();
+        artifact
+            .verify_integrity()
+            .expect("claims-grade contract accepts governed provenance");
+        artifact
+            .verify_integrity_compatibility()
+            .expect("compatibility contract accepts governed provenance");
     }
 
     /// D2-02 at the artifact layer, symmetric case: provenance present,
