@@ -374,3 +374,414 @@ fn unreadable_optional_elf_fails_loudly_and_is_not_absent() {
     // treated as absent.
     assert_unreadable_elf_fails_loudly(false);
 }
+
+// ---------------------------------------------------------------------
+// 7: settle_stale_v4_pnl_mark — the CalcPnlError-37 determinism contract
+// ---------------------------------------------------------------------
+//
+// Pins the in-memory stale-pnl settlement primitive (fork-harness CI job
+// 140886613649): a byte-for-byte mainnet snapshot whose current vault
+// product K is below the recorded `target_orders.calc_pnl` K makes EVERY
+// real V4 withdraw revert with CalcPnlError 37. P125-02: the primitive is
+// NEVER invoked by shared fork-test setup on untouched state — suites
+// that need a settled pool go through the explicit, named
+// post_settlement_v4_pool_fixture builder (pinned in section 8 below),
+// and the untouched-state behavior is covered by raydium_v4_fork's
+// dedicated stale-PNL tests.
+
+use solana_sdk::account::Account;
+
+use fork_support::settle_stale_v4_pnl_mark;
+
+/// A synthetic Raydium v4 amm account with only the fields the settlement
+/// reads (layout offsets are the ones proven against live mainnet).
+fn v4_pool_account(
+    status: u64,
+    coin_decimals: u64,
+    pc_decimals: u64,
+    sys_decimal_value: u64,
+    need_take_coin: u64,
+    need_take_pc: u64,
+) -> Account {
+    let mut data = vec![0u8; 752]; // real mainnet amm accounts are 752 bytes
+    data[0..8].copy_from_slice(&status.to_le_bytes());
+    data[32..40].copy_from_slice(&coin_decimals.to_le_bytes());
+    data[40..48].copy_from_slice(&pc_decimals.to_le_bytes());
+    data[120..128].copy_from_slice(&sys_decimal_value.to_le_bytes());
+    data[192..200].copy_from_slice(&need_take_coin.to_le_bytes());
+    data[200..208].copy_from_slice(&need_take_pc.to_le_bytes());
+    Account {
+        lamports: 1,
+        data,
+        owner: Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: u64::MAX,
+    }
+}
+
+/// A synthetic target-orders account (real mainnet ones are 2208 bytes)
+/// with the two u128 calc_pnl fields.
+fn v4_target_account(calc_pnl_x: u128, calc_pnl_y: u128) -> Account {
+    let mut data = vec![0u8; 2208];
+    data[1024..1040].copy_from_slice(&calc_pnl_x.to_le_bytes());
+    data[1040..1056].copy_from_slice(&calc_pnl_y.to_le_bytes());
+    Account {
+        lamports: 1,
+        data,
+        owner: Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: u64::MAX,
+    }
+}
+
+/// A synthetic SPL token account with just the amount field.
+fn spl_token_account(amount: u64) -> Account {
+    let mut data = vec![0u8; 165];
+    data[64..72].copy_from_slice(&amount.to_le_bytes());
+    Account {
+        lamports: 1,
+        data,
+        owner: Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: u64::MAX,
+    }
+}
+
+/// Canonical SOL/USDC-shaped numbers (sys_decimal_value = 1e9, as on the
+/// live pool): 1000 SOL / 100_000 USDC, no pending pnl.
+const TEST_SYSV: u64 = 1_000_000_000;
+const TEST_COIN_DEC: u64 = 9;
+const TEST_PC_DEC: u64 = 6;
+
+#[test]
+fn healthy_v4_pnl_mark_is_left_byte_identical() {
+    // K_current == K_recorded (the boundary V4 accepts with >=): the
+    // fixture must pass through with ALL bytes unchanged — the byte-for-
+    // byte mainnet fidelity contract for healthy snapshots.
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(1_000_000_000_000); // 1000 SOL
+    let pc_vault = spl_token_account(100_000_000_000); // 100_000 USDC
+    let mut target = v4_target_account(
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32), // 1e14
+        1_000_000_000_000, // raw, sysv == 10^9
+    );
+    let before = target.data.clone();
+
+    assert!(
+        !settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault),
+        "an exactly-settled mark must not be rewritten"
+    );
+    assert_eq!(
+        target.data, before,
+        "a healthy snapshot must stay byte-for-byte identical"
+    );
+}
+
+#[test]
+fn stale_v4_pnl_mark_is_settled_exactly_like_a_mainnet_settlement() {
+    // Reproduce the CI job 140886613649 shape: the vault coin side shrank
+    // (LP burns) while the recorded mark stayed at its pre-burn values, so
+    // K_current < K_recorded and a real withdraw reverts with CalcPnlError
+    // 37. The settlement must write exactly the normalized ex-need_take
+    // vault values — which makes V4's pnl branch take the diff==0 path,
+    // keeping the withdraw economics identical to the healthy run.
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(999_000_000_000); // burned: -1 SOL
+    let pc_vault = spl_token_account(100_000_000_000);
+    let mut target = v4_target_account(
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32),
+        1_000_000_000_000,
+    );
+
+    assert!(
+        settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault),
+        "a stale mark must be settled"
+    );
+
+    let settled_x = u128::from_le_bytes(target.data[1024..1040].try_into().unwrap());
+    let settled_y = u128::from_le_bytes(target.data[1040..1056].try_into().unwrap());
+    // Exactly what V4's normalize_decimal_v2 produces for the current
+    // ex-need_take vault amounts.
+    assert_eq!(
+        settled_x,
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32),
+        "calc_pnl_x must equal the normalized pc-side vault amount"
+    );
+    assert_eq!(
+        settled_y, 999_000_000_000u128,
+        "calc_pnl_y must equal the normalized coin-side vault amount"
+    );
+
+    // The settled mark satisfies V4's condition exactly (K_recorded' ==
+    // K_current): restore(settled_x) * restore(settled_y) == pc * coin.
+    let restored_x = settled_x * 10u128.pow(TEST_PC_DEC as u32) / TEST_SYSV as u128;
+    let restored_y = settled_y * 10u128.pow(TEST_COIN_DEC as u32) / TEST_SYSV as u128;
+    assert_eq!(
+        restored_x * restored_y,
+        100_000_000_000u128 * 999_000_000_000u128,
+        "the settled mark must satisfy V4's >= condition with the current vaults"
+    );
+}
+
+#[test]
+fn stale_mark_with_need_take_pending_settles_on_ex_need_take_totals() {
+    // V4 computes withdraw totals AFTER subtracting need_take_pnl, so the
+    // settlement must too (restoring the wrong side of the subtraction
+    // would flip a healthy pool into an over/under-settled mark).
+    let need_coin = 7u64;
+    let need_pc = 5u64;
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, need_coin, need_pc);
+    let coin_vault = spl_token_account(999_000_000_000);
+    let pc_vault = spl_token_account(100_000_000_000);
+    let mut target = v4_target_account(
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32),
+        1_000_000_000_000,
+    );
+
+    assert!(settle_stale_v4_pnl_mark(
+        &pool,
+        &mut target,
+        &coin_vault,
+        &pc_vault
+    ));
+
+    let settled_x = u128::from_le_bytes(target.data[1024..1040].try_into().unwrap());
+    let settled_y = u128::from_le_bytes(target.data[1040..1056].try_into().unwrap());
+    assert_eq!(
+        settled_x,
+        ((100_000_000_000u64 - need_pc) as u128 * TEST_SYSV as u128)
+            / 10u128.pow(TEST_PC_DEC as u32),
+        "the pc-side mark must be settled on the ex-need_take total"
+    );
+    assert_eq!(
+        settled_y,
+        (999_000_000_000u64 - need_coin) as u128,
+        "the coin-side mark must be settled on the ex-need_take total"
+    );
+}
+
+#[test]
+fn withdraw_only_status_skips_the_settlement() {
+    // V4's withdraw skips calc_take_pnl entirely when status is exactly
+    // WithdrawOnly(3): a stale mark cannot fail that withdraw, so the
+    // fixture must stay byte-for-byte untouched.
+    let pool = v4_pool_account(3, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(999_000_000_000);
+    let pc_vault = spl_token_account(100_000_000_000);
+    let mut target = v4_target_account(1_000_000_000_000_000, 1_000_000_000_000_000);
+    let before = target.data.clone();
+
+    assert!(
+        !settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault),
+        "WithdrawOnly pools must not be rewritten"
+    );
+    assert_eq!(target.data, before);
+}
+
+#[test]
+fn fresh_pool_with_zero_mark_is_untouched() {
+    // A brand-new pool has calc_pnl = 0; K_recorded = 0 <= K_current
+    // always. No settlement, no panic.
+    let pool = v4_pool_account(1, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(1_000);
+    let pc_vault = spl_token_account(1_000);
+    let mut target = v4_target_account(0, 0);
+    let before = target.data.clone();
+
+    assert!(!settle_stale_v4_pnl_mark(
+        &pool,
+        &mut target,
+        &coin_vault,
+        &pc_vault
+    ));
+    assert_eq!(target.data, before);
+}
+
+#[test]
+#[should_panic(expected = "too short to read")]
+fn truncated_target_orders_fail_loudly() {
+    // A truncated target_orders fixture is a broken fixture state, not a
+    // healthy one — the settlement must refuse to guess.
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(1_000);
+    let pc_vault = spl_token_account(1_000);
+    let mut target = v4_target_account(1, 1);
+    target.data.truncate(1030); // cuts calc_pnl_y in half
+
+    let _ = settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault);
+}
+
+#[test]
+#[should_panic(expected = "need_take_pnl")]
+fn need_take_above_vault_balance_fails_loudly() {
+    // need_take_pnl above the vault balance is impossible from the
+    // fetcher and V4's own checked_sub would reject it; fail loudly here
+    // instead of "settling" garbage.
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 5_000, 0);
+    let coin_vault = spl_token_account(1_000);
+    let pc_vault = spl_token_account(1_000);
+    let mut target = v4_target_account(1, 1);
+
+    let _ = settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault);
+}
+
+// ---------------------------------------------------------------------
+// 8: P125-02 — the explicit post-settlement builder + pure diagnostic
+// ---------------------------------------------------------------------
+//
+// P125-02 contract pins: the named builder is the ONLY sanctioned
+// settlement entry point, it rewrites EXACTLY the two calc_pnl u128
+// fields, it is a documented no-op on healthy snapshots, it is
+// deterministic/idempotent, and the pure diagnostic never mutates
+// anything. The untouched captured state (and the CalcPnlError-37
+// failure it produces) is never normalized by shared setup.
+
+use fork_support::{
+    post_settlement_v4_pool_fixture, stale_v4_pnl_mark_status, PostSettlementDelta,
+    V4StalePnlStatus, V4_TARGET_CALC_PNL_X_OFF, V4_TARGET_CALC_PNL_Y_OFF,
+};
+
+/// A STALE fixture shape (coin side burned below the recorded mark) with
+/// the canonical SOL/USDC numbers.
+fn stale_fixture() -> (Account, Account, Account, Account) {
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(999_000_000_000); // burned: -1 SOL
+    let pc_vault = spl_token_account(100_000_000_000);
+    let target = v4_target_account(
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32),
+        1_000_000_000_000,
+    );
+    (pool, coin_vault, pc_vault, target)
+}
+
+#[test]
+fn p125_02_diagnostic_is_pure_and_matches_the_settle_decision() {
+    // The diagnostic must never mutate ANY account, and its verdict must
+    // agree with the settle primitive's boolean.
+    let (pool, coin_vault, pc_vault, mut target) = stale_fixture();
+    let pool_before = pool.data.clone();
+    let coin_before = coin_vault.data.clone();
+    let pc_before = pc_vault.data.clone();
+    let target_before = target.data.clone();
+
+    let status = stale_v4_pnl_mark_status(&pool, &target, &coin_vault, &pc_vault);
+    assert!(
+        matches!(status, V4StalePnlStatus::Stale { .. }),
+        "the stale fixture must be diagnosed as stale"
+    );
+    assert_eq!(
+        pool.data, pool_before,
+        "the diagnostic must not touch the pool"
+    );
+    assert_eq!(
+        coin_vault.data, coin_before,
+        "the diagnostic must not touch the coin vault"
+    );
+    assert_eq!(
+        pc_vault.data, pc_before,
+        "the diagnostic must not touch the pc vault"
+    );
+    assert_eq!(
+        target.data, target_before,
+        "the diagnostic must not touch target_orders"
+    );
+
+    let settled = settle_stale_v4_pnl_mark(&pool, &mut target, &coin_vault, &pc_vault);
+    assert!(settled, "the settle primitive agrees with the diagnostic");
+}
+
+#[test]
+fn p125_02_builder_rewrites_exactly_the_two_calc_pnl_fields() {
+    let (pool, coin_vault, pc_vault, mut target) = stale_fixture();
+    let before = target.data.clone();
+
+    let delta: PostSettlementDelta =
+        post_settlement_v4_pool_fixture(&pool, &mut target, &coin_vault, &pc_vault);
+
+    assert!(
+        delta.settled,
+        "a stale snapshot must be settled by the builder"
+    );
+    assert_eq!(
+        delta.changed_ranges,
+        vec![
+            (V4_TARGET_CALC_PNL_X_OFF, V4_TARGET_CALC_PNL_X_OFF + 16),
+            (V4_TARGET_CALC_PNL_Y_OFF, V4_TARGET_CALC_PNL_Y_OFF + 16),
+        ],
+        "the builder must rewrite EXACTLY the two u128 calc_pnl fields"
+    );
+    // Byte-level cross-check: every changed byte lies in those ranges and
+    // the length is untouched.
+    assert_eq!(target.data.len(), before.len());
+    for (i, (b, a)) in before.iter().zip(target.data.iter()).enumerate() {
+        if b != a {
+            assert!(
+                (V4_TARGET_CALC_PNL_X_OFF..V4_TARGET_CALC_PNL_X_OFF + 16).contains(&i)
+                    || (V4_TARGET_CALC_PNL_Y_OFF..V4_TARGET_CALC_PNL_Y_OFF + 16).contains(&i),
+                "byte {i} changed outside the calc_pnl fields"
+            );
+        }
+    }
+}
+
+#[test]
+fn p125_02_builder_is_a_documented_noop_on_healthy_snapshots() {
+    // Healthy snapshot: the builder must NOT rewrite anything and must
+    // report settled=false with empty ranges — an untouched fixture passes
+    // through byte-for-byte (this is what a NO-normalization shared setup
+    // relies on).
+    let pool = v4_pool_account(6, TEST_COIN_DEC, TEST_PC_DEC, TEST_SYSV, 0, 0);
+    let coin_vault = spl_token_account(1_000_000_000_000); // 1000 SOL — healthy
+    let pc_vault = spl_token_account(100_000_000_000);
+    let mut target = v4_target_account(
+        (100_000_000_000u128 * TEST_SYSV as u128) / 10u128.pow(TEST_PC_DEC as u32),
+        1_000_000_000_000,
+    );
+    let before = target.data.clone();
+
+    let delta = post_settlement_v4_pool_fixture(&pool, &mut target, &coin_vault, &pc_vault);
+    assert!(!delta.settled);
+    assert!(delta.changed_ranges.is_empty());
+    assert_eq!(
+        target.data, before,
+        "a healthy snapshot must stay byte-for-byte identical"
+    );
+}
+
+#[test]
+fn p125_02_builder_is_deterministic_and_idempotent() {
+    // Determinism: two independent clones of the same stale state settle
+    // to IDENTICAL bytes. Idempotence: a second settle pass is a no-op
+    // (the mark is already current), so repeated test execution is
+    // deterministic.
+    let (pool, coin_vault, pc_vault, mut a) = stale_fixture();
+    let untouched_snapshot = a.data.clone();
+    let mut b = Account {
+        lamports: a.lamports,
+        data: a.data.clone(),
+        owner: a.owner,
+        executable: a.executable,
+        rent_epoch: a.rent_epoch,
+    };
+
+    let first = post_settlement_v4_pool_fixture(&pool, &mut a, &coin_vault, &pc_vault);
+    let second = post_settlement_v4_pool_fixture(&pool, &mut b, &coin_vault, &pc_vault);
+    assert_eq!(
+        a.data, b.data,
+        "the builder is deterministic across independent clones"
+    );
+    assert_eq!(first, second);
+    assert_ne!(
+        a.data, untouched_snapshot,
+        "the stale mark was actually rewritten"
+    );
+
+    // Idempotence: re-settling an already-settled account is a no-op.
+    let after_first = a.data.clone();
+    let again = settle_stale_v4_pnl_mark(&pool, &mut a, &coin_vault, &pc_vault);
+    assert!(
+        !again,
+        "a settled mark is current — the second pass must be a no-op"
+    );
+    assert_eq!(a.data, after_first);
+}

@@ -87,7 +87,7 @@ use solana_sdk_ids::system_program;
 #[macro_use]
 #[path = "common/fork_support.rs"]
 mod fork_support;
-use fork_support::{fixtures_dir, load_manifest};
+use fork_support::{fixtures_dir, load_manifest, post_settlement_v4_pool_fixture};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -538,7 +538,35 @@ fn build_genesis(dust: u64, extra: Vec<(Pubkey, Account)>, salvor: Keypair) -> O
         return None;
     }
 
+    // Load the four accounts the post-settlement builder touches first, so it
+    // can see pool + vaults + target orders together, then add the whole
+    // section to genesis. P125-02: this is the EXPLICIT, NAMED
+    // post_settlement_v4_pool_fixture builder — a healthy snapshot stays
+    // byte-for-byte mainnet; a snapshot exhibiting the stale-PNL transient
+    // has ONLY its calc_pnl fields rewritten, with a loud POST-SETTLEMENT
+    // banner and an exact delta returned. The UNTOUCHED snapshot behavior
+    // (the production-relevant CalcPnlError 37 failure) is covered by
+    // raydium_v4_fork's dedicated stale-PNL tests — never normalized here.
+    let post_settlement_pool_section = {
+        let (pool_k, pool_a) = load_real_account(&manifest["accounts"], "pool");
+        let (coin_k, coin_a) = load_real_account(&manifest["accounts"], "coin_vault");
+        let (pc_k, pc_a) = load_real_account(&manifest["accounts"], "pc_vault");
+        let (target_k, mut target_a) = load_real_account(&manifest["accounts"], "target_orders");
+        post_settlement_v4_pool_fixture(&pool_a, &mut target_a, &coin_a, &pc_a);
+        vec![
+            (pool_k, pool_a),
+            (coin_k, coin_a),
+            (pc_k, pc_a),
+            (target_k, target_a),
+        ]
+    };
+    for (k, a) in post_settlement_pool_section {
+        pt.add_account(k, a);
+    }
     for name in POOL_ACCOUNTS {
+        if matches!(name, "pool" | "coin_vault" | "pc_vault" | "target_orders") {
+            continue;
+        }
         let (k, a) = load_real_account(&manifest["accounts"], name);
         pt.add_account(k, a);
     }
