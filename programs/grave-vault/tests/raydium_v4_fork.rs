@@ -71,7 +71,10 @@ use solana_sdk_ids::system_program;
 #[macro_use]
 #[path = "common/fork_support.rs"]
 mod fork_support;
-use fork_support::{fixtures_dir, load_manifest, settle_stale_v4_pnl_mark};
+use fork_support::{
+    fixtures_dir, load_manifest, post_settlement_v4_pool_fixture, stale_v4_pnl_mark_status,
+    PostSettlementDelta, V4StalePnlStatus,
+};
 
 // GraveVault / GraveScanner placeholder program IDs (KEYS-003; same values as
 // Anchor.toml). The vault ID also comes from `declare_id!`.
@@ -94,6 +97,11 @@ const ERR_PREFLIGHT_FAILED: u32 = 7013;
 
 // Raw deployed-AMM error code: InsufficientFunds (Raydium AmmError index 40).
 const AMM_ERR_INSUFFICIENT_FUNDS: u32 = 40;
+
+// Raw deployed-AMM error code: CalcPnlError (Raydium AmmError index 37) —
+// the production-relevant stale-PNL failure the untouched-state test
+// below observes and reports (P125-02).
+const AMM_ERR_CALC_PNL: u32 = 37;
 
 // Anchored timestamps: genesis clock is "now", so certs expiring in 2100 are
 // valid and certs expiring in 2001 are expired — regardless of test time.
@@ -163,6 +171,15 @@ fn read_u64(data: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(data[off..off + 8].try_into().unwrap())
 }
 
+/// Raw bytes of a named fixture FILE (no Account construction) — used by
+/// the stale-PNL fidelity tests to prove that fixture loading and genesis
+/// injection never mutate the captured Mainnet bytes (P125-02).
+fn fixture_file_bytes(manifest: &Value, name: &str) -> Vec<u8> {
+    let entry = &manifest["accounts"][name];
+    std::fs::read(fixtures_dir().join(entry["file"].as_str().unwrap()))
+        .unwrap_or_else(|e| panic!("missing fixture for {name}: {e}"))
+}
+
 fn token_amount(account: &Account) -> u64 {
     read_u64(&account.data, TA_AMOUNT)
 }
@@ -228,13 +245,44 @@ struct ForkHarness {
     vault_base_ata: Pubkey,
     vault_memecoin_ata: Pubkey,
     salvor_lp_ata: Pubkey,
+    /// P125-02: the stale-PNL status of the CAPTURED Mainnet snapshot,
+    /// evaluated on the byte-for-byte loaded accounts BEFORE any genesis
+    /// injection. Never mutated by the harness.
+    pnl_status: V4StalePnlStatus,
+    /// P125-02: the captured target_orders FILE bytes (the untouched
+    /// Mainnet state) — the fidelity baseline the VM-injected account is
+    /// asserted against by the dedicated stale-PNL tests.
+    target_orders_file_bytes: Vec<u8>,
 }
 
 impl ForkHarness {
-    /// Builds the genesis. Returns None (after printing a SKIP reason) when
-    /// fixtures are absent, so CI without fixtures stays green. `extra`
-    /// accounts are injected into genesis (used by adversarial tests).
+    /// Builds the genesis from the CAPTURED MAINNET STATE, UNTOUCHED
+    /// (P125-02: no stale-PNL normalization anywhere in genesis setup).
+    /// Returns None (after printing a SKIP reason) when fixtures are
+    /// absent, so CI without fixtures stays green. `extra` accounts are
+    /// injected into genesis (used by adversarial tests).
     fn try_new(cert_expires_at: i64, extra: Vec<(Pubkey, Account)>) -> Option<Self> {
+        Self::try_new_impl(cert_expires_at, extra, false).map(|(h, _)| h)
+    }
+
+    /// The EXPLICIT post-settlement scenario constructor: identical
+    /// genesis, except the NAMED `post_settlement_v4_pool_fixture`
+    /// builder is applied to the target_orders COPY before injection
+    /// (a loud, field-scoped, documented transformation — never part of
+    /// ordinary fixture loading). Returns the exact delta so the test
+    /// can assert only the settlement-related fields changed.
+    fn try_new_post_settlement(
+        cert_expires_at: i64,
+        extra: Vec<(Pubkey, Account)>,
+    ) -> Option<(Self, PostSettlementDelta)> {
+        Self::try_new_impl(cert_expires_at, extra, true).map(|(h, delta)| (h, delta.unwrap()))
+    }
+
+    fn try_new_impl(
+        cert_expires_at: i64,
+        extra: Vec<(Pubkey, Account)>,
+        post_settlement: bool,
+    ) -> Option<(Self, Option<PostSettlementDelta>)> {
         let manifest = load_manifest()?;
         let parsed = &manifest["parsed"];
 
@@ -290,12 +338,32 @@ impl ForkHarness {
         // CI determinism: settle a stale mainnet pnl mark if this snapshot
         // exhibits the CalcPnlError-37 transient (see fork_support for the
         // full story). Healthy snapshots pass through untouched.
-        settle_stale_v4_pnl_mark(
+        // P125-02 REWRITE: the captured Mainnet state is ALWAYS loaded and
+        // injected UNTOUCHED. The stale-PNL status is evaluated here (pure,
+        // non-mutating) and recorded on the harness; ONLY the explicit
+        // post-settlement scenario applies the NAMED builder to the
+        // target_orders copy, and it reports exactly what it rewrote.
+        let pnl_status = stale_v4_pnl_mark_status(
             &pool_acct,
-            &mut target_orders_acct,
+            &target_orders_acct,
             &coin_vault_acct,
             &pc_vault_acct,
         );
+        let target_orders_file_bytes = fixture_file_bytes(&manifest, "target_orders");
+        assert_eq!(
+            target_orders_acct.data, target_orders_file_bytes,
+            "P125-02 fidelity: load_real_account must yield the byte-for-byte captured target_orders bytes"
+        );
+        let post_settlement_delta = if post_settlement {
+            Some(post_settlement_v4_pool_fixture(
+                &pool_acct,
+                &mut target_orders_acct,
+                &coin_vault_acct,
+                &pc_vault_acct,
+            ))
+        } else {
+            None
+        };
 
         // ---- derived / forged identities
         let salvor = Keypair::new();
@@ -421,42 +489,47 @@ impl ForkHarness {
             pt.add_account(addr, account);
         }
 
-        Some(Self {
-            pt: Some(pt),
-            pool,
-            amm_program,
-            coin_vault,
-            pc_vault,
-            lp_mint,
-            pc_mint,
-            open_orders,
-            target_orders,
-            market,
-            market_program,
-            market_coin_vault,
-            market_pc_vault,
-            vault_signer: pk(parsed["vaultSigner"].as_str().unwrap()),
-            event_queue,
-            bids,
-            asks,
-            coin_reserve,
-            pc_reserve,
-            lp_supply,
-            amm_lp_amount,
-            lp_burn_plan,
-            salvor,
-            cert_pda,
-            protocol_config,
-            vault_authority,
-            pool_registry,
-            salvage_receipt,
-            lp_holder_pool_vault,
-            protocol_treasury,
-            vault_sol_holding,
-            vault_base_ata,
-            vault_memecoin_ata,
-            salvor_lp_ata,
-        })
+        Some((
+            Self {
+                pt: Some(pt),
+                pool,
+                amm_program,
+                coin_vault,
+                pc_vault,
+                lp_mint,
+                pc_mint,
+                open_orders,
+                target_orders,
+                market,
+                market_program,
+                market_coin_vault,
+                market_pc_vault,
+                vault_signer: pk(parsed["vaultSigner"].as_str().unwrap()),
+                event_queue,
+                bids,
+                asks,
+                coin_reserve,
+                pc_reserve,
+                lp_supply,
+                amm_lp_amount,
+                lp_burn_plan,
+                salvor,
+                cert_pda,
+                protocol_config,
+                vault_authority,
+                pool_registry,
+                salvage_receipt,
+                lp_holder_pool_vault,
+                protocol_treasury,
+                vault_sol_holding,
+                vault_base_ata,
+                vault_memecoin_ata,
+                salvor_lp_ata,
+                pnl_status,
+                target_orders_file_bytes,
+            },
+            post_settlement_delta,
+        ))
     }
 
     /// The 13 pool-derived remaining accounts in vault CPI order
@@ -603,6 +676,31 @@ fn default_salvage_opts(h: &ForkHarness, lp_amount: u64) -> SalvageOpts {
 // Execution + assertion helpers
 // =====================================================================
 
+/// P125-02: the captured Mainnet state is injected UNTOUCHED. When it
+/// exhibits the stale-PNL transient, V4-level behavior tests cannot run
+/// honestly against rewritten bytes (silent normalization is forbidden),
+/// so they skip LOUDLY in BOTH workflows — an environmental condition of
+/// the captured snapshot, not a harness defect. The stale condition
+/// itself is exercised by the dedicated tests below
+/// (untouched_stale_mainnet_state_surfaces_calc_pnl_error_37 /
+/// post_settlement_withdraw_succeeds_and_rewrites_only_calc_pnl).
+fn skip_when_stale(h: &ForkHarness, ctx: &str) -> bool {
+    if let V4StalePnlStatus::Stale {
+        current_k,
+        recorded_k,
+    } = h.pnl_status
+    {
+        eprintln!(
+            "SKIP: {ctx} — the captured Mainnet snapshot exhibits the stale Raydium v4 pnl mark \
+             (vault K {current_k} < recorded calc_pnl K {recorded_k}): the real withdraw would revert \
+             with CalcPnlError 37. P125-02 forbids silently normalizing the fixture; the condition \
+             itself is exercised by the dedicated untouched-state and post-settlement tests."
+        );
+        return true;
+    }
+    false
+}
+
 async fn acct(client: &mut BanksClient, k: &Pubkey) -> Account {
     client
         .get_account(*k)
@@ -665,7 +763,27 @@ async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
             "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
         );
     };
+    // P125-02: untouched-state fidelity — when the captured snapshot
+    // exhibits the stale mark, this V4-level behavior test skips loudly
+    // instead of running against (forbidden) normalized bytes.
+    if skip_when_stale(
+        &h,
+        "real_v4_withdraw_burns_lp_and_settles_40_40_20 (V4-level withdraw behavior)",
+    ) {
+        return;
+    }
     let (mut client, h) = setup(h).await;
+
+    // -------- P125-02 fidelity: the VM holds the byte-for-byte captured
+    // target_orders — fixture loading and genesis injection never mutate
+    // the captured Mainnet state.
+    {
+        let t = acct(&mut client, &h.target_orders).await;
+        assert_eq!(
+            t.data, h.target_orders_file_bytes,
+            "the VM-injected target_orders must be byte-for-byte the captured Mainnet fixture (P125-02)"
+        );
+    }
 
     // -------- pre-state from the live VM (should match fixture reads)
     let supply_before = mint_supply(&acct(&mut client, &h.lp_mint).await);
@@ -819,6 +937,210 @@ async fn real_v4_withdraw_burns_lp_and_settles_40_40_20() {
 }
 
 // =====================================================================
+// Tests — P125-02 dedicated stale-PNL scenarios (independently runnable)
+// =====================================================================
+//
+// The UNTOUCHED-state failure scenario and the POST-SETTLEMENT success
+// scenario are separate tests with distinct names and outputs. Neither
+// one silently invokes the normalization helper: the untouched test never
+// touches the builder, and the post-settlement test applies the NAMED
+// `post_settlement_v4_pool_fixture` builder explicitly and asserts the
+// exact delta.
+
+#[tokio::test]
+async fn untouched_stale_mainnet_state_surfaces_calc_pnl_error_37() {
+    // UNTOUCHED SCENARIO: the genesis holds the byte-for-byte captured
+    // Mainnet state — no normalization, anywhere. When that captured
+    // state exhibits the stale PNL mark, a real withdraw MUST revert with
+    // the real V4 CalcPnlError (custom 37): this is a PRODUCTION-RELEVANT
+    // failure condition, deliberately observed and reported here rather
+    // than rewritten away.
+    let Some(h) = ForkHarness::try_new(TS_VALID_UNTIL_2100, vec![]) else {
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
+    };
+    let (mut client, h) = setup(h).await;
+
+    // Fidelity: the VM-injected target_orders are the byte-for-byte
+    // captured bytes (fixture loading + injection never mutate them).
+    let vm_target = acct(&mut client, &h.target_orders).await;
+    assert_eq!(
+        vm_target.data, h.target_orders_file_bytes,
+        "P125-02: the untouched scenario must run against the byte-for-byte captured Mainnet target_orders"
+    );
+
+    match h.pnl_status {
+        V4StalePnlStatus::Stale {
+            current_k,
+            recorded_k,
+        } => {
+            eprintln!(
+                "UNTOUCHED-STALE SCENARIO: captured Mainnet state has vault K {current_k} < recorded \
+                 calc_pnl K {recorded_k} — the production-relevant CalcPnlError-37 window. The real \
+                 withdraw on this state is expected to FAIL; this failure is reported as the EXPECTED \
+                 result, not rewritten away."
+            );
+            let err = send(
+                &mut client,
+                &h.salvor,
+                &[salvage_ix(&h, &default_salvage_opts(&h, h.lp_burn_plan))],
+            )
+            .await
+            .expect_err(
+                "a real withdraw on the UNTOUCHED stale-PNL state must fail with the real V4 CalcPnlError — if this succeeds, the captured state was silently modified",
+            );
+            expect_custom(
+                err,
+                AMM_ERR_CALC_PNL,
+                "untouched stale Mainnet state must surface the real V4 CalcPnlError 37 (production-relevant failure)",
+            );
+            eprintln!(
+                "UNTOUCHED-STALE SCENARIO: observed the real V4 CalcPnlError 37 on the untouched \
+                 captured state — the production-relevant failure condition is established by evidence."
+            );
+        }
+        V4StalePnlStatus::Healthy => {
+            // Honest fixture limitation: the captured snapshot was healthy
+            // at capture time (K_current >= K_recorded), so the failure
+            // condition is NOT present in this fixture. The failure
+            // scenario cannot be established from it and is NOT fabricated.
+            eprintln!(
+                "SKIP: the captured Mainnet snapshot is HEALTHY at capture time (K_current >= \
+                 K_recorded) — the stale-PNL failure condition is absent, so the untouched-failure \
+                 scenario cannot be established from this fixture. This is a fixture limitation \
+                 (reported, not fabricated); re-run when the captured snapshot exhibits the stale mark."
+            );
+        }
+        V4StalePnlStatus::WithdrawOnly => {
+            eprintln!(
+                "SKIP: the captured pool is in WithdrawOnly status — V4's withdraw skips \
+                 calc_take_pnl entirely, so the CalcPnlError-37 failure is unreachable on this \
+                 snapshot (fixture limitation, reported not fabricated)."
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn post_settlement_withdraw_succeeds_and_rewrites_only_calc_pnl() {
+    // POST-SETTLEMENT SCENARIO (explicit, separately labelled): the NAMED
+    // `post_settlement_v4_pool_fixture` builder is applied to the
+    // target_orders COPY before genesis injection — a visible, documented,
+    // field-scoped transformation. The untouched captured bytes stay the
+    // fidelity baseline: the VM state must differ from them ONLY in the
+    // calc_pnl fields, and the fixture FILE must remain byte-for-byte
+    // mainnet.
+    let Some((h, delta)) = ForkHarness::try_new_post_settlement(TS_VALID_UNTIL_2100, vec![]) else {
+        skip_or_fail!(
+            "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
+        );
+    };
+    let (mut client, h) = setup(h).await;
+
+    // The fixture FILE is immutable — the builder only ever rewrote the
+    // in-memory copy, never the shared captured data.
+    let manifest = load_manifest().expect("fixtures present (try_new_post_settlement succeeded)");
+    assert_eq!(
+        fixture_file_bytes(&manifest, "target_orders"),
+        h.target_orders_file_bytes,
+        "P125-02: the captured target_orders fixture FILE must remain byte-for-byte mainnet after the post-settlement build"
+    );
+
+    match h.pnl_status {
+        V4StalePnlStatus::Stale { .. } => {
+            // The builder settled the stale mark: assert the exact,
+            // field-scoped delta.
+            assert!(
+                delta.settled,
+                "a stale snapshot must be settled by the explicit builder"
+            );
+            assert_eq!(
+                delta.changed_ranges,
+                vec![
+                    (
+                        fork_support::V4_TARGET_CALC_PNL_X_OFF,
+                        fork_support::V4_TARGET_CALC_PNL_X_OFF + 16
+                    ),
+                    (
+                        fork_support::V4_TARGET_CALC_PNL_Y_OFF,
+                        fork_support::V4_TARGET_CALC_PNL_Y_OFF + 16
+                    ),
+                ],
+                "settlement must rewrite EXACTLY the two calc_pnl u128 fields and nothing else"
+            );
+            // VM state differs from the captured bytes ONLY in those ranges.
+            let vm_target = acct(&mut client, &h.target_orders).await;
+            assert_eq!(vm_target.data.len(), h.target_orders_file_bytes.len());
+            for (i, (captured, vm_byte)) in h
+                .target_orders_file_bytes
+                .iter()
+                .zip(vm_target.data.iter())
+                .enumerate()
+            {
+                if captured != vm_byte {
+                    assert!(
+                        (fork_support::V4_TARGET_CALC_PNL_X_OFF
+                            ..fork_support::V4_TARGET_CALC_PNL_X_OFF + 16)
+                            .contains(&i)
+                            || (fork_support::V4_TARGET_CALC_PNL_Y_OFF
+                                ..fork_support::V4_TARGET_CALC_PNL_Y_OFF + 16)
+                                .contains(&i),
+                        "P125-02: byte {i} changed outside the calc_pnl fields — the settlement touched non-settlement state"
+                    );
+                }
+            }
+            eprintln!(
+                "POST-SETTLEMENT SCENARIO: the explicit builder settled the stale mark (ranges \
+                 {:?}); the withdraw below is expected to SUCCEED on the post-settlement state.",
+                delta.changed_ranges
+            );
+        }
+        _ => {
+            // Healthy/WithdrawOnly snapshot: the builder is a documented
+            // no-op (nothing rewritten); the withdraw succeeds on the
+            // byte-for-byte untouched state.
+            assert!(
+                !delta.settled && delta.changed_ranges.is_empty(),
+                "a healthy/withdraw-only snapshot must pass through the builder untouched"
+            );
+            let vm_target = acct(&mut client, &h.target_orders).await;
+            assert_eq!(
+                vm_target.data, h.target_orders_file_bytes,
+                "with no settlement needed, the VM state must be byte-for-byte the captured fixture"
+            );
+            eprintln!(
+                "POST-SETTLEMENT SCENARIO: the captured snapshot needed no settlement — the \
+                 withdraw below runs on the byte-for-byte untouched state."
+            );
+        }
+    }
+
+    // The post-settlement withdraw succeeds (economics assertions mirror
+    // the main happy-path test in condensed form).
+    send(
+        &mut client,
+        &h.salvor,
+        &[salvage_ix(&h, &default_salvage_opts(&h, h.lp_burn_plan))],
+    )
+    .await
+    .unwrap_or_else(|e| panic!("salvage_pool on the post-settlement state must succeed: {e:?}"));
+
+    let supply_after = mint_supply(&acct(&mut client, &h.lp_mint).await);
+    assert_eq!(
+        supply_after,
+        h.lp_supply - h.lp_burn_plan,
+        "LP mint supply must decrease by exactly the burned amount"
+    );
+    let coin_after = token_amount(&acct(&mut client, &h.coin_vault).await);
+    let pc_after = token_amount(&acct(&mut client, &h.pc_vault).await);
+    assert!(
+        h.coin_reserve > coin_after && h.pc_reserve > pc_after,
+        "both sides must pay out"
+    );
+}
+
+// =====================================================================
 // Tests — adversarial matrix
 // =====================================================================
 
@@ -850,6 +1172,12 @@ async fn scrambled_open_orders_vs_target_rejected_by_real_v4() {
             "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
         );
     };
+    if skip_when_stale(
+        &h,
+        "scrambled_open_orders_vs_target_rejected_by_real_v4 (V4-level rejection code)",
+    ) {
+        return;
+    }
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
     remaining.swap(1, 2); // open_orders <-> target_orders
@@ -874,6 +1202,12 @@ async fn scrambled_coin_vs_pc_vaults_rejected_by_real_v4() {
             "required fork fixtures missing — run scripts/build_fork_harness.sh for the explicit fork workflow"
         );
     };
+    if skip_when_stale(
+        &h,
+        "scrambled_coin_vs_pc_vaults_rejected_by_real_v4 (V4-level rejection code)",
+    ) {
+        return;
+    }
     let (mut client, h) = setup(h).await;
     let mut remaining = h.remaining_default();
     remaining.swap(3, 4); // amm coin vault <-> amm pc vault

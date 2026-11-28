@@ -285,14 +285,16 @@ pub fn required_elfs_registered_from(
 // pool's mark. That is salvage-protocol behavior, deliberately outside
 // this test-infrastructure fix.
 
-const V4_AMM_STATUS_OFF: usize = 0;
-const V4_AMM_COIN_DECIMALS_OFF: usize = 32;
-const V4_AMM_PC_DECIMALS_OFF: usize = 40;
-const V4_AMM_SYS_DECIMAL_VALUE_OFF: usize = 120;
-const V4_AMM_NEED_TAKE_PNL_COIN_OFF: usize = 192;
-const V4_AMM_NEED_TAKE_PNL_PC_OFF: usize = 200;
-const V4_TARGET_CALC_PNL_X_OFF: usize = 1024;
-const V4_TARGET_CALC_PNL_Y_OFF: usize = 1040;
+// Offsets are pub: the dedicated stale-PNL fidelity tests assert against
+// the exact settlement-affected byte ranges (P125-02).
+pub const V4_AMM_STATUS_OFF: usize = 0;
+pub const V4_AMM_COIN_DECIMALS_OFF: usize = 32;
+pub const V4_AMM_PC_DECIMALS_OFF: usize = 40;
+pub const V4_AMM_SYS_DECIMAL_VALUE_OFF: usize = 120;
+pub const V4_AMM_NEED_TAKE_PNL_COIN_OFF: usize = 192;
+pub const V4_AMM_NEED_TAKE_PNL_PC_OFF: usize = 200;
+pub const V4_TARGET_CALC_PNL_X_OFF: usize = 1024;
+pub const V4_TARGET_CALC_PNL_Y_OFF: usize = 1040;
 /// SPL token account layout: the `amount` field.
 const V4_TOKEN_ACCOUNT_AMOUNT_OFF: usize = 64;
 /// `AmmStatus::WithdrawOnly` — the ONLY status for which V4's withdraw
@@ -339,27 +341,37 @@ fn v4_normalize_decimal(val: u128, native_decimals: u32, sys_decimal_value: u128
         })
 }
 
-/// Settles a stale Raydium v4 pnl mark in the in-memory `target_orders`
-/// fixture copy when the captured mainnet snapshot exhibits the
-/// CalcPnlError-37 transient described above. Returns true when the mark
-/// was rewritten (stale snapshot), false when the snapshot is healthy (or
-/// the pool is in WithdrawOnly status, where V4 skips the check anyway).
-///
-/// Panics loudly on fixture states that could never have come from the
-/// fetcher (truncated accounts, need_take above the vault balance,
-/// zero system decimal value): those are broken fixture states, and
-/// guessing would only move the failure somewhere less diagnosable.
-pub fn settle_stale_v4_pnl_mark(
+/// The stale-PNL condition of a captured V4 snapshot (PURE diagnostic —
+/// never mutates anything). P125-02: shared fork-test setup uses this to
+/// DECIDE and REPORT; it never rewrites captured state as a side effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V4StalePnlStatus {
+    /// AmmStatus == WithdrawOnly(3): V4's withdraw skips calc_take_pnl
+    /// entirely, so a stale mark cannot fail the withdraw.
+    WithdrawOnly,
+    /// current vault K >= recorded calc_pnl K: a real withdraw proceeds.
+    Healthy,
+    /// current vault K < recorded calc_pnl K: EVERY real V4 withdraw on
+    /// this snapshot reverts with CalcPnlError 37 — a real,
+    /// production-relevant failure condition of the captured state.
+    Stale { current_k: u128, recorded_k: u128 },
+}
+
+/// Pure, non-mutating evaluation of the V4 CalcPnlError-37 condition on a
+/// captured snapshot (pool + target_orders + both vaults). Panics loudly
+/// on fixture states that could never have come from the fetcher
+/// (truncated accounts, need_take above the vault balance, zero system
+/// decimal value): those are broken fixture states, and guessing would
+/// only move the failure somewhere less diagnosable.
+pub fn stale_v4_pnl_mark_status(
     pool: &Account,
-    target_orders: &mut Account,
+    target_orders: &Account,
     coin_vault: &Account,
     pc_vault: &Account,
-) -> bool {
+) -> V4StalePnlStatus {
     let status = v4_read_u64(&pool.data, V4_AMM_STATUS_OFF, "status", "pool.bin");
     if status == V4_STATUS_WITHDRAW_ONLY {
-        // V4's withdraw skips calc_take_pnl entirely in this status; a
-        // stale mark cannot fail the withdraw, so leave the fixture alone.
-        return false;
+        return V4StalePnlStatus::WithdrawOnly;
     }
 
     let coin_decimals = v4_read_u64(
@@ -444,9 +456,85 @@ pub fn settle_stale_v4_pnl_mark(
         .expect("FORK-FIXTURE: recorded pnl product overflows u128 — corrupt fixture");
 
     if current_k >= recorded_k {
-        // Healthy snapshot: leave the byte-for-byte fixture untouched.
-        return false;
+        V4StalePnlStatus::Healthy
+    } else {
+        V4StalePnlStatus::Stale {
+            current_k,
+            recorded_k,
+        }
     }
+}
+
+/// Settles a stale Raydium v4 pnl mark in the in-memory `target_orders`
+/// fixture copy when the captured mainnet snapshot exhibits the
+/// CalcPnlError-37 transient described above. Returns true when the mark
+/// was rewritten (stale snapshot), false when the snapshot is healthy (or
+/// the pool is in WithdrawOnly status, where V4 skips the check anyway).
+///
+/// P125-02 NOTE: this primitive is NOT part of fixture loading and is
+/// never invoked by shared setup on untouched state. Shared suites that
+/// need a settled pool use the EXPLICIT, NAMED
+/// `post_settlement_v4_pool_fixture` builder below (which records and
+/// reports exactly what it rewrote); the captured state's UNTOUCHED
+/// behavior is covered by the dedicated stale-PNL tests in
+/// `raydium_v4_fork.rs`.
+pub fn settle_stale_v4_pnl_mark(
+    pool: &Account,
+    target_orders: &mut Account,
+    coin_vault: &Account,
+    pc_vault: &Account,
+) -> bool {
+    let (coin_decimals, pc_decimals, sys_decimal_value) =
+        match stale_v4_pnl_mark_status(pool, target_orders, coin_vault, pc_vault) {
+            V4StalePnlStatus::WithdrawOnly | V4StalePnlStatus::Healthy => return false,
+            V4StalePnlStatus::Stale { .. } => (
+                v4_read_u64(
+                    &pool.data,
+                    V4_AMM_COIN_DECIMALS_OFF,
+                    "coin_decimals",
+                    "pool.bin",
+                ),
+                v4_read_u64(
+                    &pool.data,
+                    V4_AMM_PC_DECIMALS_OFF,
+                    "pc_decimals",
+                    "pool.bin",
+                ),
+                v4_read_u64(
+                    &pool.data,
+                    V4_AMM_SYS_DECIMAL_VALUE_OFF,
+                    "sys_decimal_value",
+                    "pool.bin",
+                ),
+            ),
+        };
+
+    let need_take_coin = v4_read_u64(
+        &pool.data,
+        V4_AMM_NEED_TAKE_PNL_COIN_OFF,
+        "need_take_pnl_coin",
+        "pool.bin",
+    );
+    let need_take_pc = v4_read_u64(
+        &pool.data,
+        V4_AMM_NEED_TAKE_PNL_PC_OFF,
+        "need_take_pnl_pc",
+        "pool.bin",
+    );
+    let coin_vault_amount = v4_read_u64(
+        &coin_vault.data,
+        V4_TOKEN_ACCOUNT_AMOUNT_OFF,
+        "amount",
+        "coin_vault.bin",
+    );
+    let pc_vault_amount = v4_read_u64(
+        &pc_vault.data,
+        V4_TOKEN_ACCOUNT_AMOUNT_OFF,
+        "amount",
+        "pc_vault.bin",
+    );
+    let total_coin_without_take_pnl = coin_vault_amount - need_take_coin;
+    let total_pc_without_take_pnl = pc_vault_amount - need_take_pc;
 
     // Stale mark. Settle it the way a mainnet swap / withdraw_pnl
     // settlement would have: mark := current ex-need_take vault amounts,
@@ -472,13 +560,82 @@ pub fn settle_stale_v4_pnl_mark(
     );
     target_orders.data[V4_TARGET_CALC_PNL_X_OFF..x_end].copy_from_slice(&settled_x.to_le_bytes());
     target_orders.data[V4_TARGET_CALC_PNL_Y_OFF..y_end].copy_from_slice(&settled_y.to_le_bytes());
-
-    eprintln!(
-        "FORK-FIXTURE: settled stale Raydium v4 pnl mark in memory — the captured mainnet snapshot has \
-         vault K {current_k} < recorded calc_pnl K {recorded_k}, so a real withdraw on this snapshot \
-         would revert with CalcPnlError 37 (P&L calculation error) until a mainnet settlement updates \
-         the pool. calc_pnl_x/y rewritten to the current ex-need_take vault values ({settled_x}, \
-         {settled_y}); withdraw economics unchanged. Fixture files remain byte-for-byte mainnet."
-    );
     true
+}
+
+/// What `post_settlement_v4_pool_fixture` changed in the target-orders
+/// account (empty when the snapshot needed no settlement).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostSettlementDelta {
+    /// true when the captured snapshot exhibited the stale mark and the
+    /// calc_pnl fields were rewritten; false when the snapshot was
+    /// healthy/withdraw-only and NOTHING was rewritten.
+    pub settled: bool,
+    /// The exact byte ranges rewritten (empty when not settled): the two
+    /// u128 calc_pnl fields ([1024..1040) and [1040..1056)). Pinned by
+    /// fork_support_regression; the builder itself asserts no byte outside
+    /// these ranges changed.
+    pub changed_ranges: Vec<(usize, usize)>,
+}
+
+/// P125-02: the EXPLICIT, NAMED post-settlement fixture builder.
+///
+/// This is the ONLY sanctioned entry point for suites that need a settled
+/// pool state, and it is deliberately loud:
+///
+///   * it takes captured Mainnet accounts AS LOADED (byte-for-byte) and
+///     applies the settlement to the caller's `target_orders` copy;
+///   * it prints a banner recording exactly which byte ranges were
+///     rewritten, and states that the result is POST-SETTLEMENT
+///     (explicitly normalized) state — NOT an untouched Mainnet fixture;
+///   * it returns the exact `PostSettlementDelta` so a suite can assert
+///     that only the expected settlement-related fields changed.
+///
+/// The untouched behavior of the captured Mainnet state (including the
+/// CalcPnlError-37 failure the stale mark produces) is covered by the
+/// dedicated untouched-state tests in `raydium_v4_fork.rs`, which never
+/// invoke this builder.
+pub fn post_settlement_v4_pool_fixture(
+    pool: &Account,
+    target_orders: &mut Account,
+    coin_vault: &Account,
+    pc_vault: &Account,
+) -> PostSettlementDelta {
+    let before = target_orders.data.clone();
+    let settled = settle_stale_v4_pnl_mark(pool, target_orders, coin_vault, pc_vault);
+    if !settled {
+        return PostSettlementDelta {
+            settled: false,
+            changed_ranges: Vec::new(),
+        };
+    }
+    // Builder contract check: the rewrite MUST be confined to the two
+    // calc_pnl fields. Compute the byte-level diff and assert it, then
+    // report the SEMANTIC ranges (the two u128 fields) as the delta.
+    let x_end = V4_TARGET_CALC_PNL_X_OFF + 16;
+    let y_end = V4_TARGET_CALC_PNL_Y_OFF + 16;
+    for (i, (b, a)) in before.iter().zip(target_orders.data.iter()).enumerate() {
+        if b != a {
+            assert!(
+                (V4_TARGET_CALC_PNL_X_OFF..x_end).contains(&i)
+                    || (V4_TARGET_CALC_PNL_Y_OFF..y_end).contains(&i),
+                "P125-02 CONTRACT VIOLATION: byte {i} changed outside the calc_pnl fields — the settlement touched non-settlement state"
+            );
+        }
+    }
+    let changed_ranges = vec![
+        (V4_TARGET_CALC_PNL_X_OFF, x_end),
+        (V4_TARGET_CALC_PNL_Y_OFF, y_end),
+    ];
+    eprintln!(
+        "POST-SETTLEMENT FIXTURE BUILDER (P125-02): the captured Mainnet snapshot exhibits the stale \
+         Raydium v4 pnl mark — calc_pnl_x/y rewritten at byte ranges {changed_ranges:?}. The resulting \
+         state is POST-SETTLEMENT (explicitly normalized in memory), NOT an untouched Mainnet fixture; \
+         fixture FILES remain byte-for-byte mainnet, and the untouched-state failure behavior \
+         (CalcPnlError 37) is covered by the dedicated stale-PNL tests in raydium_v4_fork.rs."
+    );
+    PostSettlementDelta {
+        settled: true,
+        changed_ranges,
+    }
 }
