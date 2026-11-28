@@ -1,0 +1,241 @@
+name: grave-snapshotter-cli
+
+# Companion D4 producer workflow (workstream D — I-06): runs the REAL
+# Rust claims producer (`grave-snapshotter-cli`, the W1/D3 binary in
+# snapshotter/src/bin/) against an RPC endpoint and uploads the sealed
+# claims artifact as a GitHub Actions RUN ARTIFACT, so the indexer's
+# publication pipeline (GraveYield/grave-indexer,
+# publish-claims-artifact.yml) can retrieve the EXACT artifact by
+# producer-run identity and re-verify it before any publication side
+# effect.
+#
+# ── IDENTITY LOCK-STEP (I-06) ───────────────────────────────────────────
+# The indexer publication workflow pins the producer identity:
+#   GY_CLAIMS_PRODUCER_WORKFLOW: grave-snapshotter-cli
+# The value MUST equal this file's top-level `name:` — the handoff
+# verifies the run's workflow identity against it, and a mismatch fails
+# closed. Do not rename this workflow without the corresponding indexer
+# change (and vice versa).
+#
+# ── SAFETY ENVELOPE (hard invariants) ──────────────────────────────────
+#   * READ-ONLY on-chain access: the only network calls are JSON-RPC
+#     reads (account/program enumeration). The workflow NEVER signs,
+#     NEVER submits a transaction, NEVER runs salvage or any bot.
+#   * ARTIFACT-ONLY: the workflow uploads Actions run artifacts and
+#     writes nothing else. It NEVER creates a release, NEVER creates or
+#     moves a git ref/tag, and its output is NEVER a production claims
+#     release. The production stable pointer (`claims-artifact-prod`)
+#     lives exclusively in the indexer repository and is moved ONLY by
+#     the indexer's own publication workflow.
+#   * GOVERNED INPUTS, FAIL CLOSED: the governed sink ledger
+#     (`gy.sink-ledger.v1`) is a REQUIRED dispatch input — an empty,
+#     whitespace-only, or malformed ledger aborts the run before the CLI
+#     is invoked (the CLI itself additionally fails closed on any
+#     unsupported/duplicate/ambiguous/mismatched ledger, and
+#     `--lock-evidence rpc` is mandatory in the binary, so locker
+#     evidence can never silently become an empty list).
+#   * CREDENTIALS: the RPC endpoint (which may carry provider
+#     credentials in its URL) enters ONLY via the SNAPSHOTTER_RPC_URL
+#     secret and is passed to the CLI as a quoted environment expansion.
+#     It is never echoed: the CLI's logging path is structurally unable
+#     to log the URL (D1-01), and no step prints the secret.
+#
+# This workflow is VALIDATION-GRADE. Its artifact must never be treated
+# as a production claims release; the indexer handoff re-verifies every
+# byte before anything is published, and publication itself remains a
+# separate, separately-authorized dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pool:
+        description: "Pool public key to snapshot (base58)"
+        required: true
+        type: string
+      amm:
+        description: "AMM program id of the pool (base58)"
+        required: true
+        type: string
+      lp_mint:
+        description: "LP mint of the pool (base58)"
+        required: true
+        type: string
+      commitment:
+        description: "RPC commitment for enumeration AND locker evidence (never defaulted)"
+        required: true
+        type: choice
+        options:
+          - confirmed
+          - finalized
+      sink_ledger:
+        description: "Governed sink-exclusion ledger document (gy.sink-ledger.v1 JSON). REQUIRED — an empty or malformed ledger aborts the run."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grave-snapshotter-cli-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    name: run grave-snapshotter-cli (read-only) + upload claims artifact
+    runs-on: ubuntu-latest
+    steps:
+      # ── FAIL-CLOSED INPUT GATE (before checkout, before build) ──
+      # Every required input must be non-empty; the RPC secret must be
+      # configured. The gate runs FIRST so a misconfigured dispatch can
+      # never reach the build or any network call. Values cross into the
+      # shell ONLY as env (GitHub expands env:, never shell text) and are
+      # consumed as quoted "$VAR" — a value with shell metacharacters
+      # stays data, never code.
+      - name: Fail closed on missing or empty required inputs
+        env:
+          SNAP_POOL: ${{ inputs.pool }}
+          SNAP_AMM: ${{ inputs.amm }}
+          SNAP_LP_MINT: ${{ inputs.lp_mint }}
+          SNAP_COMMITMENT: ${{ inputs.commitment }}
+          SNAP_SINK_LEDGER: ${{ inputs.sink_ledger }}
+          SNAP_RPC_URL: ${{ secrets.SNAPSHOTTER_RPC_URL }}
+        run: |
+          set -eu
+          fail() { echo "FAIL-CLOSED: $1" >&2; exit 1; }
+          [ -n "$SNAP_POOL" ]        || fail "pool is required"
+          [ -n "$SNAP_AMM" ]         || fail "amm is required"
+          [ -n "$SNAP_LP_MINT" ]     || fail "lp_mint is required"
+          case "$SNAP_COMMITMENT" in confirmed|finalized) ;; *) fail "commitment must be confirmed or finalized";; esac
+          # The governed sink ledger is REQUIRED (never silently empty).
+          [ -n "$(printf '%s' "$SNAP_SINK_LEDGER" | tr -d '[:space:]')" ] || fail "sink_ledger is required and must not be empty/whitespace"
+          # The RPC URL is credential-bearing: presence is checked WITHOUT printing it.
+          [ -n "$SNAP_RPC_URL" ] || fail "the SNAPSHOTTER_RPC_URL secret is not configured on this repository — refusing to run"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # The checkout is at the dispatch ref: github.sha below IS the
+        # producer commit, and the run's head_sha binds the artifact to it.
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch head, pinned 2026-11-01
+        with:
+          toolchain: "1.91.1" # rust-toolchain.toml (kept in lock-step)
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # Deterministic producer build: pinned toolchain (above) + the
+      # committed Cargo.lock (--locked) + the exact workspace commit.
+      - name: Build grave-snapshotter-cli (locked)
+        run: cargo build --release --locked -p grave-snapshotter --bin grave-snapshotter-cli
+
+      # The governed sink ledger is written to a file exactly as supplied —
+      # the CLI validates it (schema, duplicates, ambiguity, pool/mint
+      # match) and fails closed; the artifact provenance records the
+      # ledger's identity and input digest.
+      - name: Stage the governed sink ledger
+        env:
+          SNAP_SINK_LEDGER: ${{ inputs.sink_ledger }}
+        run: |
+          set -eu
+          printf '%s\n' "$SNAP_SINK_LEDGER" > sink-ledger.json
+
+      # The REAL Rust producer. `--lock-evidence rpc` is mandatory (the
+      # binary refuses any other mode), so RPC-backed UNCX locker evidence
+      # is always consulted; an empty lock list is never substituted. The
+      # RPC URL is expanded by GitHub into the process environment only —
+      # it is never echoed, and the CLI's startup line excludes it (D1-01).
+      - name: Run grave-snapshotter-cli (read-only RPC; seals claims-artifact.json)
+        env:
+          SNAP_RPC_URL: ${{ secrets.SNAPSHOTTER_RPC_URL }}
+          SNAP_POOL: ${{ inputs.pool }}
+          SNAP_AMM: ${{ inputs.amm }}
+          SNAP_LP_MINT: ${{ inputs.lp_mint }}
+          SNAP_COMMITMENT: ${{ inputs.commitment }}
+        run: |
+          set -eu
+          ./target/release/grave-snapshotter-cli \
+            --url "$SNAP_RPC_URL" \
+            --pool "$SNAP_POOL" \
+            --amm "$SNAP_AMM" \
+            --lp-mint "$SNAP_LP_MINT" \
+            --out claims-artifact.json \
+            --commitment "$SNAP_COMMITMENT" \
+            --lock-evidence rpc \
+            --sink-ledger sink-ledger.json
+
+      # Post-run integrity gate: the artifact must exist, be non-empty and
+      # parse as JSON; its digest and byte length are recorded for the
+      # provenance sidecar. The indexer independently re-verifies ALL of
+      # this (digest, byte length, claims-grade schema/provenance/Merkle
+      # integrity) — this gate is producer-side evidence, not the trust
+      # boundary.
+      - name: Verify artifact presence + record digest
+        run: |
+          set -eu
+          fail() { echo "FAIL-CLOSED: $1" >&2; exit 1; }
+          [ -s claims-artifact.json ] || fail "claims-artifact.json was not produced or is empty"
+          python3 - <<'PY'
+          import json, sys
+          with open("claims-artifact.json", "rb") as f:
+              doc = json.load(f)
+          if not isinstance(doc, dict) or doc.get("format_version") != 2:
+              sys.exit("FAIL-CLOSED: artifact is not a format-v2 claims document")
+          PY
+          sha256sum claims-artifact.json | awk '{print $1}' > claims-artifact.sha256
+          wc -c < claims-artifact.json | tr -d '[:space:]' > claims-artifact.bytes
+
+      # Provenance sidecar: exact producer commit SHA + run identity +
+      # toolchain + input digests. The commit is the DISPATCH commit
+      # (github.sha), which the Actions API also records as the run's
+      # head_sha — the indexer verifies both against the publication's
+      # source commit.
+      - name: Write provenance sidecar
+        env:
+          SNAP_POOL: ${{ inputs.pool }}
+          SNAP_COMMITMENT: ${{ inputs.commitment }}
+          PRODUCER_COMMIT: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -eu
+          ledger_digest="$(sha256sum sink-ledger.json | awk '{print $1}')"
+          artifact_digest="$(cat claims-artifact.sha256)"
+          artifact_bytes="$(cat claims-artifact.bytes)"
+          toolchain="$(rustc --version)"
+          cat > claims-artifact-provenance.json <<JSON
+          {
+            "producer_workflow": "grave-snapshotter-cli",
+            "producer_commit_sha": "$PRODUCER_COMMIT",
+            "run_id": "$RUN_ID",
+            "run_attempt": "$RUN_ATTEMPT",
+            "toolchain": "$toolchain",
+            "build_flags": "--release --locked",
+            "pool": "$SNAP_POOL",
+            "commitment": "$SNAP_COMMITMENT",
+            "lock_evidence": "rpc",
+            "sink_ledger_input_sha256": "$ledger_digest",
+            "artifact_sha256": "$artifact_digest",
+            "artifact_byte_length": $artifact_bytes,
+            "artifact_name": "claims-artifact.json",
+            "grade": "validation-only — NEVER a production claims release"
+          }
+          JSON
+
+      # THE handoff artifact: named exactly `claims-artifact.json` so the
+      # indexer's handoff (pinned GY_CLAIMS_ARTIFACT_NAME) finds exactly
+      # one match in THIS run. if-no-files-found: error — an incomplete
+      # upload can never look like success.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: claims-artifact.json
+          path: claims-artifact.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: claims-artifact-provenance
+          path: |
+            claims-artifact.sha256
+            claims-artifact.bytes
+            claims-artifact-provenance.json
+          if-no-files-found: error
+          retention-days: 30
