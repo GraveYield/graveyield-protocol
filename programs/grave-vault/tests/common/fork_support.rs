@@ -235,3 +235,250 @@ pub fn required_elfs_registered_from(
     }
     true
 }
+
+// =====================================================================
+// Raydium AMM v4 "stale pnl mark" settlement (fork-test determinism)
+// =====================================================================
+//
+// WHY: every suite that exercises a real V4 withdraw (salvage_pool's
+// withdraw leg) boots genesis from the byte-for-byte mainnet pool /
+// target_orders fixtures. V4's withdraw calls `calc_take_pnl`
+// unconditionally (the ONLY status that skips it is exactly
+// WithdrawOnly=3), and that function FAILS with CalcPnlError (custom
+// error 37, "P&L calculation error.") whenever
+//
+//   (pc_vault - need_take_pnl_pc) * (coin_vault - need_take_pnl_coin)
+//       < restore(calc_pnl_x) * restore(calc_pnl_y)          (raw amounts)
+//
+// i.e. whenever the pool's CURRENT vault product K has dropped below the
+// K snapshot recorded in `target_orders.calc_pnl_x/y`. On mainnet this is
+// a real, recurring transient: LP burns shrink the vault product while
+// the calc_pnl mark only moves on the next swap / deposit / withdraw_pnl
+// settlement. During such a window EVERY withdraw on the pool reverts,
+// and because the fixtures are fetched live at the start of each CI run,
+// the failure lands on a different run nondeterministically
+// (fork-harness CI job 140886613649: raydium_v4_fork
+// real_v4_withdraw_burns_lp_and_settles_40_40_20 failed with
+// TransactionError Custom(37) for exactly this reason — while the same
+// code, minutes earlier in job 46113461505, passed against a healthy
+// snapshot).
+//
+// WHAT: this helper replicates the V4 condition exactly (the offsets
+// below were verified against the live pool 58oQChx… and its
+// CZza3Ej4… target orders on 2026-11-28) and, when the captured fixture
+// exhibits the stale mark, settles it in memory the way a mainnet
+// settlement would have: calc_pnl_x/y are rewritten to the current
+// ex-need_take vault amounts in V4's normalized-decimal space. With the
+// last mark equal to the current values, V4's pnl math takes the
+// `diff == 0` branch: nothing is taken, the withdraw totals are
+// untouched, and the withdraw proceeds with the full pro-rata payout —
+// economics identical to the healthy-path run.
+//
+// The fixture FILES stay byte-for-byte mainnet; the settlement happens in
+// test memory before genesis, and it prints a loud banner so the harness
+// log always shows when a stale mark was settled. Healthy snapshots are
+// passed through completely untouched.
+//
+// RESIDUAL RISK (documented, not fixed here): a real salvor hitting this
+// window on mainnet gets CalcPnlError 37 as well; the production
+// mitigation is to retry after a mainnet settlement has updated the
+// pool's mark. That is salvage-protocol behavior, deliberately outside
+// this test-infrastructure fix.
+
+const V4_AMM_STATUS_OFF: usize = 0;
+const V4_AMM_COIN_DECIMALS_OFF: usize = 32;
+const V4_AMM_PC_DECIMALS_OFF: usize = 40;
+const V4_AMM_SYS_DECIMAL_VALUE_OFF: usize = 120;
+const V4_AMM_NEED_TAKE_PNL_COIN_OFF: usize = 192;
+const V4_AMM_NEED_TAKE_PNL_PC_OFF: usize = 200;
+const V4_TARGET_CALC_PNL_X_OFF: usize = 1024;
+const V4_TARGET_CALC_PNL_Y_OFF: usize = 1040;
+/// SPL token account layout: the `amount` field.
+const V4_TOKEN_ACCOUNT_AMOUNT_OFF: usize = 64;
+/// `AmmStatus::WithdrawOnly` — the ONLY status for which V4's withdraw
+/// skips the `calc_take_pnl` check entirely.
+const V4_STATUS_WITHDRAW_ONLY: u64 = 3;
+
+fn v4_read_u64(data: &[u8], off: usize, what: &str, acct: &str) -> u64 {
+    let end = off + 8;
+    assert!(
+        data.len() >= end,
+        "FORK-FIXTURE: {acct} data is {} bytes, too short to read {what} at offset {off} — broken fixture state, refusing to guess",
+        data.len()
+    );
+    u64::from_le_bytes(data[off..end].try_into().unwrap())
+}
+
+fn v4_read_u128(data: &[u8], off: usize, what: &str, acct: &str) -> u128 {
+    let end = off + 16;
+    assert!(
+        data.len() >= end,
+        "FORK-FIXTURE: {acct} data is {} bytes, too short to read {what} at offset {off} — broken fixture state, refusing to guess",
+        data.len()
+    );
+    u128::from_le_bytes(data[off..end].try_into().unwrap())
+}
+
+/// Replicates V4's `restore_decimal`: normalized-space value → raw token
+/// amount (floored).
+fn v4_restore_decimal(val: u128, native_decimals: u32, sys_decimal_value: u128) -> u128 {
+    val.checked_mul(10u128.checked_pow(native_decimals).unwrap_or_else(|| {
+        panic!("FORK-FIXTURE: 10^{native_decimals} overflows u128 — corrupt amm decimals field")
+    }))
+    .expect("FORK-FIXTURE: restore_decimal overflow — corrupt amm fixture")
+        / sys_decimal_value
+}
+
+/// Replicates V4's `normalize_decimal_v2`: raw token amount →
+/// normalized-space value (floored).
+fn v4_normalize_decimal(val: u128, native_decimals: u32, sys_decimal_value: u128) -> u128 {
+    val.checked_mul(sys_decimal_value)
+        .expect("FORK-FIXTURE: normalize_decimal overflow — corrupt amm fixture")
+        / 10u128.checked_pow(native_decimals).unwrap_or_else(|| {
+            panic!("FORK-FIXTURE: 10^{native_decimals} overflows u128 — corrupt amm decimals field")
+        })
+}
+
+/// Settles a stale Raydium v4 pnl mark in the in-memory `target_orders`
+/// fixture copy when the captured mainnet snapshot exhibits the
+/// CalcPnlError-37 transient described above. Returns true when the mark
+/// was rewritten (stale snapshot), false when the snapshot is healthy (or
+/// the pool is in WithdrawOnly status, where V4 skips the check anyway).
+///
+/// Panics loudly on fixture states that could never have come from the
+/// fetcher (truncated accounts, need_take above the vault balance,
+/// zero system decimal value): those are broken fixture states, and
+/// guessing would only move the failure somewhere less diagnosable.
+pub fn settle_stale_v4_pnl_mark(
+    pool: &Account,
+    target_orders: &mut Account,
+    coin_vault: &Account,
+    pc_vault: &Account,
+) -> bool {
+    let status = v4_read_u64(&pool.data, V4_AMM_STATUS_OFF, "status", "pool.bin");
+    if status == V4_STATUS_WITHDRAW_ONLY {
+        // V4's withdraw skips calc_take_pnl entirely in this status; a
+        // stale mark cannot fail the withdraw, so leave the fixture alone.
+        return false;
+    }
+
+    let coin_decimals = v4_read_u64(
+        &pool.data,
+        V4_AMM_COIN_DECIMALS_OFF,
+        "coin_decimals",
+        "pool.bin",
+    );
+    let pc_decimals = v4_read_u64(
+        &pool.data,
+        V4_AMM_PC_DECIMALS_OFF,
+        "pc_decimals",
+        "pool.bin",
+    );
+    let sys_decimal_value = v4_read_u64(
+        &pool.data,
+        V4_AMM_SYS_DECIMAL_VALUE_OFF,
+        "sys_decimal_value",
+        "pool.bin",
+    );
+    assert!(
+        sys_decimal_value > 0,
+        "FORK-FIXTURE: pool.bin sys_decimal_value is zero — not a valid Raydium v4 amm account"
+    );
+
+    let need_take_coin = v4_read_u64(
+        &pool.data,
+        V4_AMM_NEED_TAKE_PNL_COIN_OFF,
+        "need_take_pnl_coin",
+        "pool.bin",
+    );
+    let need_take_pc = v4_read_u64(
+        &pool.data,
+        V4_AMM_NEED_TAKE_PNL_PC_OFF,
+        "need_take_pnl_pc",
+        "pool.bin",
+    );
+
+    let coin_vault_amount = v4_read_u64(
+        &coin_vault.data,
+        V4_TOKEN_ACCOUNT_AMOUNT_OFF,
+        "amount",
+        "coin_vault.bin",
+    );
+    let pc_vault_amount = v4_read_u64(
+        &pc_vault.data,
+        V4_TOKEN_ACCOUNT_AMOUNT_OFF,
+        "amount",
+        "pc_vault.bin",
+    );
+    assert!(
+        coin_vault_amount >= need_take_coin && pc_vault_amount >= need_take_pc,
+        "FORK-FIXTURE: need_take_pnl (coin={need_take_coin}, pc={need_take_pc}) exceeds the vault balances (coin={coin_vault_amount}, pc={pc_vault_amount}) — broken fixture state; V4's own checked_sub would reject this withdraw too"
+    );
+    let total_coin_without_take_pnl = coin_vault_amount - need_take_coin;
+    let total_pc_without_take_pnl = pc_vault_amount - need_take_pc;
+
+    let calc_pnl_x = v4_read_u128(
+        &target_orders.data,
+        V4_TARGET_CALC_PNL_X_OFF,
+        "calc_pnl_x",
+        "target_orders.bin",
+    );
+    let calc_pnl_y = v4_read_u128(
+        &target_orders.data,
+        V4_TARGET_CALC_PNL_Y_OFF,
+        "calc_pnl_y",
+        "target_orders.bin",
+    );
+
+    // V4's exact CalcPnlError condition, in raw token amounts:
+    //   pool_pc * pool_coin >= restore(calc_pnl_x) * restore(calc_pnl_y)
+    let current_k = (total_pc_without_take_pnl as u128)
+        .checked_mul(total_coin_without_take_pnl as u128)
+        .expect("FORK-FIXTURE: vault product overflows u128 — corrupt fixture");
+    let recorded_k = v4_restore_decimal(calc_pnl_x, pc_decimals as u32, sys_decimal_value as u128)
+        .checked_mul(v4_restore_decimal(
+            calc_pnl_y,
+            coin_decimals as u32,
+            sys_decimal_value as u128,
+        ))
+        .expect("FORK-FIXTURE: recorded pnl product overflows u128 — corrupt fixture");
+
+    if current_k >= recorded_k {
+        // Healthy snapshot: leave the byte-for-byte fixture untouched.
+        return false;
+    }
+
+    // Stale mark. Settle it the way a mainnet swap / withdraw_pnl
+    // settlement would have: mark := current ex-need_take vault amounts,
+    // in V4's normalized-decimal space. With last == current, V4's pnl
+    // branch computes a zero diff, takes nothing, and leaves the withdraw
+    // totals exactly as they were.
+    let settled_x = v4_normalize_decimal(
+        total_pc_without_take_pnl as u128,
+        pc_decimals as u32,
+        sys_decimal_value as u128,
+    );
+    let settled_y = v4_normalize_decimal(
+        total_coin_without_take_pnl as u128,
+        coin_decimals as u32,
+        sys_decimal_value as u128,
+    );
+    let x_end = V4_TARGET_CALC_PNL_X_OFF + 16;
+    let y_end = V4_TARGET_CALC_PNL_Y_OFF + 16;
+    assert!(
+        target_orders.data.len() >= y_end,
+        "FORK-FIXTURE: target_orders data is {} bytes, too short for the calc_pnl fields — broken fixture state",
+        target_orders.data.len()
+    );
+    target_orders.data[V4_TARGET_CALC_PNL_X_OFF..x_end].copy_from_slice(&settled_x.to_le_bytes());
+    target_orders.data[V4_TARGET_CALC_PNL_Y_OFF..y_end].copy_from_slice(&settled_y.to_le_bytes());
+
+    eprintln!(
+        "FORK-FIXTURE: settled stale Raydium v4 pnl mark in memory — the captured mainnet snapshot has \
+         vault K {current_k} < recorded calc_pnl K {recorded_k}, so a real withdraw on this snapshot \
+         would revert with CalcPnlError 37 (P&L calculation error) until a mainnet settlement updates \
+         the pool. calc_pnl_x/y rewritten to the current ex-need_take vault values ({settled_x}, \
+         {settled_y}); withdraw economics unchanged. Fixture files remain byte-for-byte mainnet."
+    );
+    true
+}

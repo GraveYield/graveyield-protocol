@@ -81,7 +81,7 @@ use solana_sdk_ids::system_program;
 #[macro_use]
 #[path = "common/fork_support.rs"]
 mod fork_support;
-use fork_support::{fixtures_dir, load_manifest};
+use fork_support::{fixtures_dir, load_manifest, settle_stale_v4_pnl_mark};
 
 fn vault_id() -> Pubkey {
     grave_vault::ID
@@ -461,7 +461,32 @@ fn build_genesis_with(
         return None;
     }
 
+    // Load the four accounts the stale-pnl settlement touches first, so it
+    // can see pool + vaults + target orders together (see
+    // fork_support::settle_stale_v4_pnl_mark for why this exists), then add
+    // the whole section to genesis. Healthy snapshots stay byte-for-byte
+    // mainnet; stale ones are settled exactly like a mainnet settlement
+    // would.
+    let settled_pool_section = {
+        let (pool_k, pool_a) = load_real_account(&manifest["accounts"], "pool");
+        let (coin_k, coin_a) = load_real_account(&manifest["accounts"], "coin_vault");
+        let (pc_k, pc_a) = load_real_account(&manifest["accounts"], "pc_vault");
+        let (target_k, mut target_a) = load_real_account(&manifest["accounts"], "target_orders");
+        settle_stale_v4_pnl_mark(&pool_a, &mut target_a, &coin_a, &pc_a);
+        vec![
+            (pool_k, pool_a),
+            (coin_k, coin_a),
+            (pc_k, pc_a),
+            (target_k, target_a),
+        ]
+    };
+    for (k, a) in settled_pool_section {
+        pt.add_account(k, a);
+    }
     for name in POOL_ACCOUNTS {
+        if matches!(name, "pool" | "coin_vault" | "pc_vault" | "target_orders") {
+            continue;
+        }
         let (k, a) = load_real_account(&manifest["accounts"], name);
         pt.add_account(k, a);
     }

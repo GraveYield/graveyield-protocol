@@ -71,7 +71,7 @@ use solana_sdk_ids::system_program;
 #[macro_use]
 #[path = "common/fork_support.rs"]
 mod fork_support;
-use fork_support::{fixtures_dir, load_manifest};
+use fork_support::{fixtures_dir, load_manifest, settle_stale_v4_pnl_mark};
 
 // GraveVault / GraveScanner placeholder program IDs (KEYS-003; same values as
 // Anchor.toml). The vault ID also comes from `declare_id!`.
@@ -251,7 +251,7 @@ impl ForkHarness {
         let (pc_mint, pc_mint_acct) = load_real_account(&manifest, "pc_mint");
         let (wsol_mint, wsol_mint_acct) = load_real_account(&manifest, "wsol_mint");
         let (open_orders, open_orders_acct) = load_real_account(&manifest, "open_orders");
-        let (target_orders, target_orders_acct) = load_real_account(&manifest, "target_orders");
+        let (target_orders, mut target_orders_acct) = load_real_account(&manifest, "target_orders");
         let (market, market_acct) = load_real_account(&manifest, "market");
         let (market_coin_vault, market_coin_vault_acct) =
             load_real_account(&manifest, "market_coin_vault");
@@ -285,6 +285,16 @@ impl ForkHarness {
             (coin_reserve as u128) * (lp_burn_plan as u128) / (lp_supply as u128) > 0
                 && (pc_reserve as u128) * (lp_burn_plan as u128) / (lp_supply as u128) > 0,
             "planned burn rounds to zero on one side"
+        );
+
+        // CI determinism: settle a stale mainnet pnl mark if this snapshot
+        // exhibits the CalcPnlError-37 transient (see fork_support for the
+        // full story). Healthy snapshots pass through untouched.
+        settle_stale_v4_pnl_mark(
+            &pool_acct,
+            &mut target_orders_acct,
+            &coin_vault_acct,
+            &pc_vault_acct,
         );
 
         // ---- derived / forged identities
